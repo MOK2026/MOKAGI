@@ -66,7 +66,11 @@
     
 # 可用工具:
 
-<img width="739" height="437" alt="image" src="https://github.com/user-attachments/assets/1d93ca05-78f5-4e4c-8f7a-8e9aa8d4f9f9" />
+<img width="424" height="477" alt="image" src="https://github.com/user-attachments/assets/e6b5882a-8fda-4aff-ada8-bfa1e26f446f" />
+
+<img width="423" height="476" alt="image" src="https://github.com/user-attachments/assets/8f454b56-1fce-4213-a45b-5d07c8b1fa28" />
+
+
 
 # api 連接:
 
@@ -79,7 +83,8 @@
 
 # 可用 agent:
 
-<img width="280" height="308" alt="image" src="https://github.com/user-attachments/assets/4464e2f3-2e4e-4063-baeb-a670d614bdb9" />
+<img width="430" height="475" alt="image" src="https://github.com/user-attachments/assets/87853c15-0ae6-4212-b669-33861e0bf146" />
+
 
 
 ================================================
@@ -185,10 +190,12 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
     └── README.md         # 就是這個文件
 
 
-<img width="959" height="539" alt="image" src="https://github.com/user-attachments/assets/2fe7487a-20a3-478e-93cd-819191fbf76d" />
+<img width="349" height="454" alt="image" src="https://github.com/user-attachments/assets/35e56ed4-f310-49ee-8580-e9318c3cbb1b" />
 
-<img width="322" height="479" alt="image" src="https://github.com/user-attachments/assets/63b78888-7777-4716-8efc-f80bec31e759" />
+<img width="959" height="478" alt="image" src="https://github.com/user-attachments/assets/f6f27600-7e16-415f-87ba-24a75046cb63" />
 
+
+<img width="959" height="457" alt="image" src="https://github.com/user-attachments/assets/d7f0957d-4929-4284-89b3-e73e823d0f4a" />
 
 
 
