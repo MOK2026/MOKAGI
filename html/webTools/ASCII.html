@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>漢字ASCII藝術生成器 | 中文字符畫工具</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(145deg, #1a2a3a 0%, #0f1a24 100%);
+            font-family: 'Segoe UI', 'Roboto', 'Noto Sans', system-ui, -apple-system, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 24px 16px;
+        }
+
+        .card {
+            max-width: 1300px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(2px);
+            border-radius: 2.5rem;
+            box-shadow: 0 25px 45px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.15);
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+
+        .container {
+            background: #fef9ef;
+            padding: 2rem 1.8rem 2rem 1.8rem;
+            border-radius: 2rem;
+            margin: 12px;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.02), 0 10px 20px rgba(0,0,0,0.2);
+        }
+
+        h1 {
+            margin: 0 0 0.25rem 0;
+            font-size: 1.9rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #2b5876, #1e3c5c);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            letter-spacing: -0.3px;
+            display: inline-block;
+        }
+
+        .sub {
+            color: #4a627a;
+            border-left: 4px solid #e0a800;
+            padding-left: 12px;
+            margin: 8px 0 24px 0;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 28px;
+            background: #f2e8d5;
+            padding: 18px 20px;
+            border-radius: 32px;
+            align-items: flex-end;
+        }
+
+        .input-group {
+            flex: 2;
+            min-width: 180px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #7d5d42;
+            margin-bottom: 6px;
+        }
+
+        .input-group input, .input-group select {
+            width: 100%;
+            padding: 10px 14px;
+            border-radius: 60px;
+            border: 1px solid #cfbfa5;
+            background: white;
+            font-size: 1rem;
+            font-family: monospace;
+            transition: 0.2s;
+        }
+
+        .input-group input:focus, .input-group select:focus {
+            outline: none;
+            border-color: #e0a800;
+            box-shadow: 0 0 0 3px rgba(224,168,0,0.2);
+        }
+
+        .param-group {
+            flex: 1;
+            min-width: 130px;
+        }
+
+        button {
+            background: #2c5f2d;
+            border: none;
+            color: white;
+            padding: 10px 24px;
+            border-radius: 40px;
+            font-weight: bold;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            margin-top: 22px;
+        }
+
+        button:hover {
+            background: #1f4520;
+            transform: scale(0.97);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+
+        .copy-btn {
+            background: #397d7c;
+            margin-left: 8px;
+        }
+        .copy-btn:hover {
+            background: #266362;
+        }
+
+        .preview-area {
+            background: #1e1e1e;
+            border-radius: 28px;
+            padding: 20px;
+            overflow-x: auto;
+            box-shadow: inset 0 0 0 2px #3a2e22, 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        pre {
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
+            font-size: 10px;
+            line-height: 1.2;
+            margin: 0;
+            white-space: pre;
+            color: #d4d4d4;
+            background: #0f0e0c;
+            display: inline-block;
+            border-radius: 14px;
+            padding: 16px;
+            letter-spacing: 0.5px;
+        }
+
+        .info-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-top: 18px;
+            flex-wrap: wrap;
+            gap: 10px;
+            font-size: 0.8rem;
+            color: #7f6b52;
+        }
+
+        .status {
+            background: #e9dfcf;
+            padding: 6px 14px;
+            border-radius: 26px;
+            font-family: monospace;
+            font-weight: 500;
+        }
+
+        .footer-note {
+            text-align: center;
+            margin-top: 28px;
+            font-size: 0.7rem;
+            color: #b7a17a;
+            border-top: 1px dashed #e2d4be;
+            padding-top: 18px;
+        }
+
+        @media (max-width: 720px) {
+            .container {
+                padding: 1.2rem;
+            }
+            pre {
+                font-size: 6px;
+                line-height: 1.1;
+                padding: 8px;
+            }
+            .param-group input, .param-group select {
+                font-size: 0.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="container">
+        <h1>🖌️ ASCII 藝術中文字產生器</h1>
+        <div class="sub">將中文字詞轉換為古典字符畫 · 支持任意中文句子</div>
+
+        <div class="toolbar">
+            <div class="input-group" style="flex:2.5">
+                <label>✍️ 中文內容</label>
+                <input type="text" id="chText" placeholder="例如：龍、漢字、藝術、你好世界" value="藝術中文" autocomplete="off">
+            </div>
+            <div class="param-group">
+                <label>📐 輸出寬度 (字符列數)</label>
+                <input type="number" id="widthCols" min="20" max="180" value="100" step="2">
+            </div>
+            <div class="param-group">
+                <label>🎨 字符集風格</label>
+                <select id="charsetSelect">
+                    <option value="default">經典灰度 (豐富層次)</option>
+                    <option value="simple">簡約點陣 (█▓▒░ )</option>
+                    <option value="block">細膩塊狀 (高反差)</option>
+                    <option value="minimal">極簡符號 (·-+*)</option>
+                </select>
+            </div>
+            <div class="param-group">
+                <label>📏 寬高補償 (修正拉伸)</label>
+                <input type="number" id="aspectComp" step="0.05" value="1" min="1.2" max="3.2">
+                <div style="font-size: 10px; margin-top: 4px; color:#ad8b62;">值越大 → 文字越方</div>
+            </div>
+            <div>
+                <button id="generateBtn">✨ 生成 ASCII 藝術</button>
+                <button id="copyBtn" class="copy-btn">📋 複製結果</button>
+            </div>
+        </div>
+
+        <div class="preview-area">
+            <pre id="asciiOutput" style="user-select: all;">⚡ 輸入中文並點擊生成，等待片刻 ✨</pre>
+        </div>
+        <div class="info-bar">
+            <span class="status" id="infoStatus">就緒</span>
+            <span>💡 提示：調整「寬高補償」可讓漢字比例更自然，預設2.1適合多數字體。</span>
+        </div>
+        <div class="footer-note">
+            ※ 基於Canvas渲染 + 灰度採樣映射，忠實保留漢字骨架。推薦對較大文字(4~12字)效果最佳。
+        </div>
+    </div>
+</div>
+
+<script>
+    (function() {
+        // DOM 元素
+        const chTextInput = document.getElementById('chText');
+        const widthColsInput = document.getElementById('widthCols');
+        const charsetSelect = document.getElementById('charsetSelect');
+        const aspectCompInput = document.getElementById('aspectComp');
+        const generateBtn = document.getElementById('generateBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        const asciiPre = document.getElementById('asciiOutput');
+        const infoSpan = document.getElementById('infoStatus');
+
+        // ----- 不同的字符映射表 (從暗(密集) -> 亮(稀疏) )
+        const charSets = {
+            // 經典高密度豐富灰度，共15級
+            default: "@%#*+=-:. ",
+            // 簡約點陣風格
+            simple: "█▓▒░ ",
+            // 細膩塊狀反差大
+            block: "▇██▓▒░▖▘ ",
+            // 極簡符號
+            minimal: "█*+· "
+        };
+
+        // 完整擴展 (確保每個字符集至少有5個梯度, 內部動態擴展)
+        function getGradientCharset(styleKey, levels) {
+            let base = charSets[styleKey] || charSets.default;
+            // 保證映射梯度數量至少為2
+            if (base.length < 2) base = "@%#*+=-:. ";
+            let result = "";
+            // 如果需求和原始長度一樣就直接返回，否則線性插值/裁切？
+            if (base.length >= levels) {
+                // 直接均勻採樣
+                result = "";
+                for (let i = 0; i < levels; i++) {
+                    let idx = Math.floor((i / (levels - 1)) * (base.length - 1));
+                    result += base[idx];
+                }
+                return result;
+            } else {
+                // 不足levels時重複填充末尾字符，但最好均勻重複: 把原串擴展
+                result = base;
+                while (result.length < levels) {
+                    result += base[base.length - 1];
+                }
+                return result.slice(0, levels);
+            }
+        }
+
+        // 輔助：亮度映射為字符索引 (亮度0~255)
+        function brightnessToChar(bright, charGradient) {
+            // charGradient 字符串從 最密(黑) 到 最疏(白)
+            const maxIndex = charGradient.length - 1;
+            let idx = Math.floor((bright / 255) * maxIndex);
+            idx = Math.min(maxIndex, Math.max(0, idx));
+            return charGradient[idx];
+        }
+
+        // 核心: 將canvas圖像轉ascii (網格採樣)
+        function imageDataToAscii(imageData, width, height, targetCols, aspectRatioComp, gradientStr) {
+            // targetCols: 輸出字符的列數
+            // aspectRatioComp: 每個字符格子的高度採樣步長 = 寬度步長 * 補償係數 (因為字符顯示通常高度大於寬度)
+            // 實際採樣網格: 水平方向分成 targetCols 份, 垂直方向根據比例自動計算行數
+            const gridCols = targetCols;
+            const stepX = width / gridCols;
+            // 每個格子代表的實際像素高度 = stepX * aspectRatioComp (修正垂直密度)
+            const stepY = stepX * aspectRatioComp;
+            const gridRows = Math.floor(height / stepY);
+            if (gridRows <= 0) return "❌ 寬度過大或文字過小，請增加輸出寬度或調整補償值";
+            
+            let asciiLines = [];
+            // 遍歷每個格子 (y方向)
+            for (let row = 0; row < gridRows; row++) {
+                let lineChars = [];
+                const yStart = row * stepY;
+                const yEnd = Math.min(height, yStart + stepY);
+                if (yStart >= height) continue;
+                for (let col = 0; col < gridCols; col++) {
+                    const xStart = col * stepX;
+                    const xEnd = Math.min(width, xStart + stepX);
+                    if (xStart >= width) {
+                        lineChars.push(' ');
+                        continue;
+                    }
+                    // 計算該矩形區域內所有像素的平均亮度
+                    let totalLum = 0;
+                    let pixelCount = 0;
+                    const x0 = Math.floor(xStart);
+                    const y0 = Math.floor(yStart);
+                    const x1 = Math.ceil(xEnd);
+                    const y1 = Math.ceil(yEnd);
+                    for (let py = y0; py < y1 && py < height; py++) {
+                        for (let px = x0; px < x1 && px < width; px++) {
+                            const idx = (py * width + px) * 4;
+                            const r = imageData.data[idx];
+                            const g = imageData.data[idx+1];
+                            const b = imageData.data[idx+2];
+                            // 標準亮度公式 (0~255)
+                            const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                            totalLum += lum;
+                            pixelCount++;
+                        }
+                    }
+                    let avgBright = pixelCount > 0 ? totalLum / pixelCount : 255;
+                    // 對於白色背景黑色文字圖像，亮度低->黑墨, 亮度高->背景白 ; 因為字符映射希望“暗部用密字符，亮部用疏字符”
+                    // 亮度avgBright: 0(黑墨) -> 255(白紙)  所以字符應該 暗部用密字符(索引0)，亮部用稀字符(索引max)
+                    const char = brightnessToChar(avgBright, gradientStr);
+                    lineChars.push(char);
+                }
+                asciiLines.push(lineChars.join(''));
+            }
+            return asciiLines.join('\n');
+        }
+
+        // 主要生成流程: 根據文本, 渲染到canvas, 轉ascii
+        async function generateAsciiArt() {
+            const rawText = chTextInput.value.trim();
+            if (rawText === "") {
+                asciiPre.innerText = "⚠️ 請輸入中文或符號 (至少一個字)";
+                infoSpan.innerText = "無文字輸入";
+                return;
+            }
+            
+            // 獲取參數
+            let targetCols = parseInt(widthColsInput.value, 10);
+            if (isNaN(targetCols) || targetCols < 15) targetCols = 50;
+            if (targetCols > 220) targetCols = 220;
+            let aspect = parseFloat(aspectCompInput.value);
+            if (isNaN(aspect) || aspect < 1.0) aspect = 1.8;
+            if (aspect > 3.5) aspect = 3.2;
+            const styleKey = charsetSelect.value;
+            
+            infoSpan.innerText = "⏳ 渲染中 ... 請稍候";
+            asciiPre.innerText = "🎨 正在轉換字形，請稍等...";
+            
+            // 強制延時讓UI更新 (輕微)
+            await new Promise(r => setTimeout(r, 10));
+            
+            // 創建canvas元素 (離屏)
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                asciiPre.innerText = "❌ 瀏覽器不支援Canvas API";
+                infoSpan.innerText = "錯誤";
+                return;
+            }
+            
+            // 重要: 為了避免文本過長溢出，設定畫布基準寬度 1000px，根據文本長度動態調整字體大小以保證可讀且佈滿
+            const baseWidth = 1100;
+            let fontSize = 96;   // 起始大號字
+            let finalCanvasWidth = baseWidth;
+            let finalCanvasHeight = 300;
+            
+            // 輔助函數測量文本實際需要的寬度 (多字符整體)
+            function measureTextDimensions(text, fontSz) {
+                ctx.save();
+                ctx.font = `${fontSz}px "Noto Serif SC", "PingFang SC", "Microsoft YaHei", "SimHei", "WenQuanYi Micro Hei", "STHeiti", monospace`;
+                const metrics = ctx.measureText(text);
+                const textWidth = metrics.width;
+                // 粗略估算高度 (大約字體大小的1.2倍)
+                const textHeight = fontSz * 1.25;
+                ctx.restore();
+                return { width: textWidth, height: textHeight };
+            }
+            
+            // 自適應字體大小使文本大致適合baseWidth，並留白邊
+            let bestFontSize = 86;
+            let maxWidthAllowed = baseWidth - 80;  // 左右留白40px
+            if (rawText.length === 1) {
+                bestFontSize = 180;
+            } else if (rawText.length <= 3) {
+                bestFontSize = 140;
+            } else if (rawText.length <= 6) {
+                bestFontSize = 102;
+            } else if (rawText.length <= 10) {
+                bestFontSize = 72;
+            } else {
+                bestFontSize = 48;
+            }
+            // 安全裁剪 防止過小/過大
+            bestFontSize = Math.min(180, Math.max(34, bestFontSize));
+            
+            // 更準確：循環微調確保文本寬度不超過最大寬度
+            let tries = 0;
+            let currentFs = bestFontSize;
+            let measured = measureTextDimensions(rawText, currentFs);
+            while ((measured.width > maxWidthAllowed || measured.width < maxWidthAllowed * 0.5) && tries < 12 && currentFs > 24 && currentFs < 220) {
+                if (measured.width > maxWidthAllowed) {
+                    currentFs = currentFs * 0.9;
+                } else if (measured.width < maxWidthAllowed * 0.55 && rawText.length > 1) {
+                    currentFs = currentFs * 1.08;
+                } else {
+                    break;
+                }
+                currentFs = Math.min(190, Math.max(28, currentFs));
+                measured = measureTextDimensions(rawText, currentFs);
+                tries++;
+            }
+            bestFontSize = Math.min(190, Math.max(28, currentFs));
+            
+            // 最終確定畫布寬高: 寬度基於文本寬度 + padding, 高度基於字體大小2倍留白
+            const finalMeasured = measureTextDimensions(rawText, bestFontSize);
+            finalCanvasWidth = Math.min(1400, Math.max(400, finalMeasured.width + 90));
+            finalCanvasHeight = Math.min(700, Math.max(150, bestFontSize * 1.8 + 50));
+            
+            canvas.width = finalCanvasWidth;
+            canvas.height = finalCanvasHeight;
+            
+            // 重新獲取context (尺寸重置後需要重設)
+            const ctx2 = canvas.getContext('2d');
+            if (!ctx2) throw new Error("no context");
+            
+            // 繪製白色背景 + 黑色文字 (銳利)
+            ctx2.fillStyle = "#FFFFFF";
+            ctx2.fillRect(0, 0, canvas.width, canvas.height);
+            ctx2.fillStyle = "#000000";
+            // 字體設置: 優先使用美觀的中文字體，並保證fallback
+            ctx2.font = `${bestFontSize}px "Noto Serif SC", "PingFang SC", "Microsoft YaHei", "SimHei", "WenQuanYi Micro Hei", "STHeiti", "KaiTi", monospace`;
+            ctx2.textAlign = "center";
+            ctx2.textBaseline = "middle";
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            ctx2.fillText(rawText, centerX, centerY);
+            
+            // 可選: 輕微邊緣加強（讓字形更清晰，避免過於平滑）
+            // 獲取像素數據
+            const imageData = ctx2.getImageData(0, 0, canvas.width, canvas.height);
+            
+            // 動態生成字符梯度長度 (期望15級左右，保證層次感)
+            const gradientLevels = 14;
+            const gradientStr = getGradientCharset(styleKey, gradientLevels);
+            
+            // 執行 ASCII 轉換
+            try {
+                const asciiResult = imageDataToAscii(imageData, canvas.width, canvas.height, targetCols, aspect, gradientStr);
+                if (asciiResult.length === 0 || asciiResult.includes("❌")) {
+                    asciiPre.innerText = asciiResult || "轉換失敗，請調整寬度或補償係數";
+                    infoSpan.innerText = "轉換異常";
+                } else {
+                    asciiPre.innerText = asciiResult;
+                    infoSpan.innerText = `✅ 完成 | 寬度:${targetCols}列 | 實際行數:${asciiResult.split('\n').length} | 字符梯度:${gradientStr.length}級`;
+                }
+            } catch (err) {
+                console.error(err);
+                asciiPre.innerText = "⚠️ 生成過程中發生錯誤，請嘗試減少寬度或修改內容";
+                infoSpan.innerText = "錯誤";
+            }
+        }
+        
+        // 複製功能
+        function copyToClipboard() {
+            const textToCopy = asciiPre.innerText;
+            if (!textToCopy || textToCopy.includes("⚡") && textToCopy.length < 20) {
+                // 無效內容提示
+                infoSpan.innerText = "⚠️ 無有效ASCII內容，請先生成";
+                return;
+            }
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                infoSpan.innerText = "📋 複製成功！可粘貼到任何地方";
+                setTimeout(() => {
+                    if (infoSpan.innerText === "📋 複製成功！可粘貼到任何地方")
+                        infoSpan.innerText = "就緒";
+                }, 2000);
+            }).catch(() => {
+                infoSpan.innerText = "❌ 複製失敗，手動選取吧";
+            });
+        }
+        
+        // 綁定事件
+        generateBtn.addEventListener('click', () => {
+            generateAsciiArt();
+        });
+        copyBtn.addEventListener('click', copyToClipboard);
+        
+        // 按下回車直接生成（中文輸入法友好無需擔心）
+        chTextInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                generateAsciiArt();
+            }
+        });
+        
+        // 附加：參數聯動提示，但不需要實時生成，避免性能
+        widthColsInput.addEventListener('change', () => {
+            let val = parseInt(widthColsInput.value,10);
+            if (val < 20) widthColsInput.value = 20;
+            if (val > 180) widthColsInput.value = 180;
+        });
+        
+        // 初始生成一個默認例子
+        generateAsciiArt();
+        
+        // 監聽字體加載完成可選，無需額外操作
+        // 窗口尺寸變更無影響
+    })();
+</script>
+</body>
+</html>

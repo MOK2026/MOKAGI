@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>莫氏集團 · 3D多人線上養成格鬥</title>
+<meta name="description" content="莫氏集團 - 3D多人線上養成格鬥遊戲。AI村民互動、格鬥競技！">
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.170.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.170.0/examples/jsm/"}}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/game/style.css">
+</head>
+<body>
+
+<!-- 3D 畫布 -->
+<canvas id="three-canvas"></canvas>
+
+<!-- 開始頁覆蓋層 -->
+<div id="start-overlay">
+  <div class="zone top" data-zone="top"></div>
+  <div class="zone bottom" data-zone="bottom"></div>
+  <div class="zone left" data-zone="left"></div>
+  <div class="zone right" data-zone="right"></div>
+  <div class="zone center" data-zone="center"></div>
+</div>
+
+<!-- 智能快捷鍵 -->
+<div id="smart-shortcut"><a class="shortcut-btn" href="#" id="smart-link"></a></div>
+
+<!-- 開始選單 -->
+<div id="start-menu">
+  <div id="zone-indicator"></div>
+  <a class="menu-btn" id="btn-start" href="#">⚔️ 開始遊戲</a>
+  <a class="menu-btn" id="btn-business" href="#">🏢 商業</a>
+  <a class="menu-btn" id="btn-pay" href="#">💎 充值</a>
+</div>
+
+<!-- 遊戲 UI -->
+<div id="game-ui">
+  <div id="top-bar">
+    <span class="title">🏘️ 莫氏 AI 村莊</span>
+    <span class="info" id="online-count">村民加載中...</span>
+    <button id="btn-back-to-start" style="pointer-events:all">◄ 返回</button>
+  </div>
+</div>
+<div id="bottom-hint">👆 點擊村民互動 | 💬 對話 | ⚔️ 格鬥</div>
+<div id="agent-name-tag"></div>
+<div id="building-tooltip"></div>
+<div id="score-board">🏆 戰績<br><span id="score-text">0 勝 0 敗</span></div>
+
+<!-- 互動選單 -->
+<div id="interact-menu">
+  <button class="interact-btn" id="interact-chat">💬 對話</button>
+  <button class="interact-btn fight" id="interact-fight">⚔️ 格鬥</button>
+  <button class="interact-btn" id="interact-cancel">✕ 取消</button>
+</div>
+
+<!-- 聊天面板 -->
+<div id="chat-panel">
+  <div id="chat-bg"></div>
+  <div id="chat-header">
+    <span id="chat-agent-name">🤖 Agent</span>
+    <span id="chat-close" title="關閉">✕</span>
+  </div>
+  <div id="chat-messages"></div>
+  <div id="chat-loading">思考中...</div>
+  <div id="chat-input-area">
+    <input id="chat-input" type="text" placeholder="輸入訊息..." autocomplete="off">
+    <button id="chat-send">發送</button>
+  </div>
+</div>
+
+<!-- 戰鬥面板 -->
+<div id="battle-overlay">
+  <div id="battle-arena">
+    <canvas id="battle-canvas"></canvas>
+    <div id="battle-result"></div>
+  </div>
+  <div id="battle-hud">
+    <span class="battle-name" id="battle-player-name">你</span>
+    <div class="battle-hp-bar"><div class="battle-hp-fill player" id="battle-player-hp" style="width:100%"></div></div>
+    <span class="battle-timer" id="battle-timer">60</span>
+    <div class="battle-hp-bar"><div class="battle-hp-fill enemy" id="battle-enemy-hp" style="width:100%"></div></div>
+    <span class="battle-name" id="battle-enemy-name">對手</span>
+  </div>
+  <div id="battle-log">準備戰鬥！</div>
+  <div id="battle-controls">
+    <button class="battle-ctrl-btn" data-move="up">⬆ 上攻</button>
+    <button class="battle-ctrl-btn" data-move="left">⬅ 左攻</button>
+    <button class="battle-ctrl-btn block-btn" data-move="block">🛡 格擋</button>
+    <button class="battle-ctrl-btn" data-move="right">➡ 右攻</button>
+    <button class="battle-ctrl-btn" data-move="down">⬇ 下攻</button>
+  </div>
+  <button class="battle-ctrl-btn" id="battle-surrender" style="margin-top:10px;border-color:#666;color:#666">🏳 投降</button>
+</div>
+
+<!-- 過場 -->
+<div id="transition-overlay">
+  <div id="transition-snapshot"></div>
+  <div id="transition-loader">LOADING...</div>
+</div>
+
+
+  <script src="/game/agents_real.js"></script>
+  <script type="module" src="/game/game.js"></script>
+</body>
+</html>
