@@ -66,11 +66,7 @@
     
 # 可用工具:
 
-<img width="424" height="477" alt="image" src="https://github.com/user-attachments/assets/e6b5882a-8fda-4aff-ada8-bfa1e26f446f" />
-
-<img width="423" height="476" alt="image" src="https://github.com/user-attachments/assets/8f454b56-1fce-4213-a45b-5d07c8b1fa28" />
-
-
+<img width="739" height="437" alt="image" src="https://github.com/user-attachments/assets/1d93ca05-78f5-4e4c-8f7a-8e9aa8d4f9f9" />
 
 # api 連接:
 
@@ -83,8 +79,7 @@
 
 # 可用 agent:
 
-<img width="430" height="475" alt="image" src="https://github.com/user-attachments/assets/87853c15-0ae6-4212-b669-33861e0bf146" />
-
+<img width="280" height="308" alt="image" src="https://github.com/user-attachments/assets/4464e2f3-2e4e-4063-baeb-a670d614bdb9" />
 
 
 ================================================
@@ -190,23 +185,73 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
     └── README.md         # 就是這個文件
 
 
-<img width="349" height="454" alt="image" src="https://github.com/user-attachments/assets/35e56ed4-f310-49ee-8580-e9318c3cbb1b" />
+<img width="959" height="539" alt="image" src="https://github.com/user-attachments/assets/2fe7487a-20a3-478e-93cd-819191fbf76d" />
 
-<img width="959" height="478" alt="image" src="https://github.com/user-attachments/assets/f6f27600-7e16-415f-87ba-24a75046cb63" />
-
-
-<img width="959" height="457" alt="image" src="https://github.com/user-attachments/assets/d7f0957d-4929-4284-89b3-e73e823d0f4a" />
+<img width="322" height="479" alt="image" src="https://github.com/user-attachments/assets/63b78888-7777-4716-8efc-f80bec31e759" />
 
 
 
+# 用戶工作流:
+
+    有任何想法
+    立即點左上 +
+    寫入標題(自動打開對話)
+    寫入任何內容
+    已安裝(minimax-m3:cloud) 免費的llm模型
+    如agent沒回 ⚙️ 設定 加入自己的 llm api token
+
+
+# 說明:
+    
+
+ /會議模式 = 多agent分工
+    
+    用戶: 我想宣傳mokagi
+
+    agents:
+        總指揮 = 分析總體任務，並將工作分配給團隊成員
+        (根據 <agents>/soul/agent.md 內容)
+
+/job = 工作列表
+
+    用戶:   更新 mokagi 官網
+            更新 會議模式 的 bug
+            學習妳的新事情
+
+    agent: 整理用戶每行需求,在 jobs/  更新 JSON 格式的工作列表
+
+    agent:
+        每次心跳，如沒工作 執行一項 JSON 內工作,完成加上 don 標籤 ,並通知用戶。
 
 
 
 
+## 文件:
 
+    agents/.<agents>
+    agents/<agents>/soul/soul.md = 角色扮演(#工作模式不使用)
+    agents/<agents>/soul/agent.md = 工作風格(#只用在工作模式)
+    agents/<agents>/soul/user.md =  用戶背景(預設加入)
 
+## 文件使用時機:
 
+    多輪工具調用循環 =  無
+    會議模式 = agent.md、user.md
+    api客服模式 = agent.md
+    個人對話 = agent.md、soul.md、user.md
+    tg對話 = agent.md、soul.md、user.md
 
+## 自我進化
+
+一個獨立的:
+    修bug agent:
+    任務:
+        檢查每agent最後對話中 使用工具時:
+        有沒有bug
+        主程式復完備份
+        加工具
+        細分所有工具,最完美是只有 error一個變量(退回修bug agent)
+        工具過多可合併為一組程式碼 或 一份文件(每份文件不能超2千行)
 
 
 
