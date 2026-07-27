@@ -185,6 +185,8 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
     └── README.md         # 就是這個文件
 
 
+
+
 <img width="959" height="539" alt="image" src="https://github.com/user-attachments/assets/2fe7487a-20a3-478e-93cd-819191fbf76d" />
 
 <img width="322" height="479" alt="image" src="https://github.com/user-attachments/assets/63b78888-7777-4716-8efc-f80bec31e759" />
@@ -193,6 +195,32 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
 
 
 
+## 文件:
+
+    agents/.<agents>
+    agents/<agents>/soul/soul.md = 角色扮演(#工作模式不使用)
+    agents/<agents>/soul/agent.md = 工作風格(#只用在工作模式)
+    agents/<agents>/soul/user.md =  用戶背景(預設加入)
+
+## 文件使用時機:
+
+    多輪工具調用循環 =  無
+    會議模式 = agent.md、user.md
+    api客服模式 = agent.md、user.md
+    個人對話 = agent.md、soul.md、user.md
+    tg對話 = agent.md、soul.md、user.md
+
+總結對照表
+
+| 來源 | 內容 | 何時加入 |
+|------|------|----------|
+| `soul/*.md` | 角色設定、主人設定等 | `context_files=None` 時全部載入 |
+| 主機環境 | OS、CPU、記憶體、磁碟、時間 | 始終加入 |
+| 目錄資訊 | 房間路徑、工具路徑 | 始終加入 |
+| 權限提示 | `/admin exec`、JSON 格式 | 始終加入 |
+| `prompt` | `主人:xxx\n春:` | 一般聊天模式 |
+| `initial_prompt` | 外部注入（含歷史摘要等） | job 恢復等場景 |
+| 工具循環 | 僅環境資訊（無 soul） | 多輪工具調用時替換 |📌 
 
 
 
