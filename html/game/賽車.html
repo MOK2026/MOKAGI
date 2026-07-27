@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>🏁 汐の3D主観賽車</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;user-select:none}
+body{overflow:hidden;background:#000;font-family:'Segoe UI',sans-serif;touch-action:none;-webkit-touch-callout:none}
+canvas{display:block}
+
+#hud{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
+
+#speed{position:absolute;bottom:60px;right:50px;text-align:right}
+#speedVal{color:#0ff;font-size:56px;font-weight:900;text-shadow:0 0 30px rgba(0,255,255,.7);font-family:monospace;letter-spacing:2px;line-height:1}
+#unit{color:#8af;font-size:16px;font-family:monospace;opacity:.8}
+
+#dist{position:absolute;top:30px;right:40px;color:#fff;font-size:18px;text-shadow:0 0 15px rgba(255,255,255,.3);font-family:monospace;opacity:.8}
+#score{position:absolute;top:30px;left:40px;color:#ff0;font-size:24px;font-weight:700;text-shadow:0 0 20px rgba(255,255,0,.5);font-family:monospace}
+
+#controls{position:fixed;bottom:30px;left:0;width:100%;display:flex;justify-content:space-between;align-items:flex-end;padding:0 20px;pointer-events:auto;z-index:50;touch-action:manipulation}
+.ctrl-group{display:flex;gap:8px;align-items:flex-end}
+.ctrl-btn{width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);color:rgba(255,255,255,.7);font-size:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:all .1s;touch-action:manipulation;user-select:none;-webkit-user-select:none;pointer-events:auto}
+.ctrl-btn:active,.ctrl-btn.pressed{background:rgba(255,255,255,.25);border-color:rgba(255,255,255,.7);transform:scale(.9);color:#fff;box-shadow:0 0 20px rgba(255,255,255,.3)}
+.ctrl-btn.accel{width:80px;height:80px;background:rgba(0,255,100,.12);border-color:rgba(0,255,100,.4);color:#0f8;font-size:32px}
+.ctrl-btn.accel:active,.ctrl-btn.accel.pressed{background:rgba(0,255,100,.35);border-color:#0f8;box-shadow:0 0 30px rgba(0,255,100,.5)}
+.ctrl-btn.brake{width:60px;height:60px;background:rgba(255,50,50,.1);border-color:rgba(255,50,50,.35);color:#f55}
+.ctrl-btn.brake:active,.ctrl-btn.brake.pressed{background:rgba(255,50,50,.3);border-color:#f55;box-shadow:0 0 20px rgba(255,50,50,.4)}
+.ctrl-btn.boost{width:56px;height:56px;background:rgba(255,180,0,.1);border-color:rgba(255,180,0,.35);color:#fb0;font-size:20px}
+.ctrl-btn.boost:active,.ctrl-btn.boost.pressed{background:rgba(255,180,0,.35);border-color:#fb0;box-shadow:0 0 25px rgba(255,180,0,.5)}
+#hint{position:absolute;bottom:130px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.15);font-size:13px;font-family:monospace;letter-spacing:2px;text-align:center;line-height:1.8}
+
+#crash{position:fixed;top:0;left:0;width:100%;height:100%;display:none;justify-content:center;align-items:center;flex-direction:column;background:rgba(255,0,0,.25);z-index:100;pointer-events:auto;backdrop-filter:blur(5px)}
+#crash.show{display:flex}
+#crash h1{color:#f44;font-size:72px;text-shadow:0 0 60px rgba(255,0,0,.8);margin-bottom:10px;font-family:monospace}
+#crash p{color:#fff;font-size:20px;margin-bottom:8px;font-family:monospace;opacity:.9}
+#crash button{margin-top:25px;padding:15 50px;font-size:22px;border:2px solid #f44;background:rgba(255,0,0,.15);color:#fff;border-radius:12px;cursor:pointer;font-family:monospace;pointer-events:auto;transition:.2s}
+#crash button:hover{background:rgba(255,0,0,.4);transform:scale(1.05)}
+
+#boostBar{position:absolute;bottom:60px;left:50px;width:120px;height:8px;background:rgba(255,255,255,.1);border-radius:4px;overflow:hidden}
+#boostFill{height:100%;width:100%;background:linear-gradient(90deg,#f80,#ff0);border-radius:4px;transition:width .1s}
+#boostLabel{position:absolute;bottom:72px;left:50px;color:rgba(255,255,255,.3);font-size:11px;font-family:monospace}
+
+#tachometer{position:absolute;bottom:60px;left:50%;transform:translateX(-50%);width:200px;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden}
+#tachoFill{height:100%;width:0%;background:linear-gradient(90deg,#0f0,#ff0,#f00);border-radius:2px;transition:width .05s}
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div id="score">🏆 <span id="scoreVal">0</span></div>
+  <div id="dist">📏 <span id="distVal">0</span> m</div>
+  <div id="speed">
+    <div id="speedVal">0</div>
+    <div id="unit">km/h</div>
+  </div>
+  <div id="boostLabel">BOOST</div>
+  <div id="boostBar"><div id="boostFill"></div></div>
+  <div id="tachometer"><div id="tachoFill"></div></div>
+  <div id="controls">
+  <div class="ctrl-group">
+    <button class="ctrl-btn" id="btnLeft" ontouchstart="event.preventDefault()">◀</button>
+    <button class="ctrl-btn" id="btnRight" ontouchstart="event.preventDefault()">▶</button>
+  </div>
+  <div class="ctrl-group">
+    <button class="ctrl-btn boost" id="btnBoost" ontouchstart="event.preventDefault()">⚡</button>
+    <button class="ctrl-btn brake" id="btnBrake" ontouchstart="event.preventDefault()">⏬</button>
+    <button class="ctrl-btn accel" id="btnAccel" ontouchstart="event.preventDefault()">▲</button>
+  </div>
+</div>
+<div id="hint">📱 點擊螢幕加速 | 左右滑動轉向 | 按住按鈕控制</div>
+</div>
+
+<div id="crash">
+  <h1>💥 CRASH!</h1>
+  <p>行駛距離: <span id="crashDist">0</span> m</p>
+  <p>得分: <span id="crashScore">0</span></p>
+  <button onclick="restart()">🔄 重新出發</button>
+  <button onclick="location.href='/game/'" style="border-color:#8af;background:rgba(100,150,255,0.15)">🚪 返回大廳</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ===== 核心場景 =====
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x080818);
+scene.fog = new THREE.FogExp2(0x080818, 0.006);
+
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth/window.innerHeight, 0.1, 400);
+camera.position.set(0, 2.0, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.prepend(renderer.domElement);
+
+// 燈光
+scene.add(new THREE.AmbientLight(0x222244, 0.4));
+const sun = new THREE.DirectionalLight(0xffeedd, 1.0);
+sun.position.set(40, 60, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024,1024);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 150;
+sun.shadow.camera.left = -60;
+sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 60;
+sun.shadow.camera.bottom = -60;
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0x4444ff, 0x442222, 0.3));
+
+// 星空
+const starGeo = new THREE.BufferGeometry();
+const starPos = new Float32Array(3000);
+for(let i=0;i<3000;i++) starPos[i]=(Math.random()-0.5)*600;
+starGeo.setAttribute('position',new THREE.BufferAttribute(starPos,3));
+scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xffffff,size:0.25,transparent:true,opacity:0.7})));
+
+// ===== 道路 =====
+const LW = 2.6, RL = 40, RW = LW*3, SEGS = 120;
+const segs = [];
+
+function makeSeg(z) {
+  const g = new THREE.Group();
+  const rd = new THREE.Mesh(new THREE.BoxGeometry(RW,0.2,RL),new THREE.MeshStandardMaterial({color:0x2a2a3a,roughness:0.9}));
+  rd.position.y=-0.1;rd.receiveShadow=true;g.add(rd);
+  
+  // 車道線（白線）
+  for(let l=1;l<3;l++){
+    const x=-RW/2+l*LW;
+    for(let i=0;i<6;i++){
+      const ln=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.04,2.5),new THREE.MeshStandardMaterial({color:0xffffff,emissive:0x4488ff,emissiveIntensity:0.2}));
+      ln.position.set(x,0.04,-RL/2+i*6+2.5);g.add(ln);
+    }
+  }
+  // 中線（黃線）
+  const cx=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.04,RL),new THREE.MeshStandardMaterial({color:0xffaa00,emissive:0xff8800,emissiveIntensity:0.1}));
+  cx.position.set(0,0.04,0);g.add(cx);
+  
+  // 路肩+護欄
+  for(let s=-1;s<=1;s+=2){
+    const gr=new THREE.Mesh(new THREE.BoxGeometry(12,0.15,RL),new THREE.MeshStandardMaterial({color:0x226633,roughness:0.9}));
+    gr.position.set(s*(RW/2+6),-0.12,0);g.add(gr);
+    const ba=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.5,RL),new THREE.MeshStandardMaterial({color:0x8899aa,roughness:0.4,metalness:0.3}));
+    ba.position.set(s*(RW/2+0.2),0.15,0);ba.castShadow=true;g.add(ba);
+    for(let i=0;i<8;i++){
+      const p=new THREE.Mesh(new THREE.BoxGeometry(0.1,0.7,0.1),new THREE.MeshStandardMaterial({color:0x778899,roughness:0.5}));
+      p.position.set(s*(RW/2+0.2),0.3,-RL/2+2.5+i*5);g.add(p);
+    }
+    // LED路燈
+    if(Math.random()>0.5){
+      const pl=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.08,2),new THREE.MeshStandardMaterial({color:0x555566}));
+      pl.position.set(s*(RW/2+0.6),1,0);g.add(pl);
+      const lh=new THREE.Mesh(new THREE.SphereGeometry(0.12,6,6),new THREE.MeshStandardMaterial({color:0xffdd88,emissive:0xffaa44,emissiveIntensity:0.5}));
+      lh.position.set(s*(RW/2+0.6),2,0);g.add(lh);
+    }
+  }
+  g.position.z=z;return g;
+}
+
+for(let i=0;i<SEGS;i++){const s=makeSeg(-i*RL);scene.add(s);segs.push(s);}
+
+// ===== 樹木 =====
+const trees=[];
+for(let i=0;i<SEGS;i++){
+  const z=-i*RL-RL/2;
+  for(let s=-1;s<=1;s+=2){
+    if(Math.random()>0.35){
+      const g=new THREE.Group();
+      const x=s*(RW/2+3+Math.random()*5);
+      const t=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.25,1.5),new THREE.MeshStandardMaterial({color:0x5a3a2a,roughness:1}));
+      t.position.y=0.75;t.castShadow=true;g.add(t);
+      for(let k=0;k<3;k++){
+        const l=new THREE.Mesh(new THREE.SphereGeometry(0.6+Math.random()*0.3,6,6),new THREE.MeshStandardMaterial({color:0x1a7a1a+Math.floor(Math.random()*0x003300),roughness:0.8}));
+        l.position.set((Math.random()-0.5)*0.6,1.2+Math.random()*0.5,(Math.random()-0.5)*0.6);l.castShadow=true;g.add(l);
+      }
+      g.position.set(x,0,z);scene.add(g);trees.push(g);
+    }
+  }
+}
+
+// ===== 交通車 =====
+const traffic=[], cColors=[0xee3333,0x33cc33,0x3366ee,0xeeee33,0xee44ee,0xff8800,0x44dddd,0xdd88ff];
+function mkCar(z,lane){
+  const g=new THREE.Group(), col=cColors[Math.floor(Math.random()*cColors.length)];
+  const b=new THREE.Mesh(new THREE.BoxGeometry(1.5,0.45,2.8),new THREE.MeshStandardMaterial({color:col,roughness:0.3,metalness:0.5}));
+  b.position.y=0.35;b.castShadow=true;g.add(b);
+  const tp=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.3,1.7),new THREE.MeshStandardMaterial({color:0x88ccff,roughness:0.1,metalness:0.7,transparent:true,opacity:0.5}));
+  tp.position.set(0,0.75,-0.2);g.add(tp);
+  const wm=new THREE.MeshStandardMaterial({color:0x222,roughness:1});
+  for(let wx=-1;wx<=1;wx+=2)for(let wz=-1;wz<=1;wz+=2){
+    const w=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.12,8),wm);
+    w.rotation.x=Math.PI/2;w.position.set(wx*0.8,0.1,wz*1.1);g.add(w);
+  }
+  // 車燈
+  const lm=new THREE.MeshStandardMaterial({color:0xffffaa,emissive:0xffff44,emissiveIntensity:0.6});
+  const rm=new THREE.MeshStandardMaterial({color:0xff2200,emissive:0xff0000,emissiveIntensity:0.4});
+  new THREE.Mesh(new THREE.SphereGeometry(0.1,6,6),lm).position.set(0.5,0.35,-1.45).applyMatrix4(new THREE.Matrix4().identity());
+  new THREE.Mesh(new THREE.SphereGeometry(0.1,6,6),lm).position.set(-0.5,0.35,-1.45).applyMatrix4(new THREE.Matrix4().identity());
+  
+  g.position.set((lane-1)*LW,0,z);
+  return {g,spd:6+Math.random()*14,lane,z};
+}
+for(let i=4;i<SEGS;i+=4){
+  const z=-i*RL-Math.random()*RL, lane=Math.floor(Math.random()*3);
+  const c=mkCar(z,lane);scene.add(c.g);traffic.push(c);
+}
+
+// ===== 遊戲變量 =====
+let spd=0, maxSpd=160, dist=0, score=0, dead=false;
+let off=0, tOff=0, curve=0, tilt=0;
+let boost=100;
+const keys={};
+
+// ===== 輸入 =====
+document.addEventListener('keydown',e=>{keys[e.key]=true;if(e.key==='r'||e.key==='R')restart()});
+document.addEventListener('keyup',e=>keys[e.key]=false);
+
+// ===== 觸控（手機）=====
+let touchStartX=null, touchActive=false, touchOnCanvas=false;
+document.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  touchActive=true;
+  touchStartX=e.touches[0].clientX;
+  const t=e.touches[0];
+  touchOnCanvas=t.clientY < window.innerHeight-140;
+  if(touchOnCanvas) keys['ArrowUp']=true;
+},{passive:false});
+document.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  if(!touchActive||touchStartX===null) return;
+  const dx=e.touches[0].clientX-touchStartX;
+  if(Math.abs(dx)>8){
+    keys['ArrowRight']=dx>0;
+    keys['ArrowLeft']=dx<0;
+  }else{
+    keys['ArrowRight']=false;
+    keys['ArrowLeft']=false;
+  }
+},{passive:false});
+document.addEventListener('touchend',e=>{
+  e.preventDefault();
+  touchActive=false;touchStartX=null;
+  keys['ArrowUp']=false;keys['ArrowLeft']=false;keys['ArrowRight']=false;
+  keys['Shift']=false;keys['ArrowDown']=false;
+},{passive:false});
+
+// ===== 虛擬按鈕事件 =====
+function bindBtn(id,key){
+  const btn=document.getElementById(id);
+  if(!btn) return;
+  btn.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();keys[key]=true;btn.classList.add('pressed');});
+  btn.addEventListener('pointerup',e=>{e.preventDefault();e.stopPropagation();keys[key]=false;btn.classList.remove('pressed');});
+  btn.addEventListener('pointerleave',e=>{keys[key]=false;btn.classList.remove('pressed');});
+  btn.addEventListener('pointercancel',e=>{keys[key]=false;btn.classList.remove('pressed');});
+}
+bindBtn('btnAccel','ArrowUp');
+bindBtn('btnBrake','ArrowDown');
+bindBtn('btnLeft','ArrowLeft');
+bindBtn('btnRight','ArrowRight');
+bindBtn('btnBoost','Shift');
+
+// ===== 碰撞 =====
+function collide(){
+  if(Math.abs(off)>RW/2-0.6)return true;
+  for(const c of traffic){
+    if(Math.abs(c.z)<2.8){
+      const dx=c.g.position.x-off;
+      if(Math.abs(dx)<1.7)return true;
+    }
+  }
+  return false;
+}
+
+function restart(){
+  spd=0;dist=0;score=0;dead=false;off=0;tOff=0;curve=0;boost=100;
+  document.getElementById('crash').style.display='none';
+  document.getElementById('crash').classList.remove('show');
+  traffic.forEach((c,i)=>{c.z=-(4+i*4)*RL-Math.random()*RL;c.g.position.z=c.z;c.lane=Math.floor(Math.random()*3);c.g.position.x=(c.lane-1)*LW;c.spd=6+Math.random()*14;});
+}
+
+function update(dt){
+  if(dead)return;
+  const boostKey=keys['Shift']||keys['shift'];
+  
+  // 加速
+  if(keys['ArrowUp']){
+    const b=boostKey&&boost>0?1.6:1;
+    spd=Math.min(spd+50*dt*b,maxSpd*(boostKey&&boost>0?1.3:1));
+    if(boostKey&&boost>0)boost=Math.max(0,boost-15*dt);
+  }else if(keys['ArrowDown'])spd=Math.max(spd-80*dt,0);
+  else spd=Math.max(spd-8*dt,0);
+  
+  // 自然回boost
+  if(!boostKey||!keys['ArrowUp'])boost=Math.min(100,boost+5*dt);
+  
+  // 轉向
+  const ts=spd>3?12*(1+spd/maxSpd):0;
+  if(keys['ArrowLeft']){tOff+=ts*dt;tilt=Math.min(tilt+6*dt,0.35);}
+  else if(keys['ArrowRight']){tOff-=ts*dt;tilt=Math.max(tilt-6*dt,-0.35);}
+  else tilt*=0.92;
+  
+  // 彎道
+  curve+=dt*0.25;
+  tOff+=Math.sin(curve)*6*dt;
+  
+  off+=(tOff-off)*Math.min(1,3*dt);
+  
+  // 移動世界
+  const mv=spd*dt*0.5;
+  dist+=mv;
+  
+  for(const s of segs){
+    s.position.z+=mv;
+    if(s.position.z>RL)s.position.z-=SEGS*RL;
+  }
+  for(const t of trees){
+    t.position.z+=mv;
+    if(t.position.z>RL*2)t.position.z-=SEGS*RL;
+  }
+  for(const c of traffic){
+    c.z+=mv+c.spd*dt*0.3;
+    if(c.z>RL*2){c.z-=SEGS*RL;c.lane=Math.floor(Math.random()*3);c.g.position.x=(c.lane-1)*LW;c.spd=6+Math.random()*14;}
+    c.g.position.z=c.z;
+  }
+  
+  // 相機
+  camera.position.x=off;
+  camera.position.z=0;
+  camera.rotation.z=-tilt*0.4;
+  camera.rotation.y=-off*0.015;
+  camera.position.y=2.0+Math.sin(dist*0.4)*0.015*spd/40;
+  
+  // 碰撞
+  if(collide()){dead=true;
+    document.getElementById('crash').style.display='flex';
+    document.getElementById('crash').classList.add('show');
+    document.getElementById('crashDist').textContent=Math.floor(dist);
+    document.getElementById('crashScore').textContent=Math.floor(score);
+  }
+  
+  // 得分
+  score+=spd*dt*0.08;
+  
+  // HUD
+  document.getElementById('speedVal').textContent=Math.floor(spd);
+  document.getElementById('distVal').textContent=Math.floor(dist);
+  document.getElementById('scoreVal').textContent=Math.floor(score);
+  document.getElementById('boostFill').style.width=boost+'%';
+  document.getElementById('tachoFill').style.width=(spd/maxSpd*100)+'%';
+  
+  // 速度視覺效果
+  const sr=spd/maxSpd;
+  scene.fog.density=0.004+sr*0.012;
+  renderer.toneMappingExposure=0.9+sr*0.4;
+  if(sr>0.6){
+    const tint=Math.floor((sr-0.6)*5*255);
+    scene.background.setRGB(0.03+tint/255*0.05,0.03,0.06+tint/255*0.02);
+  }
+}
+
+// ===== resize =====
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+
+// ===== loop =====
+let lt=0;
+function loop(t){
+  const dt=Math.min((t-lt)/1000,0.05);lt=t;
+  update(dt);
+  renderer.render(scene,camera);
+  requestAnimationFrame(loop);
+}
+loop(0);
+</script>
+</body>
+</html>

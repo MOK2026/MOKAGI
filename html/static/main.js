@@ -441,7 +441,9 @@ function renderMarkdown(text) {
                 agentPosts[agent.name] = agent.post || "";
                 // 初始化 agentStates（保留原有狀態，增加 lastActive）
                 if (!agentStates[agent.name]) {
-                    agentStates[agent.name] = { isRunning: false, hasNewCompleted: false };
+                    agentStates[agent.name] = { isRunning: agent.is_running || false, hasNewCompleted: false };
+                } else {
+                    agentStates[agent.name].isRunning = agent.is_running || false;
                 }
                 agentStates[agent.name].lastActive = agent.last_active || 0;
             });
@@ -603,6 +605,18 @@ if (headerDisplay) {
         const menuToggle = document.getElementById('menuToggle');
         if (menuToggle) {
             menuToggle.innerText = agenticon;
+        }
+
+        // 更新右側工具面板的 agent icon 按鈕
+        const agentInfoBtn = document.getElementById('agentInfoBtn');
+        if (agentInfoBtn) {
+            agentInfoBtn.textContent = agenticon;
+            agentInfoBtn.title = `查看 ${agentName} 的 Soul / Jobs / Logs`;
+        }
+
+        // 若當前面板是 agent 資訊，自動刷新
+        if (currentTool === 'agent') {
+            renderAgentInfo();
         }
 
         renderAgentList();
@@ -810,6 +824,69 @@ function renderPlainTextWithFold(text) {
         placeholders.push(details);
         return placeholder;
     });
+
+    // 2.3. 處理 code_index 📝 程式碼內容 → 摺疊（保留【N】標題和 📁 路徑可見）
+    withDetails = withDetails.replace(/📝 (.+?)(?=\n【|\n*$)/gs, function(match, code) {
+        const codeEscaped = escapeHtml(code);
+        const details = `<details style="margin:2px 0 2px 20px;">
+            <summary style="cursor:pointer;color:#ce9178;font-size:0.9rem;">📝 點擊展開程式碼</summary>
+            <pre style="background:#1e1e1e;padding:6px 8px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;font-size:0.82rem;"><code>${codeEscaped}</code></pre>
+        </details>`;
+        const placeholder = `__PLACEHOLDER_${placeholders.length}__`;
+        placeholders.push(details);
+        return placeholder;
+    });
+
+    // 2.5. 檢測並摺疊工具輸出區塊（以行為單位，連續工具輸出自動合併為一個摺疊塊）
+    (function() {
+        const lines = withDetails.split("\n");
+        const resultLines = [];
+        let toolBlock = [];
+        let inToolBlock = false;
+
+        function isToolLine(line) {
+            const t = line.trim();
+            if (!t) return false;
+            // JSON 工具回應（長行）
+            if (/^\{.*"(action|success|error_type|status|tool|error_message)".*\}$/.test(t) && t.length > 60) return true;
+            // chunked 檔案讀取狀態
+            if (/^\{"action":\s*"read_file"/.test(t)) return true;
+            // 工具結果標頭
+            if (/^(✅|📚|📋|📄|📝|🔧)/.test(t)) return true;
+            // 搜索結果標題行 → 永遠顯示，不摺疊
+            // CONFIRM_SPLIT 行
+            if (t.includes("CONFIRM_SPLIT")) return true;
+            return false;
+        }
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (isToolLine(line)) {
+                if (!inToolBlock) {
+                    inToolBlock = true;
+                    toolBlock = [];
+                }
+                toolBlock.push(line);
+            } else {
+                if (inToolBlock) {
+                    const escapedBlock = escapeHtml(toolBlock.join("\n"));
+                    const ph = "__PLACEHOLDER_" + placeholders.length + "__";
+                    placeholders.push("<details class=\"tool-collapse\" style=\"margin:4px 0;\"><summary class=\"tool-summary\" title=\"🔧 工具輸出 — 點擊展開\"></summary><div style=\"margin-top:2px;padding:6px 10px;background:#252526;border-radius:4px;font-size:0.85rem;\">" + escapedBlock + "</div></details>");
+                    resultLines.push(ph);
+                    inToolBlock = false;
+                }
+                resultLines.push(line);
+            }
+        }
+        if (inToolBlock) {
+            const escapedBlock = escapeHtml(toolBlock.join("\n"));
+            const ph = "__PLACEHOLDER_" + placeholders.length + "__";
+            placeholders.push("<details class=\"tool-collapse\" style=\"margin:4px 0;\"><summary class=\"tool-summary\" title=\"🔧 工具輸出 — 點擊展開\"></summary><div style=\"margin-top:2px;padding:6px 10px;background:#252526;border-radius:4px;font-size:0.85rem;\">" + escapedBlock + "</div></details>");
+            resultLines.push(ph);
+        }
+
+        withDetails = resultLines.join("\n");
+    })();
 
     // 3. 對剩餘文本進行 HTML 轉義（佔位符不會被轉義）
     let escaped = escapeHtml(withDetails);
@@ -1089,7 +1166,6 @@ function renderChatMessages(messages) {
             // ---- 根據內容類型包裹摺疊塊 ----
             const contentText = rawContent;
             const isWork = contentText.includes('未完成的工作') && contentText.includes('繼續碼');
-            const isTool = contentText.includes('CONFIRM_SPLIT') || contentText.includes('📚 找到') || contentText.includes('✅ 命令執行成功');
 
             const lines = rawContent.split('\n');
             const isLong = lines.length > Mok_web_lines;
@@ -1098,11 +1174,6 @@ function renderChatMessages(messages) {
             if (isWork) {
                 processedHtml = `<details style="margin:8px 0;" open>
                     <summary style="cursor:pointer;color:#4ec9b0;font-weight:bold;">📋 未完成的工作列表</summary>
-                    <div style="margin-top:4px;padding:8px;background:#252526;border-radius:4px;">${rendered}</div>
-                </details>`;
-            } else if (isTool) {
-                processedHtml = `<details style="margin:8px 0;" open>
-                    <summary style="cursor:pointer;color:#4ec9b0;font-weight:bold;">🔧 工具執行過程</summary>
                     <div style="margin-top:4px;padding:8px;background:#252526;border-radius:4px;">${rendered}</div>
                 </details>`;
             } else {
@@ -1130,11 +1201,11 @@ function renderChatMessages(messages) {
             if (msg.thinkContent) {
                 const thinkEscaped = escapeHtml(msg.thinkContent);
                 thinkFoldHtml = `
-                    <details style="margin:0 0 6px 0;">
-                        <summary style="cursor:pointer; color:#e0a800; font-weight:bold; padding:4px 0;">💭 思考過程（點擊展開）</summary>
-                        <div class="think-container" style="margin-top:4px;">
-                            <div style="font-size:0.7rem; color:#e0a800;">${agenticon} ${currentAgent}思考中...</div>
-                            <div class="think-content">${thinkEscaped}</div>
+                    <details class="think-fold" style="margin:4px 0; border:1px solid #3a3a2e; border-radius:6px; background:#1e1e18; overflow:hidden;">
+                        <summary style="cursor:pointer; color:#a09060; font-weight:bold; padding:6px 12px; font-size:0.85rem; background:#252520; user-select:none;">💭 思考過程（點擊展開）</summary>
+                        <div class="think-container" style="max-height:30vh; overflow-y:auto; padding:8px 12px;">
+                            <div style="font-size:0.7rem; color:#a09060; margin-bottom:4px;">${agenticon} ${currentAgent} 思考中...</div>
+                            <div class="think-content" style="font-size:0.85rem; line-height:1.5; white-space:pre-wrap; word-break:break-word; color:#b0a080;">${thinkEscaped}</div>
                         </div>
                     </details>
                 `;
@@ -1307,11 +1378,11 @@ async function sendUserMessage(content) {
         // 若不存在，動態創建並插入到 chatMessagesDiv 中
         streamContainer = document.createElement('div');
         streamContainer.id = 'stream-container';
-        streamContainer.style.cssText = 'display:flex; flex-shrink:0; height:50%; min-height:200px; border-top:1px solid #3e3e42; background:#1e1e1e; position:relative; overflow:hidden;';
+        streamContainer.style.cssText = 'display:flex; flex-shrink:0; height:35%; min-height:180px; max-height:45vh; border-top:1px solid #3e3e42; background:#1e1e1e; position:relative; overflow:hidden;';
         streamContainer.innerHTML = `
             <div style="display:flex; flex-direction:column; height:100%;">
-                <div id="think-panel" style="flex:1; overflow-y:auto; padding:6px 10px; border-bottom:1px solid #3e3e42; white-space:pre-wrap; word-break:break-word;">
-                    <div style="font-weight:bold; font-size:0.9rem; color:#e0a800; margin-bottom:4px;">💭 思考</div>
+                <div id="think-panel" style="max-height:30vh; overflow-y:auto; padding:6px 10px; border-bottom:1px solid #3e3e42; white-space:pre-wrap; word-break:break-word;">
+                    <div style="font-weight:bold; font-size:0.85rem; color:#a09060; margin-bottom:4px;">💭 思考</div>
                     <div id="think-content" style="font-size:0.9rem; line-height:1.5;"></div>
                 </div>
                 <div id="reply-panel" style="flex:1; overflow-y:auto; padding:6px 10px; white-space:pre-wrap; word-break:break-word;">
@@ -1962,6 +2033,77 @@ function initContentResize() {
     contentArea.style.height = '50%';
 }
 
+function initInputResize() {
+    const handle = document.getElementById('inputResizeHandle');
+    const inputWrapper = document.getElementById('chatInputWrapper');
+    if (!handle || !inputWrapper) return;
+
+    let startY, startHeight;
+
+    function startDrag(clientY) {
+        startY = clientY;
+        startHeight = inputWrapper.offsetHeight;
+        document.body.style.userSelect = 'none';
+        document.body.style.touchAction = 'none';
+        handle.style.animation = 'none';
+        handle.style.transform = 'scale(1.4)';
+        handle.style.background = 'radial-gradient(circle, #10d8df 30%, transparent 70%)';
+        handle.style.boxShadow = '0 0 20px #4ec9b0, 0 0 40px #4ec9b060';
+    }
+
+    function onDrag(clientY) {
+        const delta = startY - clientY;          // 向上拖 → 增加高度
+        let newHeight = startHeight + delta;
+        // 限制範圍：最小 60px，最大 50vh
+        const maxHeight = window.innerHeight * 0.5;
+        newHeight = Math.max(60, Math.min(maxHeight, newHeight));
+        inputWrapper.style.height = newHeight + 'px';
+        inputWrapper.style.flexShrink = '0';
+    }
+
+    function endDrag() {
+        document.body.style.userSelect = '';
+        document.body.style.touchAction = '';
+        handle.style.animation = '';
+        handle.style.transform = '';
+        handle.style.background = '';
+        handle.style.boxShadow = '';
+    }
+
+    // 滑鼠事件
+    handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        startDrag(e.clientY);
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
+    function onMouseMove(e) { onDrag(e.clientY); }
+    function onMouseUp() {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        endDrag();
+    }
+
+    // 觸控事件
+    handle.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        startDrag(touch.clientY);
+        document.addEventListener('touchmove', onTouchMove);
+        document.addEventListener('touchend', onTouchEnd);
+    });
+    function onTouchMove(e) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        onDrag(touch.clientY);
+    }
+    function onTouchEnd() {
+        document.removeEventListener('touchmove', onTouchMove);
+        document.removeEventListener('touchend', onTouchEnd);
+        endDrag();
+    }
+}
+
 
 
 
@@ -2383,7 +2525,7 @@ async function renderFilesContent() {
             <div id="tree-container" style="flex:1; flex-shrink:0; overflow-y:auto; padding:8px;">
                 <div id="tree-root"></div>
             </div>
-            <div id="content-resize-handle" style="height:4px; background:#4ec9b0; cursor:ns-resize; flex-shrink:0;"></div>
+            <div id="content-resize-handle"></div>
             <div id="content-area" style="height:50%; display:flex; flex-direction:column; overflow:hidden;">
                 <!-- 模式切換列 -->
                 <div id="mode-toggle-bar" style="display:none; background:#252526; padding:4px 8px; border-bottom:1px solid #3e3e42; flex-shrink:0;">
@@ -2582,8 +2724,10 @@ async function createFromPath() {
         else if (tool === 'tools') renderToolsContent();
         else if (tool === 'tokenstats') renderTokenStats();
         else if (tool === 'logs') renderLogsContent();
+        else if (tool === 'search') renderSearchContent();
 
         else if (tool === 'game') rendergame();
+        else if (tool === 'agent') renderAgentInfo();
 
     }
 
@@ -2764,7 +2908,8 @@ socket.on('chat_stream', (data) => {
                 agentStates[agent].hasNewCompleted = false;
             }
             renderAgentList();
-            // 🔧 只有當前侍女完成時才顯示輸入框
+        }
+        // 🔧 無論 agentStates 狀態如何，done 就該關閉工作中指示器
             if (agent === currentAgent) {
                 hideWorkingIndicator();
             } else {
@@ -2774,7 +2919,6 @@ socket.on('chat_stream', (data) => {
                     hideWorkingIndicator();
                 }
                 // 若當前侍女仍在工作中，保持輸入框隱藏
-            }
         }
         if (agentStates[agent]) {
             agentStates[agent].lastActive = Date.now() / 1000;
@@ -2898,7 +3042,7 @@ socket.on('log_line', function(data) {
             }
             // 普通 Enter 不攔截，瀏覽器會默認換行
         };
-        textarea.oninput = function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 100) + 'px'; };
+        textarea.oninput = function() { const prevH = this.clientHeight; this.style.height = 'auto'; this.style.height = Math.max(prevH, this.scrollHeight, 44) + 'px'; };
         stopBtn.onclick = stopGeneration;
         clearBtn.onclick = clearAllChats;
         chatMessagesDiv = document.getElementById('chatMessages');
@@ -3004,6 +3148,74 @@ function unsubscribeLogs() {
     }
 }
 
+
+// ========== 🔍 全域對話搜尋 ==========
+function renderSearchContent() {
+    const container = document.getElementById("toolsContent");
+    container.innerHTML = '' +
+        '<div style="height:100%; display:flex; flex-direction:column;">' +
+            '<div style="padding:8px; flex-shrink:0; border-bottom:1px solid #3e3e42;">' +
+                '<div style="display:flex; gap:6px;">' +
+                    '<input id="searchQueryInput" type="text" placeholder="輸入關鍵詞搜尋全主機對話..." ' +
+                        'style="flex:1; background:#2d2d30; color:#d4d4d4; border:1px solid #3e3e42; border-radius:6px; padding:6px 10px; font-size:0.85rem; outline:none;" ' +
+                        'autofocus>' +
+                    '<button id="searchDoBtn" style="background:#4ec9b0; color:#1e1e1e; border:none; border-radius:6px; padding:6px 14px; cursor:pointer; font-weight:bold;">搜尋</button>' +
+                '</div>' +
+                '<div style="margin-top:4px; font-size:0.7rem; color:#888;">' +
+                    '搜尋範圍：chat_history + conversation_history（全主機所有 agent 及使用者對話）' +
+                '</div>' +
+            '</div>' +
+            '<div id="searchResults" style="flex:1; overflow-y:auto; padding:8px;">' +
+                '<div style="color:#888; text-align:center; margin-top:40px;">🔍 請輸入關鍵詞開始搜尋</div>' +
+            '</div>' +
+        '</div>';
+
+    function doSearch() {
+        const q = document.getElementById("searchQueryInput").value.trim();
+        const resultsDiv = document.getElementById("searchResults");
+        if (!q) {
+            resultsDiv.innerHTML = '<div style="color:#e0a800; text-align:center; margin-top:40px;">請輸入關鍵詞</div>';
+            return;
+        }
+        resultsDiv.innerHTML = '<div style="color:#888; text-align:center; margin-top:40px;">⏳ 搜尋中...</div>';
+
+        fetch('/api/search_all_conversations?q=' + encodeURIComponent(q) + '&limit=50')
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    resultsDiv.innerHTML = '<div style="color:#e0a800; text-align:center; margin-top:40px;">⚠️ ' + data.error + '</div>';
+                    return;
+                }
+                if (!data.results || data.results.length === 0) {
+                    resultsDiv.innerHTML = '<div style="color:#888; text-align:center; margin-top:40px;">😕 沒有找到相關對話</div>';
+                    return;
+                }
+                let html = '<div style="margin-bottom:8px; font-size:0.8rem; color:#4ec9b0;">📊 找到 <b>' + data.total + '</b> 筆結果（關鍵詞：「' + data.query + '」）</div>';
+                data.results.forEach(function(r) {
+                    var ts = r.timestamp ? new Date(r.timestamp * 1000).toLocaleString("zh-TW") : "未知時間";
+                    var roleIcon = r.role === "user" ? "👤" : r.role === "assistant" ? "🤖" : "💬";
+                    var sourceLabel = r.source === "chat_history" ? "💬Web" : "📝完整";
+                    var agentLabel = r.agent ? " @" + r.agent : "";
+                    html += '<div style="margin-bottom:10px; padding:8px; background:#252526; border-radius:8px; border-left:3px solid #4ec9b0;">' +
+                        '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">' +
+                        '<span style="font-size:0.75rem; color:#4ec9b0;">' + roleIcon + sourceLabel + agentLabel + '</span>' +
+                        '<span style="font-size:0.7rem; color:#888;">' + ts + '</span></div>' +
+                        '<div style="font-size:0.8rem; color:#d4d4d4; white-space:pre-wrap; word-break:break-word; line-height:1.5;">' + escapeHtml(r.snippet) + '</div></div>';
+                });
+                resultsDiv.innerHTML = html;
+            })
+            .catch(function(err) {
+                resultsDiv.innerHTML = '<div style="color:#f44747; text-align:center; margin-top:40px;">❌ 搜尋失敗：' + err.message + '</div>';
+            });
+    }
+
+    document.getElementById("searchDoBtn").addEventListener("click", doSearch);
+    document.getElementById("searchQueryInput").addEventListener("keydown", function(e) {
+        if (e.key === "Enter") doSearch();
+    });
+}
+
+
 function renderLogsContent() {
     const container = document.getElementById('toolsContent');
     container.innerHTML = `
@@ -3083,16 +3295,184 @@ function subscribeLogs() {
 
 
 
+// ========== 🌸 Agent 資訊面板 ==========
+function renderAgentInfo() {
+    const container = document.getElementById("toolsContent");
+    const agentName = currentAgent || "未知";
+    const icon = currentAgent ? (agentIcons[currentAgent] || "🌸") : "🌸";
+    container.innerHTML = `<div style="height:100%; display:flex; flex-direction:column;">
+        <div style="display:flex; gap:4px; padding:6px 8px; border-bottom:1px solid #3e3e42; flex-shrink:0; background:#1e1e1e;">
+            <button class="agent-tab-btn active" data-tab="soul">📝 Soul</button>
+            <button class="agent-tab-btn" data-tab="jobs">📋 Jobs</button>
+            <button class="agent-tab-btn" data-tab="logs">📜 Logs</button>
+            <button class="agent-tab-btn" data-tab="settings">⚙️ 設定</button>
+        </div>
+        <div id="agentTabContent" style="flex:1; overflow-y:auto; padding:8px; font-family:monospace; font-size:0.8rem; white-space:pre-wrap; background:#1e1e1e;">
+            <div style="color:#888;">載入中...</div>
+        </div>
+    </div>`;
+    let activeTab = "soul";
+    const tabContent = document.getElementById("agentTabContent");
+    const loadTab = (tab) => {
+        activeTab = tab;
+        container.querySelectorAll(".agent-tab-btn").forEach(b => b.classList.remove("active"));
+        container.querySelector(`[data-tab="${tab}"]`)?.classList.add("active");
+        tabContent.innerHTML = `<div style="color:#888;">載入中...</div>`;
+        if (tab === "soul") loadAgentSoul(tabContent, agentName);
+        else if (tab === "jobs") loadAgentJobs(tabContent, agentName);
+        else if (tab === "logs") loadAgentLogs(tabContent, agentName);
+        else if (tab === "settings") loadAgentSettings(tabContent, agentName);
+    };
+    container.querySelectorAll(".agent-tab-btn").forEach(btn => {
+        btn.addEventListener("click", () => loadTab(btn.dataset.tab));
+    });
+    loadTab("soul");
+}
+
+function loadAgentSoul(container, agentName) {
+    socket.emit("get_agent_soul", { agent: agentName });
+    const handler = (data) => {
+        socket.off("agent_soul_result", handler);
+        if (data.error) container.innerHTML = `<div style="color:#ff6b6b;">❌ ${data.error}</div>`;
+        else container.innerHTML = data.content || "<div style=\"color:#888;\">(無內容)</div>";
+    };
+    socket.on("agent_soul_result", handler);
+    setTimeout(() => { socket.off("agent_soul_result", handler); if (container.innerHTML.includes("載入中")) container.innerHTML = "<div style=\"color:#e0a800;\">⚠️ 載入逾時</div>"; }, 8000);
+}
+
+function loadAgentJobs(container, agentName) {
+    socket.emit("get_agent_jobs", { agent: agentName });
+    const handler = (data) => {
+        socket.off("agent_jobs_result", handler);
+        if (data.error) container.innerHTML = `<div style="color:#ff6b6b;">❌ ${data.error}</div>`;
+        else container.innerHTML = data.content || "<div style=\"color:#888;\">(無工作)</div>";
+    };
+    socket.on("agent_jobs_result", handler);
+    setTimeout(() => { socket.off("agent_jobs_result", handler); if (container.innerHTML.includes("載入中")) container.innerHTML = "<div style=\"color:#e0a800;\">⚠️ 載入逾時</div>"; }, 8000);
+}
+
+
+function loadAgentLogs(container, agentName) {
+    socket.emit("get_agent_logs", { agent: agentName });
+    const handler = (data) => {
+        socket.off("agent_logs_result", handler);
+        if (data.error) container.innerHTML = `<div style="color:#ff6b6b;">❌ ${data.error}</div>`;
+        else container.innerHTML = data.content || "<div style=\"color:#888;\">(無日誌)</div>";
+    };
+    socket.on("agent_logs_result", handler);
+    setTimeout(() => { socket.off("agent_logs_result", handler); if (container.innerHTML.includes("載入中")) container.innerHTML = "<div style=\"color:#e0a800;\">⚠️ 載入逾時</div>"; }, 8000);
+}
+
+function loadAgentSettings(container, agentName) {
+    socket.emit("get_agent_settings", { agent: agentName });
+    const handler = (data) => {
+        socket.off("agent_settings_result", handler);
+        if (data.error) { container.innerHTML = `<div style="color:#ff6b6b;">❌ ${data.error}</div>`; return; }
+        const raw = data.raw || '';
+        if (!raw) { container.innerHTML = "<div style=\"color:#888;\">(無設定)</div>"; return; }
+        container.dataset.rawContent = raw;
+        const lines = raw.split('\n');
+        const entries = [];
+        let commentBuffer = [];
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('#')) { commentBuffer.push(trimmed); }
+            else if (trimmed.includes('=')) {
+                const eqIdx = trimmed.indexOf('=');
+                const key = trimmed.substring(0, eqIdx).trim();
+                const value = trimmed.substring(eqIdx + 1).trim();
+                entries.push({ type: 'keyvalue', key, value, comments: commentBuffer.slice() });
+                commentBuffer = [];
+            } else if (trimmed === '') { commentBuffer.push(''); }
+        }
+        if (entries.length === 0) {
+            container.innerHTML = `<pre style="white-space:pre-wrap; background:#1e1e1e; padding:12px; border-radius:8px;">${escapeHtml(raw)}</pre>`;
+            return;
+        }
+        let html = `<div style="padding:8px;"><h3 style="color:#4ec9b0; margin-bottom:8px;">${agentName} · 屬性</h3><div style="display:flex; flex-direction:column; gap:6px;">`;
+        for (const entry of entries) {
+            for (const comment of entry.comments) {
+                if (comment.trim() === '') html += `<div style="color:#888; font-size:0.75rem; padding-left:8px; height:1em;">&nbsp;</div>`;
+                else html += `<div style="color:#888; font-size:0.75rem; padding-left:8px;">${escapeHtml(comment)}</div>`;
+            }
+            const key = entry.key, value = entry.value;
+            let inputHtml;
+            if (value === 'true' || value === 'false') {
+                inputHtml = `<input type="checkbox" ${value === 'true' ? 'checked' : ''} data-key="${key}" style="width:18px; height:18px; accent-color:#4ec9b0;" />`;
+            } else {
+                inputHtml = `<input type="text" value="${escapeHtml(value)}" data-key="${key}" style="flex:1; background:#1e1e1e; border:1px solid #4ec9b0; border-radius:4px; padding:3px 6px; color:#d4d4d4; font-family:monospace; font-size:0.75rem;" />`;
+            }
+            html += `<div style="display:flex; align-items:center; gap:8px; border-bottom:1px solid #3e3e42; padding-bottom:3px;"><label style="width:140px; flex-shrink:0; color:#d4d4d4; font-weight:bold; font-size:0.8rem;">${escapeHtml(key)}</label>${inputHtml}</div>`;
+        }
+        html += `</div><div style="display:flex; align-items:center; gap:8px; margin-top:12px;"><button id="saveAgentTabSettingsBtn" style="background:#4ec9b0; border:none; border-radius:16px; padding:5px 16px; font-weight:bold; cursor:pointer; font-size:0.8rem;">💾 儲存設定</button><span id="saveAgentTabStatus" style="font-size:0.75rem; color:#888;"></span></div></div>`;
+        container.innerHTML = html;
+        document.getElementById('saveAgentTabSettingsBtn').addEventListener('click', () => { saveAgentTabSettings(agentName); });
+    };
+    socket.on("agent_settings_result", handler);
+    setTimeout(() => { socket.off("agent_settings_result", handler); if (container.innerHTML.includes("載入中")) container.innerHTML = "<div style=\"color:#e0a800;\">⚠️ 載入逾時</div>"; }, 8000);
+}
+
+function saveAgentTabSettings(agentName) {
+    const container = document.getElementById('agentTabContent');
+    const rawContent = container.dataset.rawContent || '';
+    const inputs = document.querySelectorAll('#agentTabContent input[data-key]');
+    const changedValues = {};
+    inputs.forEach(input => {
+        const key = input.dataset.key;
+        let val = input.type === 'checkbox' ? (input.checked ? 'true' : 'false') : input.value.trim();
+        changedValues[key] = val;
+    });
+    let newContent;
+    if (rawContent) {
+        const rawLines = rawContent.split('\n');
+        const resultLines = rawLines.map(line => {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+                const eqIdx = trimmed.indexOf('=');
+                const key = trimmed.substring(0, eqIdx).trim();
+                if (key in changedValues) {
+                    const leadingWs = line.match(/^(\s*)/)[0];
+                    return leadingWs + key + '=' + changedValues[key];
+                }
+            }
+            return line;
+        });
+        newContent = resultLines.join('\n');
+    } else {
+        const lines = [];
+        inputs.forEach(input => {
+            const key = input.dataset.key;
+            let val = input.type === 'checkbox' ? (input.checked ? 'true' : 'false') : input.value.trim();
+            lines.push(key + '=' + val);
+        });
+        newContent = lines.join('\n') + '\n';
+    }
+    const statusEl = document.getElementById('saveAgentTabStatus');
+    if (statusEl) { statusEl.textContent = '儲存中...'; statusEl.style.color = '#e0a800'; }
+    socket.emit("save_agent_settings", { agent: agentName, content: newContent });
+    const saveHandler = (data) => {
+        socket.off("agent_settings_saved", saveHandler);
+        if (statusEl) {
+            if (data.error) { statusEl.textContent = '❌ ' + data.error; statusEl.style.color = '#ff6b6b'; }
+            else { statusEl.textContent = '✅ 已儲存'; statusEl.style.color = '#4ec9b0'; container.dataset.rawContent = newContent; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
+        }
+    };
+    socket.on("agent_settings_saved", saveHandler);
+    setTimeout(() => { socket.off("agent_settings_saved", saveHandler); if (statusEl) { statusEl.textContent = '⚠️ 逾時'; statusEl.style.color = '#e0a800'; } }, 8000);
+}
     async function init() {
         await loadAgentList();
         await loadModels();
         initResize();
         initSidebars();
         initChatInput();
+        initInputResize();
         document.querySelectorAll('.tools-header-buttons button').forEach(btn => {
             btn.addEventListener('click', () => switchTool(btn.dataset.tool));
         });
         switchTool('files');
+        // agent 資訊按鈕
+        document.getElementById('agentInfoBtn')?.addEventListener('click', () => switchTool('agent'));
         await loadChatHistory();
 
 document.getElementById('loadCodeBtn')?.addEventListener('click', loadCodeLibrary);
@@ -3235,80 +3615,6 @@ document.addEventListener('click', function(e) {
                     });
                 });
 
-                // ---------- 拖曳功能（僅在收合時） ----------
-                let startX, startY, startLeft, startTop, isDragging = false;
-
-                function getPosition() {
-                    const rect = btnBox.getBoundingClientRect();
-                    return { left: rect.left, top: rect.top };
-                }
-
-                function onDragStart(e) {
-                    if (isExpanded) return;
-                    if (e.target.closest('#menuToggle')) return;
-                    const dropdown = document.getElementById('jumpDropdown');
-                    if (dropdown && dropdown.style.display !== 'none') return;
-                    const touch = e.touches ? e.touches[0] : e;
-                    startX = touch.clientX;
-                    startY = touch.clientY;
-                    const rect = btnBox.getBoundingClientRect();
-                    startLeft = rect.left;
-                    startTop = rect.top;
-                    isDragging = true;
-                    btnBox.style.cursor = 'grabbing';
-                    e.preventDefault();
-                    btnBox.style.position = "fixed";
-                }
-
-                function onDragMove(e) {
-                    if (!isDragging) return;
-                    const touch = e.touches ? e.touches[0] : e;
-                    const dx = touch.clientX - startX;
-                    const dy = touch.clientY - startY;
-                    let newLeft = startLeft + dx;
-                    let newTop = startTop + dy;
-                    const boxSize = 56;
-                    const maxX = window.innerWidth - boxSize;
-                    const maxY = window.innerHeight - boxSize;
-                    newLeft = Math.max(0, Math.min(newLeft, maxX));
-                    newTop = Math.max(0, Math.min(newTop, maxY));
-                    btnBox.style.left = newLeft + 'px';
-                    btnBox.style.top = newTop + 'px';
-                    btnBox.style.right = 'auto';
-                    btnBox.style.bottom = 'auto';
-                    e.preventDefault();
-                }
-
-                function onDragEnd(e) {
-                    if (isDragging) {
-                        isDragging = false;
-                        btnBox.style.cursor = 'grab';
-                        const rect = btnBox.getBoundingClientRect();
-                        // localStorage 已清除，不再儲存位置
-                    }
-                }
-
-                // 清除舊的 localStorage 位置記憶（不再需要移動按鈕）
-                try {
-                    localStorage.removeItem('btnBoxPos');
-                } catch(e) {}
-
-                // 綁定事件（觸控與滑鼠）
-                btnBox.addEventListener('touchstart', onDragStart, { passive: false });
-                document.addEventListener('touchmove', onDragMove, { passive: false });
-                document.addEventListener('touchend', onDragEnd);
-
-                btnBox.addEventListener('mousedown', onDragStart);
-                document.addEventListener('mousemove', onDragMove);
-                document.addEventListener('mouseup', onDragEnd);
-
-                // 防止點擊觸發拖曳結束時誤觸按鈕
-                btnBox.addEventListener('click', (e) => {
-                    if (isDragging) {
-                        e.preventDefault();
-                        isDragging = false;
-                    }
-                });
             }
         }
 

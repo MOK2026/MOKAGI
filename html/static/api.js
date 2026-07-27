@@ -30,6 +30,8 @@
             const keys = ['agent', 'user_id', 'agent_soul'];
             const payload = { message: text, url: window.location.href };
             keys.forEach(key => { if (CONFIG[key] !== undefined) payload[key] = CONFIG[key]; });
+            // 🔧 API 客服模式：只載入 agent.md（不含 soul.md、user.md）
+            payload.context_files = CONFIG.context_files || ['agent.md'];
             return payload;
         }
 
