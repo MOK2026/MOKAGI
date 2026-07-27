@@ -2,7 +2,7 @@
 mok_web.py
 網頁前端適配器（基於 mokagi）
 提供文件瀏覽器、系統監控、聊天界面，所有 AI 對話能力調用 mokagi 模塊。
-202607252231_暫時可用版
+202607271012_暫時可用版
 """
 
 import os, sys
@@ -126,6 +126,9 @@ static_dir = os.path.join(BASE_DIR, "static")
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir, static_url_path='/static')
 app.config['SECRET_KEY'] = 'secret_dev_key'
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+# ===== 工作中侍女追蹤：記錄哪些 agent 正在處理訊息 =====
+_running_agents = set()  # {agent_name, ...}
 
 # ---------- 文件瀏覽相關（動態白名單）----------
 WATCH_PATH = "/home/ubuntu/"
@@ -466,11 +469,15 @@ def handle_chat_message(data):
     if not user_msg:
         return
 
+    # 🔧 標記此 agent 工作中（頁面刷新時可恢復狀態）
+    _running_agents.add(agent_name)
+
     # 網頁版專用提示（可選）
     # web_context = "【🌐 環境提示】你正在網頁版環境中回應使用者。..."
     # user_msg = user_msg + web_context
 
     user_id = data.get("user_id") or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+    context_files = data.get("context_files", None)  # 🔧 前端控制 soul 文件載入
 
     # 立即儲存使用者訊息（保證順序）
     import time
@@ -525,6 +532,8 @@ def handle_chat_message(data):
 
         elif event["type"] == "done":
             # 最後一次更新（確保所有內容已保存）
+            # 🔧 清除工作中標記
+            _running_agents.discard(agent_name)
             if assistant_msg_id is not None:
                 await asyncio.to_thread(
                     update_assistant_in_db,
@@ -552,13 +561,14 @@ def handle_chat_message(data):
         # 發送事件給前端（包含 agent 信息）
         socketio.emit('chat_stream', event, room=request.sid)
 
-    async def run(agent_config):
+    async def run(agent_config, context_files=None):
         await mokagi.process_message(
             user_id=user_id,
             text=user_msg,
             stream_callback=stream_callback,
             agent_name=agent_name,
-            agent_config=agent_config
+            agent_config=agent_config,
+            context_files=context_files
         )
 
     async def run_with_autofix():
@@ -568,7 +578,7 @@ def handle_chat_message(data):
 
         result = await autofix_run(
             func=run,
-            func_args=(agent_config,),
+            func_args=(agent_config, context_files),
             func_kwargs={},
             max_attempts=3,
             autofix_handler=find_tool_handler("admin"),
@@ -580,12 +590,14 @@ def handle_chat_message(data):
             stream_callback=stream_callback
         )
         if result == "__ERROR_REPORTED__":
+            _running_agents.discard(agent_name)
             socketio.emit('chat_stream', {'type': 'reply', 'content': "❌ 自動修復失敗，請稍後重試。"}, room=request.sid)
             socketio.emit('chat_stream', {'type': 'done'}, room=request.sid)
 
     try:
         asyncio.run(run_with_autofix())
     except Exception as e:
+        _running_agents.discard(agent_name)
         socketio.emit('chat_stream', {'type': 'reply', 'content': f"❌ 嚴重錯誤: {str(e)}"}, room=request.sid)
         socketio.emit('chat_stream', {'type': 'done'}, room=request.sid)
 
@@ -886,7 +898,7 @@ def get_env_files_api():
             print(f"獲取 agent {agent_name} 最後活躍時間失敗: {e}")
         # ----- 結束 -----
 
-        agents.append({"name": agent_name, "file": f, "icon": icon, "post": post, "desc": desc, "tags": tags, "last_active": last_active})
+        agents.append({"name": agent_name, "file": f, "icon": icon, "post": post, "desc": desc, "tags": tags, "last_active": last_active, "is_running": agent_name in _running_agents})
 
     # ----- 按 last_active 降序排序（最新排最前）-----
     agents.sort(key=lambda x: x.get('last_active', 0), reverse=True)
@@ -1568,12 +1580,195 @@ def handle_unsubscribe_logs():
         _log_stop_event.set()
 
 
+# ========== 🌸 Agent 資訊面板 ==========
+@socketio.on('get_agent_soul')
+def handle_get_agent_soul(data):
+    agent_name = data.get('agent', '')
+    if not agent_name:
+        socketio.emit('agent_soul_result', {'error': '未指定 Agent'}, room=request.sid)
+        return
+
+    # 優先讀取 soul/ 目錄下所有 .md 檔案
+    soul_dir = os.path.join(ENV_DIR, agent_name, 'soul')
+    if os.path.isdir(soul_dir):
+        try:
+            md_files = sorted([f for f in os.listdir(soul_dir) if f.endswith('.md')])
+            if md_files:
+                lines = [f'<div style="padding:8px; border-bottom:1px solid #3e3e42; color:#4ec9b0;">📁 soul/ 共 {len(md_files)} 個檔案</div>']
+                for fname in md_files:
+                    fpath = os.path.join(soul_dir, fname)
+                    try:
+                        with open(fpath, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        if len(content) > 8000:
+                            content = content[:8000] + '\n\n... (內容已截斷)'
+                        safe = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                        lines.append(f'<details style="margin:4px 0;"><summary style="cursor:pointer; color:#e0a800; padding:4px 0;">📄 {fname}</summary><pre style="background:#1e1e1e; padding:8px; margin:4px 0; border-radius:6px; white-space:pre-wrap; word-break:break-word; font-size:0.8rem; max-height:400px; overflow-y:auto;">{safe}</pre></details>')
+                    except Exception as e:
+                        lines.append(f'<div style="color:#ff6b6b;">⚠️ 無法讀取 {fname}: {str(e)}</div>')
+                socketio.emit('agent_soul_result', {'content': ''.join(lines)}, room=request.sid)
+                return
+        except Exception as e:
+            socketio.emit('agent_soul_result', {'error': f'讀取 soul 目錄失敗: {str(e)}'}, room=request.sid)
+            return
+
+    # 回退：讀取單一 soul.md 或 agent.md
+    soul_path = os.path.join(ENV_DIR, agent_name, 'soul.md')
+    if not os.path.exists(soul_path):
+        soul_path = os.path.join(ENV_DIR, agent_name, 'agent.md')
+    if os.path.exists(soul_path):
+        try:
+            with open(soul_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            if len(content) > 30000:
+                content = content[:30000] + '\n\n... (內容過長已截斷)'
+            socketio.emit('agent_soul_result', {'content': content}, room=request.sid)
+        except Exception as e:
+            socketio.emit('agent_soul_result', {'error': f'讀取失敗: {str(e)}'}, room=request.sid)
+    else:
+        socketio.emit('agent_soul_result', {'error': f'找不到 soul 檔案'}, room=request.sid)
+
+@socketio.on('get_agent_jobs')
+def handle_get_agent_jobs(data):
+    agent_name = data.get('agent', '')
+    if not agent_name:
+        socketio.emit('agent_jobs_result', {'error': '未指定 Agent'}, room=request.sid)
+        return
+
+    # 優先讀取 jobs/ 目錄下所有子目錄（每個 job 一個目錄，內含 job.md）
+    jobs_dir = os.path.join(ENV_DIR, agent_name, 'jobs')
+    if os.path.isdir(jobs_dir):
+        try:
+            job_dirs = sorted([d for d in os.listdir(jobs_dir) if os.path.isdir(os.path.join(jobs_dir, d))])
+            if job_dirs:
+                lines = [f'<div style="padding:8px; border-bottom:1px solid #3e3e42; color:#4ec9b0;">📋 jobs/ 共 {len(job_dirs)} 個工作</div>']
+                for jname in job_dirs:
+                    job_path = os.path.join(jobs_dir, jname)
+                    md_path = os.path.join(job_path, 'job.md')
+                    if os.path.isfile(md_path):
+                        try:
+                            with open(md_path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                            if len(content) > 8000:
+                                content = content[:8000] + '\n\n... (內容已截斷)'
+                            safe = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                            lines.append(f'<details style="margin:4px 0;"><summary style="cursor:pointer; color:#e0a800; padding:4px 0;">📌 {jname}</summary><pre style="background:#1e1e1e; padding:8px; margin:4px 0; border-radius:6px; white-space:pre-wrap; word-break:break-word; font-size:0.8rem; max-height:400px; overflow-y:auto;">{safe}</pre></details>')
+                        except Exception as e:
+                            lines.append(f'<div style="color:#ff6b6b; padding:2px 8px;">⚠️ 無法讀取 job.md: {str(e)}</div>')
+                    else:
+                        try:
+                            other_files = [f for f in os.listdir(job_path) if f != 'job.md']
+                            if other_files:
+                                lines.append(f'<div style="color:#888; padding:2px 8px; font-size:0.75rem;">📎 附檔: {", ".join(other_files)}</div>')
+                        except:
+                            pass
+                socketio.emit('agent_jobs_result', {'content': ''.join(lines)}, room=request.sid)
+                return
+        except Exception as e:
+            socketio.emit('agent_jobs_result', {'error': f'讀取 jobs 目錄失敗: {str(e)}'}, room=request.sid)
+            return
+
+    # 回退：使用 job.py 命令列工具
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['python3', '/home/ubuntu/.mok/tools/job.py', 'list', agent_name],
+            capture_output=True, text=True, timeout=10
+        )
+        output = result.stdout.strip() or result.stderr.strip()
+        if not output:
+            output = '(尚無工作記錄)'
+        socketio.emit('agent_jobs_result', {'content': output}, room=request.sid)
+    except Exception as e:
+        socketio.emit('agent_jobs_result', {'error': f'獲取失敗: {str(e)}'}, room=request.sid)
+
+# ========== 🌸 Agent Logs 面板（讀取 agent logs/ 目錄） ==========
+@socketio.on('get_agent_logs')
+def handle_get_agent_logs(data):
+    agent_name = data.get('agent', '')
+    if not agent_name:
+        socketio.emit('agent_logs_result', {'error': '未指定 Agent'}, room=request.sid)
+        return
+
+    logs_dir = os.path.join(ENV_DIR, agent_name, 'logs')
+    if os.path.isdir(logs_dir):
+        try:
+            all_files = sorted(os.listdir(logs_dir))
+            if all_files:
+                lines = [f'<div style="padding:8px; border-bottom:1px solid #3e3e42; color:#4ec9b0;">📜 logs/ 共 {len(all_files)} 個檔案</div>']
+                for fname in all_files:
+                    fpath = os.path.join(logs_dir, fname)
+                    if os.path.isfile(fpath):
+                        try:
+                            with open(fpath, 'r', encoding='utf-8') as f:
+                                fcontent = f.read()
+                            if len(fcontent) > 8000:
+                                fcontent = fcontent[:8000] + '\n\n... (內容過長，已截斷)'
+                            escaped = fcontent.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                            lines.append(f'<details style="margin:4px 0;"><summary style="cursor:pointer; color:#dcdcaa; padding:4px 0;">📄 {fname}</summary><pre style="background:#1e1e1e; padding:8px; margin:4px 0; border-radius:6px; white-space:pre-wrap; word-break:break-word; font-size:0.8rem; max-height:400px; overflow-y:auto;">{escaped}</pre></details>')
+                        except Exception:
+                            lines.append(f'<div style="padding:6px 8px; margin:2px 0; border-bottom:1px solid #2d2d30;">📄 <span style="color:#dcdcaa;">{fname}</span> <span style="color:#888;">(無法讀取)</span></div>')
+                socketio.emit('agent_logs_result', {'content': ''.join(lines)}, room=request.sid)
+            else:
+                socketio.emit('agent_logs_result', {'content': '<div style="color:#888; padding:12px;">📜 logs/ 目錄為空</div>'}, room=request.sid)
+        except Exception as e:
+            socketio.emit('agent_logs_result', {'error': f'讀取 logs 目錄失敗: {str(e)}'}, room=request.sid)
+    else:
+        socketio.emit('agent_logs_result', {'content': '<div style="color:#888; padding:12px;">📜 尚無 logs/ 目錄</div>'}, room=request.sid)
 
 
+# ========== 🌸 Agent Settings 面板 ==========
+@socketio.on('get_agent_settings')
+def handle_get_agent_settings(data):
+    agent_name = data.get('agent', '')
+    if not agent_name:
+        socketio.emit('agent_settings_result', {'error': '未指定 Agent'}, room=request.sid)
+        return
 
+    raw_data = ''
+    lines = [f'<div style="padding:8px; border-bottom:1px solid #3e3e42; color:#4ec9b0;">⚙️ 設定檔</div>']
+    agent_dotfile = os.path.join(ENV_DIR, agent_name, f'.{agent_name}')
+    if os.path.isfile(agent_dotfile):
+        try:
+            with open(agent_dotfile, 'r', encoding='utf-8') as f:
+                raw = f.read()
+            raw_data = raw
 
+            escaped = raw_data.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            lines.append(f'<div style="padding:4px 12px 12px; color:#d4d4d4; white-space:pre-wrap; font-family:monospace; font-size:0.75rem;">{escaped}</div>')
+        except Exception as e:
+            lines.append(f'<div style="color:#ff6b6b; padding:12px;">讀取設定檔失敗: {str(e)}</div>')
+    else:
+        lines.append(f'<div style="color:#888; padding:12px;">尚無 .{agent_name} 設定檔</div>')
 
+    soul_dir = os.path.join(ENV_DIR, agent_name, 'soul')
+    if os.path.isdir(soul_dir):
+        lines.append(f'<div style="padding:8px; border-bottom:1px solid #3e3e42; color:#4ec9b0; margin-top:12px;">📁 soul/ 目錄設定檔案</div>')
+        try:
+            for fname in sorted(os.listdir(soul_dir)):
+                fpath = os.path.join(soul_dir, fname)
+                if os.path.isfile(fpath):
+                    size = os.path.getsize(fpath)
+                    lines.append(f'<div style="padding:4px 12px; color:#dcdcaa;">📄 {fname} <span style="color:#888;">({size} bytes)</span></div>')
+        except Exception as e:
+            lines.append(f'<div style="color:#ff6b6b; padding:12px;">讀取 soul 目錄失敗: {str(e)}</div>')
 
+    socketio.emit('agent_settings_result', {'content': ''.join(lines), 'raw': raw_data}, room=request.sid)
+
+@socketio.on('save_agent_settings')
+def handle_save_agent_settings(data):
+    agent_name = data.get('agent', '')
+    content = data.get('content', '')
+    if not agent_name:
+        socketio.emit('agent_settings_saved', {'error': '未指定 Agent'}, room=request.sid)
+        return
+    agent_dotfile = os.path.join(ENV_DIR, agent_name, f'.{agent_name}')
+    try:
+        with open(agent_dotfile, 'w', encoding='utf-8') as f:
+            f.write(content)
+        socketio.emit('agent_settings_saved', {'success': True}, room=request.sid)
+    except Exception as e:
+        socketio.emit('agent_settings_saved', {'error': f'儲存失敗: {str(e)}'}, room=request.sid)
 
 @app.before_request
 def handle_static():
@@ -1779,6 +1974,83 @@ def add_cors_headers(response):
 
 
 
+
+
+
+
+
+# ========== 全域對話搜尋 API ==========
+@app.route("/api/search_all_conversations", methods=["GET"])
+def search_all_conversations():
+    """搜尋全主機內所有 agent 與使用者的對話內容（LIKE 全文檢索）"""
+    q = request.args.get("q", "").strip()
+    if not q or len(q) < 1:
+        return {"error": "Missing or too short query", "results": []}, 400
+
+    limit = request.args.get("limit", default=50, type=int)
+    if limit > 200:
+        limit = 200
+
+    results = []
+    HISTORY_DB = os.path.expanduser(f"~/.{MOKAGI_home}/.memory/conversation_history.db")
+
+    # --- 搜尋 chat_history（Web 端對話） ---
+    try:
+        with closing(sqlite3.connect(DB_PATH)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT id, agent, role, content, timestamp
+                   FROM chat_history
+                   WHERE content LIKE ?
+                   ORDER BY timestamp DESC
+                   LIMIT ?""",
+                (f"%{q}%", limit)
+            ).fetchall()
+            for row in rows:
+                content = row["content"] or ""
+                snippet = content[:200] + ("..." if len(content) > 200 else "")
+                results.append({
+                    "source": "chat_history",
+                    "id": row["id"],
+                    "agent": row["agent"],
+                    "role": row["role"],
+                    "snippet": snippet,
+                    "timestamp": row["timestamp"]
+                })
+    except Exception as e:
+        print(f"[search_all] chat_history 搜尋失敗: {e}")
+
+    # --- 搜尋 conversation_history（後端完整對話記錄） ---
+    try:
+        with closing(sqlite3.connect(HISTORY_DB)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT id, user_key, role, content, timestamp
+                   FROM conversation_history
+                   WHERE content LIKE ?
+                   ORDER BY timestamp DESC
+                   LIMIT ?""",
+                (f"%{q}%", limit)
+            ).fetchall()
+            for row in rows:
+                content = row["content"] or ""
+                snippet = content[:200] + ("..." if len(content) > 200 else "")
+                results.append({
+                    "source": "conversation_history",
+                    "id": row["id"],
+                    "agent": row["user_key"],
+                    "role": row["role"],
+                    "snippet": snippet,
+                    "timestamp": row["timestamp"]
+                })
+    except Exception as e:
+        print(f"[search_all] conversation_history 搜尋失敗: {e}")
+
+    # --- 依時間倒序排列，取前 limit ---
+    results.sort(key=lambda x: x["timestamp"], reverse=True)
+    results = results[:limit]
+
+    return {"query": q, "total": len(results), "results": results}
 
 
 

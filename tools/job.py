@@ -424,7 +424,7 @@ async def heartbeat_handler(agent_name: str, agent_config: dict):
                 await send_tg_notification(
                     agent_name,
                     agent_config,
-                    f"⏰ *等待主人確認*\n📋 `{job_name}`\n📊 狀態：awaiting_confirm\n⚠️ 此任務已完成，等待主人確認。\n💡 請使用 `/job update {job_name} status=done` 確認完成"
+                    f"⏰ *等待主人確認*\n📋 `{job_name}`\n📊 狀態：awaiting_confirm\n⚠️ 此任務已完成，等待主人確認。\n💡 請使用 `/job update {job_name} 0|1|2|3|4 <值>  更新任務\n    0=進行中  1=完成  2=封鎖  3=等待確認  4 <進度%>\n"
                 )
                 data["_last_reminder_ts"] = str(now)
                 with open(job_path / "job.md", 'w', encoding='utf-8') as f:
@@ -483,7 +483,7 @@ async def heartbeat_handler(agent_name: str, agent_config: dict):
                 await send_tg_notification(
                     agent_name,
                     agent_config,
-                    f"🎉 *任務已 100% 完成！*\n📋 `{job_name}`\n⏳ 狀態已轉為 awaiting_confirm，請主人確認。\n💡 使用 `/job update {job_name} status=done` 確認"
+                    f"🎉 *任務已 100% 完成！*\n📋 `{job_name}`\n⏳ 狀態已轉為 請主人確認。\n💡 使用 `/job update {job_name} 1` 確認"
                 )
 
 # ========== /job 指令處理 ==========

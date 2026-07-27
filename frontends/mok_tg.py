@@ -2,7 +2,7 @@
 mok_tg.py
 Telegram 適配器 - 支持流式輸出（實時顯示思考過程）
 核心對話能力由 mokagi 提供。
-202607252231_暫時可用版
+202607271012_暫時可用版
 """
 
 import asyncio
@@ -65,6 +65,10 @@ if ALLOWED_USERS_STR:
 WELCOME_MSG = config.get("MOK_welcome_msg", "你好！我是有記憶的 AI 助手。")
 START_MSG = config.get("MOK_start_msg", "🎉 已成功部署並24小時在線！")
 UNAUTHORIZED_MSG = config.get("MOK_unAllowed_msg", "您未獲得使用權限。")
+
+# 侍女工作中動畫（可選自訂影片路徑）
+WORKING_VIDEO_PATH = config.get("WORKING_VIDEO_PATH", "")
+WORKING_VIDEO_CAPTION = config.get("WORKING_VIDEO_CAPTION", "🌸 春工作中...")
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -275,7 +279,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 工作流自動執行標記無效")
         return
 
-    # 普通消息：發送臨時消息，然後通過流式回調更新
+    # 普通消息：先發送工作中動畫（如果有自訂影片），再發送臨時消息通過流式回調更新
+    working_video_msg = None
+    if WORKING_VIDEO_PATH and os.path.exists(WORKING_VIDEO_PATH):
+        try:
+            with open(WORKING_VIDEO_PATH, "rb") as video_file:
+                working_video_msg = await update.message.reply_video(
+                    video=video_file,
+                    caption=WORKING_VIDEO_CAPTION,
+                    supports_streaming=True
+                )
+        except Exception as e:
+            logging.warning(f"發送工作中影片失敗，降級為文字: {e}")
+
     temp_msg = await update.message.reply_text("💭 思考中...")
     try:
         cb = partial(stream_callback, update, context, temp_msg)
@@ -287,6 +303,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_id=temp_msg.message_id,
             text=f"❌ 處理消息時出錯: {str(e)}"
         )
+    finally:
+        # 清理工作中動畫（如果有發送影片）
+        if working_video_msg:
+            try:
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=working_video_msg.message_id
+                )
+            except Exception as e:
+                logging.warning(f"刪除工作中影片失敗: {e}")
 
 # ================== 主函數 ==================
 async def post_init(app):

@@ -13,7 +13,7 @@ PLUGIN_INFO = {
     "intent_keywords": [
         ("/上網", "/fetch"),
     ],
-    "update": "202607252231_暫時可用版",
+    "update": "202607271012_暫時可用版",
     "naturalize_func": "naturalize_fetch_result",
 
 

@@ -1,5 +1,5 @@
 """
-202607252231_暫時可用版
+202607271012_暫時可用版
 mokagi.py - 統一 AI 對話核心模塊
 
 設計目標：
@@ -210,11 +210,16 @@ def _get_pending_key(user_id: str, agent_name: str = None) -> str:
 # 讓每個 Agent 知道自己所在主機的配置狀態
 _system_context_cache = {}  # {agent_name: (context_str, timestamp)}
 _system_context_ttl = 60    # 緩存 60 秒
-def get_system_context(agent_name: str, owner: str, owner_time: int=0) -> str:
-    """獲取主機環境信息 + Agent 工作目錄，帶緩存"""
+def get_system_context(agent_name: str, owner: str, owner_time: int=0, context_files: Optional[List[str]] = None) -> str:
+    """獲取主機環境信息 + Agent 工作目錄，帶緩存
+    
+    context_files: 可選，指定要載入的 soul 文件列表（如 ["agent.md", "user.md"]）。
+                   若為 None（預設），載入 soul/ 目錄下所有文件。
+                   若為空列表 []，不載入任何 soul 文件。"""
     global _system_context_cache
     now = time.time()
-    cached = _system_context_cache.get(agent_name)
+    cache_key = f"{agent_name}:{'__ALL__' if context_files is None else ','.join(sorted(context_files))}"
+    cached = _system_context_cache.get(cache_key)
     if cached and (now - cached[1]) < _system_context_ttl:
         return cached[0]
 
@@ -261,6 +266,9 @@ def get_system_context(agent_name: str, owner: str, owner_time: int=0) -> str:
     if os.path.isdir(soul_dir):
         # 獲取目錄下所有文件（按文件名排序以保證確定性順序）
         for filename in sorted(os.listdir(soul_dir)):
+            # 🔧 context_files 過濾：若指定了文件列表，只讀取列表中的文件
+            if context_files is not None and filename not in context_files:
+                continue
             file_path = os.path.join(soul_dir, filename)
             # 只讀取普通文件，跳過子目錄
             if os.path.isfile(file_path):
@@ -287,7 +295,7 @@ def get_system_context(agent_name: str, owner: str, owner_time: int=0) -> str:
 
     context = "\n\n---\n\n".join(parts)
 
-    _system_context_cache[agent_name] = (context, now)
+    _system_context_cache[cache_key] = (context, now)
     return context
 
 
@@ -977,7 +985,8 @@ async def call_llm(
     workflow_id: str = None,        # 新增：用於關聯工作流的多步調用
     agent_config: Optional[Dict] = None,    # agent配置
     _test_mode_skip_confirm: bool = False,   # 內部參數，用於恢復時跳過確認
-    include_soul: bool = True,          # 新增：是否加入靈魂文件
+    include_soul: bool = False,          # 預設關閉，由前端完全控制上下文
+    context_files: Optional[List[str]] = None,  # 🔧 前端控制：指定 soul 文件（僅 include_soul=True 時生效）
     **override_options
 ) -> Union[str, AsyncGenerator[dict, None]]:
     """
@@ -1015,7 +1024,8 @@ async def call_llm(
         soul_content = get_system_context(
             agent_config.get("MOK_AGENT_NAME", "助手"),
             agent_config.get("MOK_ADMIN_NAME", "用戶"),
-            int(agent_config.get("MOK_ADMIN_TIME_ZONE", 0))
+            int(agent_config.get("MOK_ADMIN_TIME_ZONE", 0)),
+            context_files=context_files
         )
         if soul_content:
             if system_prompt:
@@ -2240,7 +2250,8 @@ async def process_message(
     agent_name: Optional[str] = None,          # 新增：明確指定 Agent 名稱
     agent_config: Optional[Dict] = None,        # 新增：直接傳入配置（若提供則跳過緩存）
     auto_mode: bool = False,   # 新增
-    initial_prompt: Optional[str] = None   # ✨ 允許外部呼叫者（例如 job_manager.py） 直接指定「LLM 應該看到的初始上下文」，而不是由 process_message 內部自動從歷史紀錄 + 記憶 + 語義搜索去拼湊。
+    initial_prompt: Optional[str] = None,   # ✨ 允許外部呼叫者（例如 job_manager.py） 直接指定「LLM 應該看到的初始上下文」，而不是由 process_message 內部自動從歷史紀錄 + 記憶 + 語義搜索去拼湊。
+    context_files: Optional[List[str]] = None,  # 🔧 前端控制：指定要載入的 soul 文件（如 ["agent.md","user.md"]）。None=全部, []=無
 ) -> Optional[str]:
     """
     處理{owner}消息的統一入口。
@@ -2758,8 +2769,10 @@ async def process_message(
             prompt = f"\n{owner}:{text}\n{agent_name}:"
         # 保留工具定義，讓 LLM 自行決定是否調用記憶/經驗等工具
         tool_defs = build_tool_definitions()
-        # 系統提示：基本角色定義，不包含靈魂文件
-        agent_body = get_system_context(agent_name, owner, owner_time)
+        # 系統提示：基本角色定義，由 context_files 控制載入哪些靈魂文件
+        agent_body = get_system_context(agent_name, owner, owner_time, context_files=context_files)
+        # 🔧 工具循環用的無 soul 版本（純工具推理，不加載 soul 文件）
+        agent_body_no_soul = get_system_context(agent_name, owner, owner_time, context_files=[])
         # 注意：歷史對話、語義搜索、經驗學習等功能已轉為工具，由 LLM 主動調用。
 
 
@@ -2797,6 +2810,9 @@ async def process_message(
 
         if use_openai_api:
             # OpenAI 模式（流式）
+            # 🔧 工具循環中替換 system message 為無 soul 版本（純粹工具推理）
+            if messages and messages[0]["role"] == "system":
+                messages[0]["content"] = agent_body_no_soul
             for iteration in range(max_iterations):
                 # 調用流式 API（但我們不在此處流式輸出，而是收集後處理）
                 # 為了流式輸出自然語言，我們仍然使用 stream=True，但要收集 tool_calls。
@@ -2990,6 +3006,9 @@ async def process_message(
 
         else:
             # ----- Ollama 模式（多步循環，與 OpenAI 分支行為一致）-----
+            # 🔧 工具循環中替換 system message 為無 soul 版本（純粹工具推理）
+            if messages and messages[0]["role"] == "system":
+                messages[0]["content"] = agent_body_no_soul
             for iteration in range(max_iterations):
                 # 將 messages 轉為純文本 Prompt
                 prompt_text = format_messages_for_ollama(messages)

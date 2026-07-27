@@ -191,67 +191,15 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
 
 
 
-# 用戶工作流:
-
-    有任何想法
-    立即點左上 +
-    寫入標題(自動打開對話)
-    寫入任何內容
-    已安裝(minimax-m3:cloud) 免費的llm模型
-    如agent沒回 ⚙️ 設定 加入自己的 llm api token
-
-
-# 說明:
-    
-
- /會議模式 = 多agent分工
-    
-    用戶: 我想宣傳mokagi
-
-    agents:
-        總指揮 = 分析總體任務，並將工作分配給團隊成員
-        (根據 <agents>/soul/agent.md 內容)
-
-/job = 工作列表
-
-    用戶:   更新 mokagi 官網
-            更新 會議模式 的 bug
-            學習妳的新事情
-
-    agent: 整理用戶每行需求,在 jobs/  更新 JSON 格式的工作列表
-
-    agent:
-        每次心跳，如沒工作 執行一項 JSON 內工作,完成加上 don 標籤 ,並通知用戶。
 
 
 
 
-## 文件:
 
-    agents/.<agents>
-    agents/<agents>/soul/soul.md = 角色扮演(#工作模式不使用)
-    agents/<agents>/soul/agent.md = 工作風格(#只用在工作模式)
-    agents/<agents>/soul/user.md =  用戶背景(預設加入)
 
-## 文件使用時機:
 
-    多輪工具調用循環 =  無
-    會議模式 = agent.md、user.md
-    api客服模式 = agent.md
-    個人對話 = agent.md、soul.md、user.md
-    tg對話 = agent.md、soul.md、user.md
 
-## 自我進化
 
-一個獨立的:
-    修bug agent:
-    任務:
-        檢查每agent最後對話中 使用工具時:
-        有沒有bug
-        主程式復完備份
-        加工具
-        細分所有工具,最完美是只有 error一個變量(退回修bug agent)
-        工具過多可合併為一組程式碼 或 一份文件(每份文件不能超2千行)
 
 
 
@@ -298,4 +246,4 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
 **MOKAGI — 不僅僅是一個遊戲，更是一段陪伴。**  
 **你的參與，就是她的生命。**
 
-
+✕Merlin
