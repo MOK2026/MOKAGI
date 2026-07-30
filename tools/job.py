@@ -111,11 +111,20 @@ def get_detailed_log_path(agent_name: str, job_name: str) -> Path:
 
 # ========== Markdown 解析與渲染 ==========
 def parse_job_md(filepath: Path) -> Dict[str, str]:
-    """從 job.md 解析出各個區塊（## 標題）的內容"""
+    """從 job.md 解析出各個區塊（## 標題）的內容，含隱藏 metadata"""
     if not filepath.exists():
         return {}
     with open(filepath, 'r', encoding='utf-8') as f:
         content = f.read()
+    
+    # 解析隱藏 metadata（_last_reminder_ts, _retry_count 等）
+    meta_match = re.search(r'<!-- METADATA\n(.*?)\n-->', content, re.DOTALL)
+    metadata = {}
+    if meta_match:
+        try:
+            metadata = json.loads(meta_match.group(1))
+        except:
+            pass
     
     pattern = r'^##\s*(.+?)\s*\n(.*?)(?=\n##\s|\Z)'
     matches = re.findall(pattern, content, re.DOTALL | re.MULTILINE)
@@ -124,13 +133,16 @@ def parse_job_md(filepath: Path) -> Dict[str, str]:
     for title, body in matches:
         data[title.strip()] = body.strip()
     
+    # 合併 metadata（_ 開頭的內部欄位）
+    data.update(metadata)
+    
     title_match = re.search(r'^#\s*(.+?)$', content, re.MULTILINE)
     if title_match:
         data['_title'] = title_match.group(1).strip()
     return data
 
 def render_job_md(data: Dict[str, str], title: str) -> str:
-    """將 dict 渲染為 job.md 格式"""
+    """將 dict 渲染為 job.md 格式，metadata（_ 開頭欄位）以隱藏註解保存"""
     lines = [f"# {title}", ""]
     sections = ["狀態", "進度", "主人原話", "上次執行摘要", "下一次目標", "主人補充"]
     for sec in sections:
@@ -138,6 +150,12 @@ def render_job_md(data: Dict[str, str], title: str) -> str:
             lines.append(f"## {sec}")
             lines.append(data[sec])
             lines.append("")
+    # 保存內部 metadata（_last_reminder_ts, _retry_count 等）為隱藏 JSON 註解
+    metadata = {k: v for k, v in data.items() if k.startswith("_") and k != "_title"}
+    if metadata:
+        lines.append("<!-- METADATA")
+        lines.append(json.dumps(metadata, ensure_ascii=False))
+        lines.append("-->")
     return "\n".join(lines).strip()
 
 # ========== CRUD 操作 ==========

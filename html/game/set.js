@@ -20,21 +20,22 @@ const AGENTS_DATA = [
 
 function toCSSColor(hex){const r=(hex>>16)&255,g=(hex>>8)&255,b=hex&255;return `rgb(${r},${g},${b})`;}
 function hexToGL(hex){return[(hex>>16&255)/255,(hex>>8&255)/255,(hex&255)/255];}
+// 莫氏總部面向 = pos:[+左-右,高,前=+,後=-] [+-18,0,]
 const BUILDINGS = [
   {name:"莫氏總部",desc:"莫氏集團核心 · 2006年成立於香港",url:"https://64071181.github.io/",pos:[0,0,-2.5],color:0x1a3a5c,w:3.5,h:6,d:3.5},
-  {name:"AI研發中心",desc:"前沿人工智能研究設施",url:"",pos:[-18,0,-15],color:0x0d2b4a,w:2.5,h:3.5,d:2.5},
+  {name:"AI研發中心",desc:"人工智能應用研究設施",url:"/project/",pos:[6,0,5],color:0x0d2b4a,w:2.5,h:3.5,d:2.5},
   {name:"格鬥競技場",desc:"🏆 排行榜 · 點擊查看戰績",url:"",pos:[15,0,-12],color:0x3a0a1a,w:3,h:2.5,d:3},
-  {name:"💎金剛石散熱",desc:"生物鑽石散熱技術 · 頭髮回收→鑽石粉末→AI晶片散熱 · 熱導率2200W/m·K",url:"https://64071181.github.io/",pos:[-12,0,-22],color:0x2a1a5c,w:2.2,h:3,d:2.2},
+  {name:"💎金剛石散熱",desc:"生物鑽石散熱技術 · 頭髮回收→鑽石粉末→AI晶片散熱 · 熱導率2200W/m·K",url:"/project/髮變鑽石",pos:[-17,0,-4],color:0x2a1a5c,w:2.2,h:3,d:2.2},
   {name:"🤑賺錢鍠中心",desc:"自動賺錢完美閉環 · AI自動收集客戶+發送促銷Email+WhatsApp客服",url:"https://64071181.github.io/index2025",pos:[20,0,-20],color:0x4a3a0a,w:2.2,h:3,d:2.2},
-  {name:"商業教育部",desc:"📚 商業知識與技能培訓學院",url:"",pos:[-22,0,8],color:0x1a2a2a,w:2,h:2.5,d:2},
-  {name:"天使投資站",desc:"👼 初創企業資金與資源支持平臺",url:"",pos:[22,0,5],color:0x3a2a1a,w:2,h:2.5,d:2},
-  {name:"資源匹配廳",desc:"🔗 企業資源對接與商務合作",url:"",pos:[-20,0,18],color:0x2a1a3a,w:2.2,h:2.5,d:2.2},
-  {name:"特許經營所",desc:"🏪 品牌特許經營與合作加盟選項",url:"",pos:[-8,0,20],color:0x1a3a2a,w:2,h:2,d:2},
+  {name:"商業教育部",desc:"📚 商業知識與技能培訓學院",url:"",pos:[-13,0,8],color:0x1a2a2a,w:2,h:2.5,d:2},
+  {name:"天使投資站",desc:"👼 初創企業資金與資源支持平臺",url:"https://www.facebook.com/groups/1619118991433947",pos:[1,15,5],color:0x3a2a1a,w:2,h:2.5,d:2},
+  {name:"資源匹配廳",desc:"🔗 企業資源對接與商務合作",url:"https://www.facebook.com/groups/440828339624274",pos:[-9,0,18],color:0x2a1a3a,w:2.2,h:2.5,d:2.2},
+  {name:"特許經營所",desc:"🏪 品牌特許經營與合作加盟選項",url:"https://www.facebook.com/groups/441454859557899",pos:[-8,0,13],color:0x1a3a2a,w:2,h:2,d:2},
   {name:"營銷推廣部",desc:"📢 全方位營銷與品牌推廣管道",url:"",pos:[10,0,20],color:0x3a1a1a,w:2,h:2.5,d:2},
-  {name:"交流中心",desc:"🤝 企業交流與商務互動活動",url:"",pos:[22,0,16],color:0x1a1a3a,w:2,h:2.5,d:2},
-  {name:"人力資源所",desc:"👥 人才招募與人力資源服務",url:"",pos:[-22,0,-20],color:0x2a2a1a,w:2,h:2.5,d:2},
-  {name:"技術轉型站",desc:"🔧 企業技術轉型支援與顧問",url:"",pos:[-5,0,22],color:0x1a2a3a,w:2,h:3,d:2},
-  {name:"業務轉移臺",desc:"🔄 業務轉移與企業交易平臺",url:"",pos:[18,0,-22],color:0x2a1a2a,w:2,h:2,d:2},
+  {name:"交流中心",desc:"🤝 企業交流與商務互動活動",url:"https://www.facebook.com/groups/440828339624274",pos:[7,0,16],color:0x1a1a3a,w:2,h:2.5,d:2},
+  {name:"人力資源所",desc:"👥 人才招募與人力資源服務",url:"https://64071181.github.io/康力人力資源顧問公司/",pos:[-8,0,-11],color:0x2a2a1a,w:2,h:2.5,d:2},
+  {name:"技術轉型站",desc:"🔧 企業技術轉型支援與顧問",url:"/project/",pos:[-5,0,7],color:0x1a2a3a,w:2,h:3,d:2},
+  {name:"業務轉移臺",desc:"🔄 業務轉移與企業交易平臺",url:"https://www.facebook.com/groups/310530886427027",pos:[0,0,-10],color:0x2a1a2a,w:2,h:2,d:2},
 ];
 const BILLBOARDS = [
   {text:"⚔️ 格鬥大賽進行中！",pos:[-6,2.5,-2],rot:0.3},
@@ -63,3 +64,10 @@ let user_setting = [
   {text:"玩家/敵人血量", nb:10},
   {text:"戰鬥時間(秒)", nb:5}
 ];
+
+
+let mokagi_storyText = ['在遙遠的未來，人類創造了擁有自主意識的 AI 村民。<br><br>莫氏集團建立了 <b style="color:#ffd700">莫氏 AI 村莊</b>——一個 AI 與人類共存的和諧社區。<br><br> <b style="color:#ffd700">村莊有各種專家，妳可以在這裡購物、交友、遊戲、查詢問題</b><br><br>然而，村莊中並非所有村民都友善…有些村民因代碼異常而變得具有攻擊性。<br><br>作為莫氏集團的特派員，你的任務是：<b style="color:#00f0ff">與 AI 村民互動、對話交流、並在必要時以格鬥保衛村莊秩序</b>。<br><br>⚔️ <b>戰鬥系統</b>：觀察敵人攻擊方向，打出剋制方向來反擊！<br>💬 <b>對話系統</b>：點擊 AI 村民可進行對話<br>⬆ <b>技能升級</b>：每擊敗一個 AI，獲得 1 點技能點數']
+
+
+
+let WelcomeTxt = "購物 | 交友 | 遊戲"

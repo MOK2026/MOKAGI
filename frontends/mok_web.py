@@ -479,6 +479,40 @@ def handle_chat_message(data):
     user_id = data.get("user_id") or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
     context_files = data.get("context_files", None)  # 🔧 前端控制 soul 文件載入
 
+    # 🔧 客服模式：自動預先抓取頁面內容（不依賴 LLM 自己調用 web_fetch）
+    if "【客服頁面】" in user_msg:
+        import re, json as _json
+        match = re.search(r"網址：(.+?)(?:\n|$)", user_msg)
+        if match:
+            page_url = match.group(1).strip()
+            try:
+                from web_fetch import handle_web_fetch
+                fetch_result = asyncio.run(handle_web_fetch(
+                    {"url": page_url},
+                    chat_id=user_id,
+                    agent_config=_agent_config
+                ))
+                result_data = _json.loads(fetch_result)
+                if result_data.get("success"):
+                    page_content = result_data.get("content", "")
+                    page_title = result_data.get("title", "")
+                    fetch_context = (
+                        f"【已自動抓取的網頁內容】\n"
+                        f"標題：{page_title}\n"
+                        f"網址：{page_url}\n\n"
+                        f"{page_content[:4000]}\n\n"
+                        f"請根據以上網頁內容回答用戶問題。\n\n"
+                    )
+                    user_msg = re.sub(
+                        r"【客服頁面】.*?\n\n",
+                        fetch_context,
+                        user_msg,
+                        count=1
+                    )
+                    print(f"✅ 客服模式：已自動抓取頁面內容 ({len(page_content)} 字)")
+            except Exception as e:
+                print(f"⚠️ 自動抓取客服頁面失敗: {e}")
+
     # 立即儲存使用者訊息（保證順序）
     import time
     with closing(sqlite3.connect(DB_PATH)) as conn:
@@ -591,15 +625,15 @@ def handle_chat_message(data):
         )
         if result == "__ERROR_REPORTED__":
             _running_agents.discard(agent_name)
-            socketio.emit('chat_stream', {'type': 'reply', 'content': "❌ 自動修復失敗，請稍後重試。"}, room=request.sid)
-            socketio.emit('chat_stream', {'type': 'done'}, room=request.sid)
+            socketio.emit('chat_stream', {'type': 'reply', 'content': "❌ 自動修復失敗，請稍後重試。", 'agent': agent_name}, room=request.sid)
+            socketio.emit('chat_stream', {'type': 'done', 'agent': agent_name}, room=request.sid)
 
     try:
         asyncio.run(run_with_autofix())
     except Exception as e:
         _running_agents.discard(agent_name)
-        socketio.emit('chat_stream', {'type': 'reply', 'content': f"❌ 嚴重錯誤: {str(e)}"}, room=request.sid)
-        socketio.emit('chat_stream', {'type': 'done'}, room=request.sid)
+        socketio.emit('chat_stream', {'type': 'reply', 'content': f"❌ 嚴重錯誤: {str(e)}", 'agent': agent_name}, room=request.sid)
+        socketio.emit('chat_stream', {'type': 'done', 'agent': agent_name}, room=request.sid)
 
         
 

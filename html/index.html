@@ -116,7 +116,7 @@
                     </div>
                     <div class="work-desk"></div>
                 </div>
-                <span class="working-text">侍女 工作中...</span>
+                <span class="working-text" id="workingText">工作中...</span>
             </div>
             <!-- 輸入區域 wrapper -->
             <div id="chatInputWrapper">
@@ -158,12 +158,32 @@
                 <button data-tool="search">🔍 搜尋</button>
             </div>
             <button id="agentInfoBtn" class="agent-info-btn" title="查看 Agent 資訊">🌸</button>
+            <button id="openToolsPanel2" title="再開一組工具面板">➕</button>
             <button id="toggleToolsPanel">❌</button>
         </div>
         <div class="tools-content" id="toolsContent"></div>
         <div id="right-resize-handle" style="opacity:0;"></div>
     </div>
 </div>
+
+<!-- 第二組浮動工具面板 -->
+<div class="tools-panel-float" id="toolsPanel2" style="display:none;">
+    <div class="tools-header-float" id="toolsPanel2DragHandle">
+        <div class="tools-header-buttons">
+            <button data-tool="game" data-panel="2">🎮 game</button>
+            <button data-tool="files" data-panel="2">📁 文件</button>
+            <button data-tool="logs" data-panel="2">📋 日誌</button>
+            <button data-tool="monitor" data-panel="2">📊 監控</button>
+            <button data-tool="tokenstats" data-panel="2">📈 Token 統計</button>
+            <button data-tool="tools" data-panel="2">🔧 工具</button>
+            <button data-tool="ascii" data-panel="2">🎨 ASCII</button>
+            <button data-tool="search" data-panel="2">🔍 搜尋</button>
+        </div>
+        <button id="closeToolsPanel2" title="關閉">❌</button>
+    </div>
+    <div class="tools-content" id="toolsContent2"></div>
+</div>
+
 <!-- 滾動到底部按鈕 -->
 
 

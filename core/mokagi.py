@@ -517,7 +517,7 @@ def _init_history_db():
 
 # 在 mokagi.py 中，約第 100 行附近（在 MOK_MODEL_NAME 等變數定義之後）
 _init_history_db()
-_pending_task = {}
+
 # ===== 啟動速度優化：程式碼索引延遲 5 秒重建 =====
 # 每次重啟都重建，確保程式碼修改後能被正確索引
 # 延遲 5 秒避免與啟動競爭 CPU
@@ -1795,76 +1795,21 @@ tool_handler.load_tools()
 # 多步工作流執行（複用 workflow 工具）0619
 # ----------------------------------------------------------------------
 
-# ---------- 掛起任務管理函數 ----------
-def _get_pending_task_file(agent_name):
-    return os.path.expanduser(f"~/.{MOKAGI_home}/agent/{agent_name}/_job.json")
+# ---------- 掛起任務管理函數（_job.json 已移除） ----------
 
 def save_pending_task(user_id, messages, goal, max_iterations, iteration, agent_name, continue_code=None):
-    unique_key = _get_unique_user_id(user_id, agent_name)
+    """[已棄用] _job.json 已移除，此函數為空操作"""
     if continue_code is None:
         continue_code = hashlib.md5(f"{user_id}_{time.time()}_{goal}".encode()).hexdigest()[:12]
-    task = {
-        "goal": goal,
-        "messages": messages,
-        "max_iterations": max_iterations,
-        "iteration": iteration,
-        "timestamp": time.time()
-    }
-    if unique_key not in _pending_task:
-        _pending_task[unique_key] = {}
-    _pending_task[unique_key][continue_code] = task
-    # 寫入文件
-    task_file = _get_pending_task_file(agent_name)
-    os.makedirs(os.path.dirname(task_file), exist_ok=True)
-    all_data = {}
-    if os.path.exists(task_file):
-        with open(task_file, 'r', encoding='utf-8') as f:
-            try:
-                all_data = json.load(f)
-            except:
-                all_data = {}
-    if unique_key not in all_data:
-        all_data[unique_key] = {}
-    all_data[unique_key][continue_code] = task
-    with open(task_file, 'w', encoding='utf-8') as f:
-        json.dump(all_data, f, ensure_ascii=False, indent=2)
-    return f"📌 已保存任務進度，繼續碼：`{continue_code}`\n繼續執行：`/continue {continue_code}`"
+    return ""
 
 def load_pending_task(user_id, continue_code, agent_name):
-    unique_key = _get_unique_user_id(user_id, agent_name)
-    # 先從內存讀取
-    if unique_key in _pending_task and continue_code in _pending_task[unique_key]:
-        return _pending_task[unique_key][continue_code]
-    task_file = _get_pending_task_file(agent_name)
-    if not os.path.exists(task_file):
-        return None
-    with open(task_file, 'r', encoding='utf-8') as f:
-        all_data = json.load(f)
-    if unique_key in all_data and continue_code in all_data[unique_key]:
-        task = all_data[unique_key][continue_code]
-        if unique_key not in _pending_task:
-            _pending_task[unique_key] = {}
-        _pending_task[unique_key][continue_code] = task
-        return task
+    """[已棄用] _job.json 已移除，永遠返回 None"""
     return None
 
 def delete_pending_task(user_id, continue_code, agent_name):
-    unique_key = _get_unique_user_id(user_id, agent_name)
-    if unique_key in _pending_task and continue_code in _pending_task[unique_key]:
-        del _pending_task[unique_key][continue_code]
-        if not _pending_task[unique_key]:
-            del _pending_task[unique_key]
-    task_file = _get_pending_task_file(agent_name)
-    if not os.path.exists(task_file):
-        return
-    with open(task_file, 'r', encoding='utf-8') as f:
-        all_data = json.load(f)
-    if unique_key in all_data and continue_code in all_data[unique_key]:
-        del all_data[unique_key][continue_code]
-        if not all_data[unique_key]:
-            del all_data[unique_key]
-        with open(task_file, 'w', encoding='utf-8') as f:
-            json.dump(all_data, f, ensure_ascii=False, indent=2)
+    """[已棄用] _job.json 已移除，空操作"""
+    pass
 
 
 
@@ -2423,50 +2368,14 @@ async def process_message(
 
 
     async def _get_all_pending_tasks() -> List[Dict[str, str]]:
-        """獲取當前用戶在當前 Agent 的所有掛起任務列表（返回 [{code, goal_preview}, ...]）"""
-        result = []
-        unique_key = _get_unique_user_id(user_id, agent_name)
-        found_codes = set()
-
-        # 1️⃣ 從內存獲取
-        if unique_key in _pending_task:
-            for code, task in _pending_task[unique_key].items():
-                goal = task.get("goal", "未知任務")
-                goal_preview = goal[:60] + ("..." if len(goal) > 60 else "")
-                result.append({"code": code, "goal": goal_preview})
-                found_codes.add(code)
-
-        # 2️⃣ 從檔案獲取（僅當前 agent 目錄）
-        try:
-            _task_dir = os.path.expanduser(f"~/.{MOKAGI_home}/agent/{agent_name}")
-            _task_file = os.path.join(_task_dir, "_job.json")
-            if os.path.exists(_task_file):
-                with open(_task_file, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    if content:
-                        all_tasks = json.loads(content)
-                        if unique_key in all_tasks:
-                            tasks_dict = all_tasks[unique_key]
-                            if not isinstance(tasks_dict, dict):
-                                tasks_dict = _upgrade_legacy_task(unique_key, tasks_dict)
-                            for code, task in tasks_dict.items():
-                                if code not in found_codes:
-                                    goal = task.get("goal", "未知任務")
-                                    goal_preview = goal[:60] + ("..." if len(goal) > 60 else "")
-                                    result.append({"code": code, "goal": goal_preview})
-                                    found_codes.add(code)
-        except Exception as e:
-            logging.warning(f"[_pending_task] 讀取掛起任務列表失敗: {e}")
-
-        return result
+        """[已棄用] _job.json 已移除，永遠返回空列表"""
+        return []
     # ===== 結束 =====
 
     async def _run():
 
         
 
-        _pending_task_dir = os.path.expanduser(f"~/.{MOKAGI_home}/agent/{agent_name}")
-        _pending_task_file = os.path.join(_pending_task_dir, "_job.json")
 
                 
 

@@ -44,7 +44,7 @@
     <button id="btn-back-to-start" style="pointer-events:all">◄ 返回</button>
   </div>
 </div>
-<div id="bottom-hint">👆 點擊村民互動 | 💬 對話 | ⚔️ 格鬥</div>
+<div id="bottom-hint"></div>
 <div id="agent-name-tag"></div>
 <div id="agent-info-tag"></div>
 <div id="building-tooltip"></div>
@@ -54,7 +54,7 @@
 <div id="interact-menu">
   <button class="interact-btn" id="interact-chat">💬 對話</button>
   <button class="interact-btn fight" id="interact-fight">⚔️ 格鬥</button>
-  <a class="interact-btn race" href="/game/賽車.html">🏎️ 賽車</a>
+  <a class="interact-btn race" href="/game/賽車.html">🏃‍♀️ 逃走</a>
   <button class="interact-btn" id="interact-cancel">✕ 取消</button>
 </div>
 
@@ -87,7 +87,8 @@
     <span class="battle-name" id="battle-enemy-name">對手</span>
   </div>
   <div id="battle-log">準備戰鬥！</div>
-  <div id="battle-controls">
+  <div id="battle-swipe-hint">👆 滑動攻擊：下→上=下攻 | 上→下=上攻 | 左→右=左攻 | 右→左=右攻 | 長按=格擋</div>
+  <div id="battle-controls" style="display:none">
     <button class="battle-ctrl-btn" data-move="up">⬆ 上攻</button>
     <button class="battle-ctrl-btn" data-move="left">⬅ 左攻</button>
     <button class="battle-ctrl-btn block-btn" data-move="block">🛡 格擋</button>

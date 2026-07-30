@@ -196,15 +196,15 @@ def _stop_xvfb():
 # 自然化輸出
 # ------------------------------------------------------------------------------------ #
 
-def naturalize_browser_result(result: str) -> str:
+def naturalize_browser_result(user_text: str = "", raw_result: str = "", ollama_api: str = "", model_name: str = "", temp_msg=None, context=None) -> str:
     """將瀏覽器操作的 JSON 結果轉為自然語言"""
     try:
-        data = json.loads(result)
+        data = json.loads(raw_result) if raw_result else {}
     except (json.JSONDecodeError, TypeError):
-        return result
+        return raw_result if raw_result else "（無回應）"
 
     if not isinstance(data, dict):
-        return result
+        return raw_result if raw_result else "（無回應）"
 
     if not data.get("success", False):
         return f"❌ 瀏覽器操作失敗：{data.get('error', '未知錯誤')}"
@@ -496,53 +496,80 @@ async def _handle_launch(args: str) -> str:
     except RuntimeError as e:
         return json.dumps({"success": False, "error": str(e), "action": "launch"}, ensure_ascii=False)
 
-    _playwright = await async_playwright().start()
+    # ⚠️ 超時保護：async_playwright().start() 可能因為下載 Chromium 而長時間懸掛
+    try:
+        _playwright = await asyncio.wait_for(async_playwright().start(), timeout=30)
+    except asyncio.TimeoutError:
+        return json.dumps({
+            "success": False,
+            "error": "⚠️ Playwright 啟動超時（30秒）。可能正在下載 Chromium，請先手動執行 /browser install。",
+            "action": "launch"
+        }, ensure_ascii=False)
 
     use_persistent = args.strip().lower() == "persistent"
     chromium_path = _find_chromium_path()
 
-    if use_persistent:
-        os.makedirs(_persistent_dir, exist_ok=True)
-        _context = await _playwright.chromium.launch_persistent_context(
-            _persistent_dir,
-            headless=False,
-            viewport={"width": 1280, "height": 800},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/126.0.0.0 Safari/537.36"
-            ),
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-blink-features=AutomationControlled",
-            ],
-            executable_path=chromium_path,
-        )
-        _browser = None
-        _page = _context.pages[0] if _context.pages else await _context.new_page()
-    else:
-        launch_opts = {
-            "headless": False,
-            "args": [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-blink-features=AutomationControlled",
-            ],
-        }
-        if chromium_path:
-            launch_opts["executable_path"] = chromium_path
+    try:
+        if use_persistent:
+            os.makedirs(_persistent_dir, exist_ok=True)
+            _context = await asyncio.wait_for(
+                _playwright.chromium.launch_persistent_context(
+                    _persistent_dir,
+                    headless=False,
+                    viewport={"width": 1280, "height": 800},
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/126.0.0.0 Safari/537.36"
+                    ),
+                    args=[
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-blink-features=AutomationControlled",
+                    ],
+                    executable_path=chromium_path,
+                ),
+                timeout=60
+            )
+            _browser = None
+            _page = _context.pages[0] if _context.pages else await _context.new_page()
+        else:
+            launch_opts = {
+                "headless": False,
+                "args": [
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-blink-features=AutomationControlled",
+                ],
+            }
+            if chromium_path:
+                launch_opts["executable_path"] = chromium_path
 
-        _browser = await _playwright.chromium.launch(**launch_opts)
-        _context = await _browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/126.0.0.0 Safari/537.36"
-            ),
-        )
-        _page = await _context.new_page()
+            _browser = await asyncio.wait_for(
+                _playwright.chromium.launch(**launch_opts),
+                timeout=60
+            )
+            _context = await _browser.new_context(
+                viewport={"width": 1280, "height": 800},
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/126.0.0.0 Safari/537.36"
+                ),
+            )
+            _page = await _context.new_page()
+    except asyncio.TimeoutError:
+        return json.dumps({
+            "success": False,
+            "error": "⚠️ 啟動 Chromium 超時（60秒）。請檢查系統資源或手動重試。",
+            "action": "launch"
+        }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": f"⚠️ 啟動 Chromium 失敗：{str(e)}",
+            "action": "launch"
+        }, ensure_ascii=False)
 
     # 注入反偵測腳本
     await _page.add_init_script("""

@@ -145,13 +145,14 @@ async def execute_command(cmd: str, args: str, chat_id: str = "web", agent_confi
     if not handler:
         return json.dumps({"success": False, "error": f"未知命令: {cmd}"}, ensure_ascii=False)
     try:
-        # 調用 handler，如果 handler 接受 agent_config 參數則傳遞
+        # 調用 handler，支援同步與非同步函數
         import inspect
         sig = inspect.signature(handler)
+        is_async = inspect.iscoroutinefunction(handler)
         if 'agent_config' in sig.parameters:
-            result = await handler(args, chat_id, agent_config=agent_config)
+            result = await handler(args, chat_id, agent_config=agent_config) if is_async else handler(args, chat_id, agent_config=agent_config)
         else:
-            result = await handler(args, chat_id)
+            result = await handler(args, chat_id) if is_async else handler(args, chat_id)
         # 如果 result 不是字符串，轉為字符串
         if not isinstance(result, str):
             result = json.dumps(result, ensure_ascii=False)

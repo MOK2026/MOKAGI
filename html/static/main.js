@@ -30,9 +30,11 @@ function showQuoteToast(message) {
 let currentFileMode = 'preview';  // 'preview' 或 'edit'
 let currentHtmlContent = '';      // 儲存當前 HTML 檔案的完整內容
     let chatMessagesDiv = null;
-    let currentThinkDiv = null, currentReplyDiv = null;
-    let currentAssistantDiv = null;   // 保存臨時助手消息的DOM元素
-    let accumulatedReply = '', accumulatedThink = '';
+    let currentThinkDiv = {};     // { agentName: DOM element }
+    let currentReplyDiv = {};     // { agentName: DOM element }
+    let currentAssistantDiv = {}; // { agentName: DOM element }
+    let accumulatedReply = {};    // { agentName: string }
+    let accumulatedThink = {};    // { agentName: string }
     let fileContentPre, imageViewer, videoViewer, currentFilenameSpan;
     let scrollBtn = null;
     let quickJumpPanel = null;  // 快速跳轉面板的DOM
@@ -230,6 +232,15 @@ async function collectTextFiles(dirHandle, prefix, result) {
         }, 50);
     }
 
+    // 將所有舊 assistant 訊息面板滾動到底部
+    function scrollAssistantPanelsToBottom() {
+        setTimeout(() => {
+            document.querySelectorAll(".assistant-think-panel, .assistant-reply-panel").forEach(panel => {
+                panel.scrollTop = panel.scrollHeight;
+            });
+        }, 100);
+    }
+
     // Markdown 渲染（包含程式碼塊複製按鈕功能）
     // ----- 從稚自.html 移植的 renderMarkdown (含複製按鈕) -----
 
@@ -274,15 +285,16 @@ function renderMarkdown(text) {
 
     // 滾動按鈕控制
     function initScrollButton() {
-        scrollBtn = document.getElementById('scrollToBottomBtn');
-        if (!scrollBtn || !chatMessagesDiv) return;
+        scrollBtn = document.getElementById("scrollToBottomBtn");
+        const chatScroll = document.getElementById("chatMessages");
+        if (!scrollBtn || !chatScroll) return;
         const checkScroll = () => {
-            const isAtBottom = chatMessagesDiv.scrollHeight - chatMessagesDiv.scrollTop - chatMessagesDiv.clientHeight < 10;
-            scrollBtn.style.display = isAtBottom ? 'none' : 'flex';
+            const isAtBottom = chatScroll.scrollHeight - chatScroll.scrollTop - chatScroll.clientHeight < 10;
+            scrollBtn.style.display = isAtBottom ? "none" : "flex";
         };
-        chatMessagesDiv.addEventListener('scroll', checkScroll);
-        scrollBtn.addEventListener('click', () => {
-            chatMessagesDiv.scrollTo({ top: chatMessagesDiv.scrollHeight, behavior: 'smooth' });
+        chatScroll.addEventListener("scroll", checkScroll);
+        scrollBtn.addEventListener("click", () => {
+            chatScroll.scrollTo({ top: chatScroll.scrollHeight, behavior: "smooth" });
         });
         checkScroll();  // <--- 新增這一行
     }
@@ -584,6 +596,7 @@ if (headerDisplay) {
 
         // ===== 所有請求成功，開始更新 UI =====
         currentAgent = agentName;
+        clearRestartWarning();  // 切換 Agent 時清除重啟警告
 
         // 🔧 根據新侍女的運行狀態，更新輸入框顯示/隱藏
         const newAgentState = agentStates[agentName];
@@ -998,7 +1011,7 @@ async function saveChatMessageToServer(msg) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                agent: currentAgent,
+                agent: msg.agent || currentAgent,
                 role: msg.role,
                 content: msg.content,
                 thinkContent: msg.thinkContent || null,
@@ -1196,19 +1209,15 @@ function renderChatMessages(messages) {
                 }
             }
 
-            // ---- 思考區摺疊（默認收起） ----
-            let thinkFoldHtml = '';
+            // ---- 思考面板（使用 assistant-stream 結構，預設滾動到底） ----
+            let thinkPanelHtml = '';
             if (msg.thinkContent) {
                 const thinkEscaped = escapeHtml(msg.thinkContent);
-                thinkFoldHtml = `
-                    <details class="think-fold" style="margin:4px 0; border:1px solid #3a3a2e; border-radius:6px; background:#1e1e18; overflow:hidden;">
-                        <summary style="cursor:pointer; color:#a09060; font-weight:bold; padding:6px 12px; font-size:0.85rem; background:#252520; user-select:none;">💭 思考過程（點擊展開）</summary>
-                        <div class="think-container" style="max-height:30vh; overflow-y:auto; padding:8px 12px;">
-                            <div style="font-size:0.7rem; color:#a09060; margin-bottom:4px;">${agenticon} ${currentAgent} 思考中...</div>
-                            <div class="think-content" style="font-size:0.85rem; line-height:1.5; white-space:pre-wrap; word-break:break-word; color:#b0a080;">${thinkEscaped}</div>
-                        </div>
-                    </details>
-                `;
+                thinkPanelHtml = `
+                    <div class="assistant-think-panel">
+                        <div class="panel-label">💭 思考</div>
+                        <div class="panel-content">${thinkEscaped}</div>
+                    </div>`;
             }
 
             // ---- 複製按鈕 ----
@@ -1224,8 +1233,13 @@ function renderChatMessages(messages) {
             div.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
                     <div class="message-bubble" style="flex:1;">
-                        ${thinkFoldHtml}
-                        ${processedHtml}
+                        <div class="assistant-stream">
+                            ${thinkPanelHtml}
+                            <div class="assistant-reply-panel">
+                                <div class="panel-label">💬 回應</div>
+                                <div class="panel-content">${processedHtml}</div>
+                            </div>
+                        </div>
                         ${copyBtnHtml}
                     </div>
                 </div>
@@ -1252,6 +1266,7 @@ function renderChatMessages(messages) {
 
     // 滾動到底部（延遲確保 DOM 更新）
     setTimeout(scrollToBottom, 50);
+    setTimeout(scrollAssistantPanelsToBottom, 150);
 
     // 更新滾動按鈕狀態
     if (scrollBtn) {
@@ -1368,9 +1383,9 @@ async function sendUserMessage(content) {
             el.remove();
         }
     });
-    // 重置累積變數
-    accumulatedReply = '';
-    accumulatedThink = '';
+    // 重置累積變數（僅當前侍女）
+    accumulatedReply[currentAgent] = '';
+    accumulatedThink[currentAgent] = '';
 
     // ---- 修復：確保 stream-container 存在 ----
     let streamContainer = document.getElementById('stream-container');
@@ -1461,9 +1476,9 @@ async function sendUserMessage(content) {
     chatMessagesDiv.appendChild(assistantDiv);
     scrollToBottom();
 
-    currentAssistantDiv = assistantDiv;
-    currentThinkDiv = assistantDiv.querySelector('.think-content');
-    currentReplyDiv = assistantDiv.querySelector('.message-bubble');
+    currentAssistantDiv[currentAgent] = assistantDiv;
+    currentThinkDiv[currentAgent] = assistantDiv.querySelector('.think-content');
+    currentReplyDiv[currentAgent] = assistantDiv.querySelector('.message-bubble');
 
     socket.emit('chat_message', { message: finalMessage, agent: currentAgent,
     user_id: userId });
@@ -1472,6 +1487,10 @@ async function sendUserMessage(content) {
     showWorkingIndicator();
 }
 
+
+// === 工作指示器超時防護 | idx | 修復動畫卡住不關閉 | 202607292320 ===
+let _workingTimer = null;
+const WORKING_TIMEOUT_MS = 5 * 60 * 1000; // 5 分鐘超時，防止動畫永久卡住（安全網，正常 done 事件會先到）
 
 // 顯示工作中指示器，隱藏輸入框（保留 .btnBox 發送按鈕）
 function showWorkingIndicator() {
@@ -1484,6 +1503,17 @@ function showWorkingIndicator() {
     if (headIcon && currentAgent && agentIcons[currentAgent]) {
         headIcon.textContent = agentIcons[currentAgent];
     }
+    // 更新工作中文字為當前 agent 名稱 | idx | 移除硬寫「侍女」改為動態 agent 名 | 202607300150
+    const workingText = document.getElementById('workingText');
+    if (workingText && currentAgent) {
+        workingText.textContent = currentAgent + ' 工作中...';
+    }
+    // 🔧 超時防護：5 分鐘後自動關閉（防止 done 事件遺失導致動畫卡住）
+    if (_workingTimer) clearTimeout(_workingTimer);
+    _workingTimer = setTimeout(() => {
+        console.warn('⏰ 工作中指示器超時（5分鐘），自動關閉');
+        hideWorkingIndicator();
+    }, WORKING_TIMEOUT_MS);
 }
 
 // 隱藏工作中指示器，顯示輸入框
@@ -1492,7 +1522,60 @@ function hideWorkingIndicator() {
     const inputWrapper = document.getElementById('chatInputWrapper');
     if (indicator) indicator.style.setProperty("display", "none", "important");
     if (inputWrapper) inputWrapper.style.setProperty("display", "block", "important");
+    // 🔧 清除超時計時器
+    if (_workingTimer) {
+        clearTimeout(_workingTimer);
+        _workingTimer = null;
+    }
 }
+
+// ===========================================================
+// === 重啟警告系統 | idx | 202607290024 ===
+// ===========================================================
+
+// 檢查 LLM 回覆是否需要重啟 pm2/mokagi
+function checkRestartWarning(text) {
+    if (!text || typeof text !== "string") return false;
+    const hasPm2 = /重啟.*pm2|restart.*pm2|pm2.*重啟|pm2.*restart/i.test(text);
+    const hasMokagi = /重啟.*mokagi|restart.*mokagi|mokagi.*重啟|mokagi.*restart/i.test(text);
+    return hasPm2 && hasMokagi;
+}
+
+// 觸發重啟警告：左側面板動畫 + 對話框
+function triggerRestartWarning(agent, reply) {
+    const sidebar = document.getElementById("agentSidebar");
+    if (sidebar) sidebar.classList.add("restart-warning");
+    const activeItem = document.querySelector(".agent-item.active");
+    if (activeItem) activeItem.classList.add("restart-warning");
+    if (!chatMessagesDiv) chatMessagesDiv = document.getElementById("message-list");
+    if (!chatMessagesDiv) return;
+    const warningDiv = document.createElement("div");
+    warningDiv.className = "message assistant restart-dialog";
+    warningDiv.id = "restartWarningDialog";
+    warningDiv.innerHTML = "<button class=\"restart-dismiss-btn\" onclick=\"clearRestartWarning()\" title=\"關閉警告\">✕</button>" +
+        "<div class=\"message-bubble\">" +
+        "<span class=\"restart-icon\">⚠️</span> " +
+        "<span class=\"restart-text\">🛑 需要手動重啟！</span><br><br>" +
+        "<span style=\"color:#ffaaaa;\">LLM 輸出中包含重啟指令，但系統無法自動執行。</span><br>" +
+        "<span style=\"color:#ff9999;\">請在終端機手動執行：</span><br>" +
+        "<code style=\"background:#0d0d0d; color:#ff6b6b; padding:6px 12px; border-radius:6px; display:inline-block; margin:6px 0; font-size:0.95rem;\">pm2 restart mokagi</code><br>" +
+        "<span style=\"color:#ff9999; font-size:0.8rem;\">或分別重啟 pm2 和 mokagi 服務。</span>" +
+        "</div>" +
+        "<div class=\"message-meta\">⚠️ 系統警告 · " + new Date().toLocaleString() + "</div>";
+    chatMessagesDiv.appendChild(warningDiv);
+    chatMessagesDiv.scrollTo({ top: chatMessagesDiv.scrollHeight, behavior: "smooth" });
+}
+
+// 關閉重啟警告
+function clearRestartWarning() {
+    const sidebar = document.getElementById("agentSidebar");
+    if (sidebar) sidebar.classList.remove("restart-warning");
+    const activeItem = document.querySelector(".agent-item.restart-warning");
+    if (activeItem) activeItem.classList.remove("restart-warning");
+    const dialog = document.getElementById("restartWarningDialog");
+    if (dialog) dialog.remove();
+}
+// ===========================================================
 
 function stopGeneration() {
     // 僅觸發後端緊急重啟，不清理 UI
@@ -2837,14 +2920,14 @@ socket.on('chat_stream', (data) => {
     }
 
     if (data.type === 'think') {
-        accumulatedThink += data.content;
+        accumulatedThink[agent] = (accumulatedThink[agent] || '') + data.content;
         const thinkPanel = document.getElementById('think-content');
-        if (thinkPanel) {
-            thinkPanel.textContent = accumulatedThink;
+        if (thinkPanel && agent === currentAgent) {
+            thinkPanel.textContent = accumulatedThink[agent];
             document.getElementById('think-panel').scrollTop = document.getElementById('think-panel').scrollHeight;
         }
-        if (currentThinkDiv) {
-            currentThinkDiv.innerText = accumulatedThink;
+        if (currentThinkDiv[agent]) {
+            currentThinkDiv[agent].innerText = accumulatedThink[agent];
         }
     } else if (data.type === 'reply') {
         const subtype = data.subtype || 'normal';
@@ -2878,28 +2961,34 @@ socket.on('chat_stream', (data) => {
             }
             return;
         }
-        accumulatedReply += content;
+        accumulatedReply[agent] = (accumulatedReply[agent] || '') + content;
         const replyPanel = document.getElementById('reply-content');
-        if (replyPanel) {
-            replyPanel.textContent = accumulatedReply;
+        if (replyPanel && agent === currentAgent) {
+            replyPanel.textContent = accumulatedReply[agent];
             document.getElementById('reply-panel').scrollTop = document.getElementById('reply-panel').scrollHeight;
         }
-        if (currentReplyDiv) {
+        if (currentReplyDiv[agent]) {
             let displayContent = content;
             if (subtype === 'tool_result') {
                 displayContent = `📋 執行結果\n\n${content}`;
             }
-            currentReplyDiv.innerText += displayContent;
+            currentReplyDiv[agent].innerText += displayContent;
         }
-        const assistantMsg = currentReplyDiv?.closest('.message.assistant');
+        const assistantMsg = currentReplyDiv[agent]?.closest('.message.assistant');
         if (assistantMsg) {
             const thinkHeader = assistantMsg.querySelector('.think-container > div:first-child');
             if (thinkHeader && thinkHeader.innerText.includes('思考中')) {
-                thinkHeader.innerText = ` ${currentAgent}回答：`;
+                thinkHeader.innerText = ` ${agent}回答：`;
             }
         }
     } else if (data.type === 'done') {
-        console.log('🏁 done 事件觸發，累積回覆長度:', accumulatedReply.length);
+        const reply = accumulatedReply[agent] || '';
+        const think = accumulatedThink[agent] || '';
+        console.log('🏁 done 事件觸發，累積回覆長度:', reply.length);
+        // === 重啟警告檢測 | idx | 202607290024 ===
+        if (checkRestartWarning(reply)) {
+            triggerRestartWarning(agent, reply);
+        }
         if (agentStates[agent]) {
             agentStates[agent].isRunning = false;
             if (agent !== currentAgent) {
@@ -2910,36 +2999,37 @@ socket.on('chat_stream', (data) => {
             renderAgentList();
         }
         // 🔧 無論 agentStates 狀態如何，done 就該關閉工作中指示器
-            if (agent === currentAgent) {
+        if (agent === currentAgent) {
+            hideWorkingIndicator();
+        } else {
+            // 背景侍女完成，檢查當前侍女是否工作中
+            const curState = agentStates[currentAgent];
+            if (!curState || !curState.isRunning) {
                 hideWorkingIndicator();
-            } else {
-                // 背景侍女完成，檢查當前侍女是否工作中
-                const curState = agentStates[currentAgent];
-                if (!curState || !curState.isRunning) {
-                    hideWorkingIndicator();
-                }
-                // 若當前侍女仍在工作中，保持輸入框隱藏
+            }
+            // 若當前侍女仍在工作中，保持輸入框隱藏
         }
         if (agentStates[agent]) {
             agentStates[agent].lastActive = Date.now() / 1000;
         }
 
-        if (accumulatedReply || accumulatedThink) {
-            const isPending = accumulatedReply.includes('未完成的工作') && accumulatedReply.includes('繼續碼');
-            const isTool = accumulatedReply.includes('### LLM 迭代') || accumulatedReply.includes('### 工具調用');
-            const isSemantic = accumulatedReply.includes('相關歷史對話（語義搜索）') || accumulatedReply.includes('找到以下相關對話');
-            const isExperience = accumulatedReply.includes('相關經驗參考');
+        if (reply || think) {
+            const isPending = reply.includes('未完成的工作') && reply.includes('繼續碼');
+            const isTool = reply.includes('### LLM 迭代') || reply.includes('### 工具調用');
+            const isSemantic = reply.includes('相關歷史對話（語義搜索）') || reply.includes('找到以下相關對話');
+            const isExperience = reply.includes('相關經驗參考');
             if (!isPending && !isTool && !isSemantic && !isExperience) {
                 saveChatMessageToServer({
                     role: 'assistant',
-                    content: accumulatedReply,
-                    thinkContent: accumulatedThink,
+                    content: reply,
+                    thinkContent: think,
                     conv_id: data.conv_id || null,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    agent: agent
                 });
-                if (currentReplyDiv) {
-                    let renderedContent = renderPlainTextWithFold(accumulatedReply);
-                    const lines = accumulatedReply.split('\n');
+                if (currentReplyDiv[agent]) {
+                    let renderedContent = renderPlainTextWithFold(reply);
+                    const lines = reply.split('\n');
                     if (lines.length > Mok_web_lines) {
                         const oldLines = lines.slice(0, -Mok_web_lines);
                         const newLines = lines.slice(-Mok_web_lines);
@@ -2952,11 +3042,11 @@ socket.on('chat_stream', (data) => {
                             <div style="margin-top:4px;padding:8px;background:#252526;border-radius:4px;">${oldHtml}</div>
                         </details>${newHtml}`;
                     }
-                    currentReplyDiv.innerHTML = renderedContent;
+                    currentReplyDiv[agent].innerHTML = renderedContent;
                 }
-                if (currentAssistantDiv) {
-                    const meta = currentAssistantDiv.querySelector('.message-meta');
-                    if (meta) meta.innerText = `${currentAgent} · ${new Date().toLocaleTimeString()}`;
+                if (currentAssistantDiv[agent]) {
+                    const meta = currentAssistantDiv[agent].querySelector('.message-meta');
+                    if (meta) meta.innerText = `${agent} · ${new Date().toLocaleTimeString()}`;
                 }
         // 更新 conv_id（從 done 事件獲取）
         if (data.conv_id) {
@@ -2985,17 +3075,19 @@ socket.on('chat_stream', (data) => {
 
             }
         }
-        // 清空流式區域並隱藏
+        // 清空流式區域並隱藏（僅當前侍女）
         const streamContainer = document.getElementById('stream-container');
-        streamContainer.style.display = 'none';
-        document.getElementById('think-content').textContent = '';
-        document.getElementById('reply-content').textContent = '';
+        if (agent === currentAgent) {
+            streamContainer.style.display = 'none';
+            document.getElementById('think-content').textContent = '';
+            document.getElementById('reply-content').textContent = '';
+        }
 
-        currentThinkDiv = null;
-        currentReplyDiv = null;
-        currentAssistantDiv = null;
-        accumulatedReply = '';
-        accumulatedThink = '';
+        currentThinkDiv[agent] = null;
+        currentReplyDiv[agent] = null;
+        currentAssistantDiv[agent] = null;
+        accumulatedReply[agent] = '';
+        accumulatedThink[agent] = '';
     }
 });
 
@@ -3159,7 +3251,7 @@ function renderSearchContent() {
                     '<input id="searchQueryInput" type="text" placeholder="輸入關鍵詞搜尋全主機對話..." ' +
                         'style="flex:1; background:#2d2d30; color:#d4d4d4; border:1px solid #3e3e42; border-radius:6px; padding:6px 10px; font-size:0.85rem; outline:none;" ' +
                         'autofocus>' +
-                    '<button id="searchDoBtn" style="background:#4ec9b0; color:#1e1e1e; border:none; border-radius:6px; padding:6px 14px; cursor:pointer; font-weight:bold;">搜尋</button>' +
+                    '<input id="searchLimitInput" type="text" placeholder="筆數" style="width:48px; background:#2d2d30; color:#d4d4d4; border:1px solid #3e3e42; border-radius:6px; padding:6px 6px; font-size:0.8rem; outline:none; text-align:center;" value="50" title="輸入數字或 all（全部）"><button id="searchDoBtn" style="background:#4ec9b0; color:#1e1e1e; border:none; border-radius:6px; padding:6px 14px; cursor:pointer; font-weight:bold;">搜尋</button>' +
                 '</div>' +
                 '<div style="margin-top:4px; font-size:0.7rem; color:#888;">' +
                     '搜尋範圍：chat_history + conversation_history（全主機所有 agent 及使用者對話）' +
@@ -3179,7 +3271,7 @@ function renderSearchContent() {
         }
         resultsDiv.innerHTML = '<div style="color:#888; text-align:center; margin-top:40px;">⏳ 搜尋中...</div>';
 
-        fetch('/api/search_all_conversations?q=' + encodeURIComponent(q) + '&limit=50')
+        let limitInput = document.getElementById('searchLimitInput'); let limitVal = (limitInput ? limitInput.value.trim() : '50'); let limit = 50; if (limitVal.toLowerCase() === 'all' || limitVal === '全部') { limit = 'all'; } else if (limitVal && !isNaN(parseInt(limitVal))) { limit = parseInt(limitVal); if (limit < 1) limit = 50; } fetch('/api/search_all_conversations?q=' + encodeURIComponent(q) + '&limit=' + limit)
             .then(res => res.json())
             .then(data => {
                 if (data.error) {
@@ -3467,7 +3559,7 @@ function saveAgentTabSettings(agentName) {
         initSidebars();
         initChatInput();
         initInputResize();
-        document.querySelectorAll('.tools-header-buttons button').forEach(btn => {
+        document.querySelectorAll('#toolsPanel .tools-header-buttons button').forEach(btn => {
             btn.addEventListener('click', () => switchTool(btn.dataset.tool));
         });
         switchTool('files');
@@ -4186,6 +4278,104 @@ setTimeout(function() {
     const btn = document.getElementById('showPendingBtn');
     if (btn) btn.addEventListener('click', showPendingList);
 }, 100);
+
+// ===== 第二組浮動工具面板 =====
+let currentTool2 = "files";
+let panel2Active = false;
+
+function renderForPanel2(fn) {
+    const orig = document.getElementById;
+    document.getElementById = function(id) {
+        if (id === "toolsContent") return orig.call(document, "toolsContent2");
+        if (id === "toolsContent2") return orig.call(document, "toolsContent2");
+        return orig.call(document, id);
+    };
+    try { fn(); } finally { document.getElementById = orig; }
+}
+
+function switchTool2(tool) {
+    currentTool2 = tool;
+    const header = document.querySelector("#toolsPanel2 .tools-header-buttons");
+    if (header) {
+        header.querySelectorAll("button[data-tool]").forEach(function(b) {
+            b.classList.toggle("active", b.dataset.tool === tool);
+        });
+    }
+    if (tool === "files") renderForPanel2(renderFilesContent);
+    else if (tool === "ascii") renderForPanel2(renderAsciiContent);
+    else if (tool === "settings") renderForPanel2(renderSettingsContent);
+    else if (tool === "monitor") renderForPanel2(renderMonitorContent);
+    else if (tool === "game") renderForPanel2(rendergame);
+    else if (tool === "tokenstats") renderForPanel2(renderTokenStats);
+    else if (tool === "tools") renderForPanel2(renderToolsContent);
+    else if (tool === "logs") renderForPanel2(renderLogsContent);
+    else if (tool === "search") renderForPanel2(renderSearchContent);
+}
+
+(function() {
+    function initPanel2() {
+        var openBtn = document.getElementById("openToolsPanel2");
+        var closeBtn = document.getElementById("closeToolsPanel2");
+        var panel2 = document.getElementById("toolsPanel2");
+        if (openBtn && panel2) {
+            openBtn.addEventListener("click", function() {
+                panel2.style.display = "flex";
+                panel2Active = true;
+                openBtn.style.color = "#f48771";
+                switchTool2(currentTool2);
+            });
+        }
+        if (closeBtn && panel2) {
+            closeBtn.addEventListener("click", function() {
+                panel2.style.display = "none";
+                panel2Active = false;
+                var ob = document.getElementById("openToolsPanel2");
+                if (ob) ob.style.color = "#4ec9b0";
+            });
+        }
+        if (panel2) {
+            var hdrBtns = panel2.querySelector(".tools-header-buttons");
+            if (hdrBtns) {
+                hdrBtns.addEventListener("click", function(e) {
+                    var btn = e.target.closest("button");
+                    if (btn && btn.dataset.tool) switchTool2(btn.dataset.tool);
+                });
+            }
+        }
+    }
+
+    var dragging = false, startX, startY, startLeft, startTop;
+    function initDrag2() {
+        var panel = document.getElementById("toolsPanel2");
+        var handle = document.getElementById("toolsPanel2DragHandle");
+        if (!panel || !handle) return;
+        handle.addEventListener("mousedown", function(e) {
+            if (e.target.tagName === "BUTTON") return;
+            dragging = true;
+            startX = e.clientX; startY = e.clientY;
+            startLeft = panel.offsetLeft; startTop = panel.offsetTop;
+            panel.style.transition = "none";
+            document.body.style.userSelect = "none";
+            e.preventDefault();
+        });
+        document.addEventListener("mousemove", function(e) {
+            if (!dragging) return;
+            var panel = document.getElementById("toolsPanel2");
+            if (!panel) return;
+            panel.style.left = (startLeft + e.clientX - startX) + "px";
+            panel.style.top = (startTop + e.clientY - startY) + "px";
+        });
+        document.addEventListener("mouseup", function() {
+            if (dragging) { dragging = false; document.body.style.userSelect = ""; }
+        });
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", function() { initPanel2(); setTimeout(initDrag2, 300); });
+    } else {
+        initPanel2(); setTimeout(initDrag2, 300);
+    }
+})();
 
 
 

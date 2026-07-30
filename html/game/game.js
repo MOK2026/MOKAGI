@@ -22,6 +22,9 @@ let state = {
   lastMove:null, lastMoveTime:0,
   enemyLastMove:null, enemyLastMoveTime:0,
   blockHeld:false,
+  hitFlashTime:0, hitFlashSide:"", // 打擊閃光
+  counterFlashTime:0, // 反擊特效時間
+  swipeTrail:null, // 滑動軌跡 {x1,y1,x2,y2,time}
   score:{wins:0,losses:0},
   currentInteractAgent:null,
   // 每個 agent 獨立戰鬥數值（startBattle 時從 AGENTS_DATA 填入）
@@ -322,10 +325,18 @@ BUILDINGS.forEach(b=>{
   nctx.fillStyle="#00f0ff";nctx.font="bold 28px \"Courier New\",\"微軟正黑體\",monospace";nctx.textAlign="center";
   nctx.fillText(b.name,256,58);
   const nameTex = new THREE.CanvasTexture(nameCanvas);nameTex.minFilter=THREE.LinearFilter;
-  const nameGeo = new THREE.PlaneGeometry(3.5,0.7);
-  const nameMat = new THREE.MeshBasicMaterial({map:nameTex,transparent:true,depthTest:false});
-  const nameLabel = new THREE.Mesh(nameGeo,nameMat);
+  // 立體名稱標籤 - BoxGeometry 前後貼文字，360度可見
+  const nameGeo = new THREE.BoxGeometry(3.5,0.7,0.12);
+  const nameTexMat = new THREE.MeshBasicMaterial({map:nameTex,transparent:true,depthTest:false});
+  const nameSideMat = new THREE.MeshBasicMaterial({color:0x004444,transparent:true,depthTest:false});
+  // BoxGeometry 面順序: +X右, -X左, +Y上, -Y下, +Z前, -Z後
+  const nameMats = [nameSideMat,nameSideMat,nameSideMat,nameSideMat,nameTexMat,nameTexMat];
+  const nameLabel = new THREE.Mesh(nameGeo,nameMats);
   nameLabel.position.y=b.h+0.9;group.add(nameLabel);
+  // 霓虹邊框
+  const nameEdgeGeo = new THREE.EdgesGeometry(nameGeo);
+  const nameEdgeLine = new THREE.LineSegments(nameEdgeGeo,new THREE.LineBasicMaterial({color:0x00ffff,transparent:true,opacity:0.5,depthTest:false}));
+  nameLabel.add(nameEdgeLine);
 
   group.position.set(b.pos[0],b.pos[1],b.pos[2]);
   group.userData = {name:b.name,desc:b.desc,isBuilding:true};
@@ -333,7 +344,7 @@ BUILDINGS.forEach(b=>{
   buildingMeshes.push(group);
 });
 
-// Billboards
+// Billboards (廣告牌)
 BILLBOARDS.forEach(b=>{
   const canvas = document.createElement('canvas');
   canvas.width=256;canvas.height=64;
@@ -343,14 +354,19 @@ BILLBOARDS.forEach(b=>{
   ctx.fillStyle='#00ffff';ctx.font='bold 26px "Courier New",monospace';ctx.textAlign='center';
   ctx.fillText(b.text,128,38);
   const tex = new THREE.CanvasTexture(canvas);tex.minFilter=THREE.LinearFilter;
-  const geo = new THREE.PlaneGeometry(3,0.75);
-  const mat = new THREE.MeshBasicMaterial({map:tex,transparent:true});
-  const board = new THREE.Mesh(geo,mat);
-  board.position.set(b.pos[0],b.pos[1],b.pos[2]);
-  board.rotation.y=b.rot;
-  board.userData = {name:'廣告版',desc:b.text,isBuilding:true};
-  scene.add(board);
-  buildingMeshes.push(board);
+  const geo = new THREE.BoxGeometry(3,0.75,0.15);
+  const textMat = new THREE.MeshBasicMaterial({map:tex,transparent:true});
+  const sideMat = new THREE.MeshBasicMaterial({color:0x006666});
+  const edgeMat2 = new THREE.MeshBasicMaterial({color:0x003333});
+  const mats = [sideMat,sideMat,edgeMat2,edgeMat2,textMat,textMat];
+  const edgeLineMat = new THREE.LineBasicMaterial({color:0x00ffff,transparent:true,opacity:0.6});
+  // 主廣告牌
+  const board1 = new THREE.Mesh(geo,mats);
+  board1.position.set(b.pos[0],b.pos[1],b.pos[2]);
+  board1.rotation.y=b.rot;
+  board1.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),edgeLineMat));
+  board1.userData = {name:'廣告版',desc:b.text,isBuilding:true};
+  scene.add(board1);buildingMeshes.push(board1);
 });
 
 // ============ AGENT NPCS ============
@@ -578,10 +594,59 @@ function drawBattleArena(){
 
   // Player (left)
   const px=cw*0.22, py=ch*0.5;
-  drawFighter(battleCtx,px,py,0.8,'#00f0ff','你',state.playerHP);
+  // 🔥 玩家被擊中閃光
+  const nowT=Date.now();
+  if(state.hitFlashSide==="player"&&(nowT-state.hitFlashTime)<250){
+    battleCtx.fillStyle="rgba(255,80,80,"+(0.5*(1-(nowT-state.hitFlashTime)/250))+")";
+    battleCtx.fillRect(0,0,cw*0.44,ch);
+  }
+  drawFighter(battleCtx,px,py,0.8,"#00f0ff","你",state.playerHP);
   // Enemy (right)
   const ex=cw*0.78, ey=ch*0.5;
-  drawFighter(battleCtx,ex,ey,0.8,'#ff2d78',state.currentInteractAgent||'對手',state.enemyHP);
+  // 🔥 敵人被擊中閃光
+  if(state.hitFlashSide==="enemy"&&(nowT-state.hitFlashTime)<250){
+    battleCtx.fillStyle="rgba(255,80,80,"+(0.5*(1-(nowT-state.hitFlashTime)/250))+")";
+    battleCtx.fillRect(cw*0.56,0,cw*0.44,ch);
+  }
+  drawFighter(battleCtx,ex,ey,0.8,"#ff2d78",state.currentInteractAgent||"對手",state.enemyHP);
+  // 🔥 反擊閃電特效
+  if((nowT-state.counterFlashTime)<400){
+    const alpha=1-(nowT-state.counterFlashTime)/400;
+    battleCtx.strokeStyle="rgba(0,255,255,"+alpha+")";
+    battleCtx.lineWidth=3;
+    battleCtx.shadowColor="rgba(0,255,255,"+alpha+")";
+    battleCtx.shadowBlur=20;
+    battleCtx.beginPath();
+    const midX=(px+ex)/2, midY=(py+ey)/2;
+    battleCtx.moveTo(px+20,py-10);
+    battleCtx.lineTo(midX-10+(Math.random()-0.5)*30,midY-15+(Math.random()-0.5)*20);
+    battleCtx.lineTo(midX+10+(Math.random()-0.5)*30,midY+10+(Math.random()-0.5)*20);
+    battleCtx.lineTo(ex-20,ey-10);
+    battleCtx.stroke();
+    battleCtx.shadowBlur=0;
+    // 火花粒子
+    for(let i=0;i<5;i++){
+      const t=i/5;
+      const sx=px+20+(ex-px-40)*t, sy=py-10+(ey-py)*t;
+      battleCtx.fillStyle="rgba(255,255,200,"+alpha+")";
+      battleCtx.beginPath();
+      battleCtx.arc(sx+(Math.random()-0.5)*20,sy+(Math.random()-0.5)*20,2+Math.random()*3,0,Math.PI*2);
+      battleCtx.fill();
+    }
+  }
+  // 🔥 滑動軌跡
+  if(state.swipeTrail&&(nowT-state.swipeTrail.time)<300){
+    const ta=1-(nowT-state.swipeTrail.time)/300;
+    battleCtx.strokeStyle="rgba(255,255,255,"+ta+")";
+    battleCtx.lineWidth=3;
+    battleCtx.shadowColor="rgba(255,255,255,"+ta+")";
+    battleCtx.shadowBlur=10;
+    battleCtx.beginPath();
+    battleCtx.moveTo(state.swipeTrail.x1,state.swipeTrail.y1);
+    battleCtx.lineTo(state.swipeTrail.x2,state.swipeTrail.y2);
+    battleCtx.stroke();
+    battleCtx.shadowBlur=0;
+  }
 }
 
 function drawFighter(ctx,x,y,scale,color,name,hp){
@@ -622,7 +687,7 @@ function startBattle(agentName){
   state.battleBlockDmg = ad.blockDmg ?? 1;
   state.battleCounterDmg = ad.counterDmg ?? 3;
   state.battleHP = ad.hp ?? 10;
-  state.battleTime = ad.battleTime ?? 5;
+  state.battleTime = 10; // 🔥 固定10秒
   state.playerHP=state.playerStats.hp;state.enemyHP=state.battleHP;
   state.battleTimer=state.battleTime;state.battleActive=true;
   state.lastMove=null;state.lastMoveTime=0;
@@ -645,8 +710,10 @@ function startBattle(agentName){
   if(battleAnimFrame) cancelAnimationFrame(battleAnimFrame);
   drawBattleArena();
 
-  if(state.battleInterval) clearInterval(state.battleInterval);
-  state.battleInterval = setInterval(()=>{
+  // 🔥 分離計時器與敵人攻擊排程
+  if(state.battleTimerInterval) clearInterval(state.battleTimerInterval);
+  if(state.enemyAtkInterval) clearInterval(state.enemyAtkInterval);
+  state.battleTimerInterval = setInterval(()=>{
     if(!state.battleActive) return;
     state.battleTimer--;
     battleTimerEl.textContent = state.battleTimer;
@@ -655,17 +722,25 @@ function startBattle(agentName){
     // Enemy AI
     // 🔥 每 atkInterval 秒，以 atkSpeed 機率觸發敵人攻擊
     // 🔥 敵人攻擊命中判定：未反擊則扣血
-    if(state.enemyLastMove&&state.enemyLastMove!=="block"&&(Date.now()-state.enemyLastMoveTime)>1200){state.playerHP-=state.battleNormalDmg;triggerShake();battleLog.textContent="💢 "+state.currentInteractAgent+" 的 "+moveLabel(state.enemyLastMove)+" 擊中了你！(-"+state.battleNormalDmg+")";state.enemyLastMove=null;updateBattleHP();if(state.playerHP<=0){endBattle("lose");return;}}
+    if(state.enemyLastMove&&state.enemyLastMove!=="block"&&(Date.now()-state.enemyLastMoveTime)>1200){state.playerHP-=state.battleNormalDmg;triggerShake("hit");battleLog.textContent="💢 "+state.currentInteractAgent+" 的 "+moveLabel(state.enemyLastMove)+" 擊中了你！(-"+state.battleNormalDmg+")";state.enemyLastMove=null;state.hitFlashTime=Date.now();state.hitFlashSide="player";updateBattleHP();if(state.playerHP<=0){endBattle("lose");return;}}
     if(state.enemyLastMove==="block"&&(Date.now()-state.enemyLastMoveTime)>2000){state.enemyLastMove=null;}
-    if(!state.enemyLastMove&&Math.random()<state.battleAtkSpeed){
-      const moves = ['up','down','left','right','block'];
-      const enemyMove = moves[Math.floor(Math.random()*moves.length)];
-      state.enemyLastMove = enemyMove; state.enemyLastMoveTime = Date.now();
-      if(enemyMove==="block"){battleLog.textContent = "🛡 "+state.currentInteractAgent+" 進入格擋！";}
-      else{battleLog.textContent = "👊 "+state.currentInteractAgent+" 使出 "+moveLabel(enemyMove)+"！快反擊！";}
-    }
+    // 🔥 敵方攻擊由 enemyAtkInterval 排程觸發（已移除機率判斷）
     drawBattleArena();
-  }, state.battleAtkInterval*1000);
+  }, 1000);
+
+  // 🔥 敵人攻擊排程：atkSpeed = 每秒攻擊次數
+  const enemyInterval = Math.max(300, 1000/state.battleAtkSpeed);
+  state.enemyAtkInterval = setInterval(()=>{
+    if(!state.battleActive) return;
+    if(!state.enemyLastMove){
+      const moves = ["up","down","left","right","block"];
+      const enemyMove = moves[Math.floor(Math.random()*moves.length)];
+      state.enemyLastMove = enemyMove;
+      state.enemyLastMoveTime = Date.now();
+      battleLog.textContent = "👊 "+state.currentInteractAgent+" 使出 "+moveLabel(enemyMove)+"！";
+      drawBattleArena();
+    }
+  }, enemyInterval);
 }
 
 function moveLabel(m){return {up:'⬆上攻',down:'⬇下攻',left:'⬅左攻',right:'➡右攻',block:'🛡格擋'}[m]||m;}
@@ -688,17 +763,20 @@ function playerMove(move){
     if(counterMap[move]===state.enemyLastMove){
       // Counter success!
       state.enemyHP -= state.playerStats.counterDmg;
-      battleLog.textContent='⚡ 反擊成功！'+moveLabel(move)+' 剋制 '+moveLabel(state.enemyLastMove)+'！(-'+state.playerStats.counterDmg+')';
-      flashBattle('counter');
+      battleLog.textContent="⚡ 反擊成功！"+moveLabel(move)+" 剋制 "+moveLabel(state.enemyLastMove)+"！(-"+state.playerStats.counterDmg+")";
+      state.hitFlashTime=Date.now();state.hitFlashSide="enemy";state.counterFlashTime=Date.now();
+      flashBattle("counter");
     }else{
       // Normal hit
-      if(state.enemyLastMove==='block'){state.enemyHP-=state.playerStats.blockDmg;battleLog.textContent='💥 擊中格擋！(-'+state.playerStats.blockDmg+')';}
-      else{state.enemyHP-=state.playerStats.normalDmg;battleLog.textContent='💥 '+moveLabel(move)+'！(-'+state.playerStats.normalDmg+')';}
+      if(state.enemyLastMove==="block"){state.enemyHP-=state.playerStats.blockDmg;battleLog.textContent="💥 擊中格擋！(-"+state.playerStats.blockDmg+")";triggerShake("block");state.hitFlashTime=Date.now();state.hitFlashSide="enemy";}
+      else{state.enemyHP-=state.playerStats.normalDmg;battleLog.textContent="💥 "+moveLabel(move)+"！(-"+state.playerStats.normalDmg+")";triggerShake("hit");flashBattle("hit");state.hitFlashTime=Date.now();state.hitFlashSide="enemy";}
     }
     state.enemyLastMove=null;
   }else{
     state.enemyHP -= state.playerStats.normalDmg;
-    battleLog.textContent = '💥 '+moveLabel(move)+'！(-'+state.playerStats.normalDmg+')';
+    battleLog.textContent = "💥 "+moveLabel(move)+"！(-"+state.playerStats.normalDmg+")";
+    triggerShake("hit");flashBattle("hit");
+    state.hitFlashTime=Date.now();state.hitFlashSide="enemy";
   }
 
   state.lastMove=move;state.lastMoveTime=now;
@@ -715,8 +793,8 @@ function playerMove(move){
       const moves=['up','down','left','right'];
       const em=moves[Math.floor(Math.random()*moves.length)];
       const counterMap={up:'down',down:'up',left:'right',right:'left'};
-      if(state.blockHeld){state.playerHP-=state.battleBlockDmg;triggerShake();battleLog.textContent="🛡 格擋敵方攻擊！(-'+state.battleBlockDmg+')";}else if(counterMap[em]===move){state.playerHP-=state.battleCounterDmg;triggerShake();battleLog.textContent="💢 被反擊！(-'+state.battleCounterDmg+')";}
-      else{state.playerHP-=state.battleNormalDmg;triggerShake();battleLog.textContent="💢 "+state.currentInteractAgent+" "+moveLabel(em)+"！(-'+state.battleNormalDmg+')";}
+      if(state.blockHeld){state.playerHP-=state.battleBlockDmg;triggerShake("block");battleLog.textContent="🛡 格擋敵方攻擊！(-"+state.battleBlockDmg+")";state.hitFlashTime=Date.now();state.hitFlashSide="player";}else if(counterMap[em]===move){state.playerHP-=state.battleCounterDmg;triggerShake("counter");flashBattle("counter");battleLog.textContent="💢 被反擊！(-"+state.battleCounterDmg+")";state.hitFlashTime=Date.now();state.hitFlashSide="player";state.counterFlashTime=Date.now();}
+      else{state.playerHP-=state.battleNormalDmg;triggerShake("hit");battleLog.textContent="💢 "+state.currentInteractAgent+" "+moveLabel(em)+"！(-"+state.battleNormalDmg+")";state.hitFlashTime=Date.now();state.hitFlashSide="player";}
       updateBattleHP();drawBattleArena();
       if(state.playerHP<=0) endBattle('lose');
     }
@@ -733,15 +811,26 @@ function updateBattleHP(){
 }
 
 function flashBattle(type){
-  const arena = document.getElementById('battle-arena');
-  if(type==='counter'){arena.style.boxShadow='0 0 120px rgba(0,255,255,0.8)';}
-  else{arena.style.boxShadow='0 0 80px rgba(255,45,120,0.5)';}
-  setTimeout(()=>{arena.style.boxShadow='0 0 80px rgba(255,45,120,0.2)';},300);
+  const arena = document.getElementById("battle-arena");
+  if(type==="counter"){
+    // 🔥 反擊特效：青藍色強烈光芒 + 多段閃爍
+    arena.style.boxShadow = "0 0 160px rgba(0,255,255,0.95), 0 0 60px rgba(0,200,255,0.6) inset";
+    arena.style.borderColor = "#00ffff";
+    setTimeout(()=>{arena.style.boxShadow="0 0 100px rgba(0,255,255,0.4)";},150);
+    setTimeout(()=>{arena.style.boxShadow="0 0 160px rgba(0,255,255,0.9)";},250);
+    setTimeout(()=>{arena.style.boxShadow="0 0 80px rgba(255,45,120,0.2)"; arena.style.borderColor="var(--pink)";},500);
+  }else{
+    arena.style.boxShadow = "0 0 120px rgba(255,45,120,0.7)";
+    arena.style.borderColor = "#ff6688";
+    setTimeout(()=>{arena.style.boxShadow="0 0 80px rgba(255,45,120,0.2)"; arena.style.borderColor="var(--pink)";},300);
+  }
+  // 🔥 震動由 triggerShake 統一處理
 }
 
 function endBattle(result){
   state.battleActive=false;
-  if(state.battleInterval){clearInterval(state.battleInterval);state.battleInterval=null;}
+  if(state.battleTimerInterval){clearInterval(state.battleTimerInterval);state.battleTimerInterval=null;}
+  if(state.enemyAtkInterval){clearInterval(state.enemyAtkInterval);state.enemyAtkInterval=null;}
   battleTimerEl.style.color='var(--gold)';
 
   if(result==='win'){
@@ -936,9 +1025,32 @@ let shakeMagnitude = 0;
 let shakeDuration = 0;
 const shakeMaxDuration = 0.35;
 const shakeMaxMagnitude = 0.6;
-function triggerShake(){
+function triggerShake(type){
   shakeMagnitude = shakeMaxMagnitude;
   shakeDuration = shakeMaxDuration;
+  // 🔥 戰鬥畫面震動（使用 CSS 動畫）
+  const arena = document.getElementById("battle-arena");
+  if(arena){
+    arena.classList.remove("shake");
+    void arena.offsetWidth; // reflow
+    arena.classList.add("shake");
+    setTimeout(()=>arena.classList.remove("shake"),350);
+  }
+  // 🔥 閃光效果（全螢幕紅閃）
+  const overlay = document.getElementById("battle-overlay");
+  if(overlay){
+    if(type==="counter"){
+      overlay.classList.remove("counter-flash");
+      void overlay.offsetWidth;
+      overlay.classList.add("counter-flash");
+      setTimeout(()=>overlay.classList.remove("counter-flash"),200);
+    }else{
+      overlay.classList.remove("hit-flash");
+      void overlay.offsetWidth;
+      overlay.classList.add("hit-flash");
+      setTimeout(()=>overlay.classList.remove("hit-flash"),150);
+    }
+  }
 }
 function animateCamera(target){
   cameraTarget.copy(target);
@@ -1079,7 +1191,7 @@ document.querySelectorAll('.upgrade-btn').forEach(btn=>{
 
 // ============ STORY OVERLAY ============
 function showStory(){
-  storyText.innerHTML='在遙遠的未來，人類創造了擁有自主意識的 AI 村民。<br><br>莫氏集團建立了 <b style="color:#ffd700">莫氏 AI 村莊</b>——一個 AI 與人類共存的和諧社區。<br><br>然而，村莊中並非所有 AI 都友善…有些 AI 因代碼異常而變得具有攻擊性。<br><br>作為莫氏集團的特派員，你的任務是：<b style="color:#00f0ff">與 AI 村民互動、對話交流、並在必要時以格鬥保衛村莊秩序</b>。<br><br>⚔️ <b>戰鬥系統</b>：觀察敵人攻擊方向，打出剋制方向來反擊！<br>💬 <b>對話系統</b>：點擊 AI 村民可進行對話<br>⬆ <b>技能升級</b>：每擊敗一個 AI，獲得 1 點技能點數';
+  storyText.innerHTML=mokagi_storyText;
   storyOverlay.classList.add('show');
 }
 storyStart.addEventListener('click',()=>{
@@ -1151,9 +1263,16 @@ document.addEventListener('keydown',(e)=>{
 
 // ============ TOUCH SWIPE FOR BATTLE ============
 let touchStartX=0,touchStartY=0,touchStartTime=0;
-battleCanvas.addEventListener('touchstart',(e)=>{
+battleCanvas.addEventListener("touchstart",(e)=>{
   if(!state.battleActive) return;
+  state.blockHeld=false; // 🔥 新觸碰釋放格擋
   touchStartX=e.touches[0].clientX;touchStartY=e.touches[0].clientY;touchStartTime=Date.now();
+  state.swipeTrail=null;
+});
+battleCanvas.addEventListener("touchmove",(e)=>{
+  if(!state.battleActive) return;
+  const cx=e.touches[0].clientX, cy=e.touches[0].clientY;
+  state.swipeTrail={x1:touchStartX,y1:touchStartY,x2:cx,y2:cy,time:Date.now()};
 });
 battleCanvas.addEventListener('touchend',(e)=>{
   if(!state.battleActive) return;
@@ -1161,10 +1280,32 @@ battleCanvas.addEventListener('touchend',(e)=>{
   const dy=(e.changedTouches[0]||e.touches[0]).clientY-touchStartY;
   const dt=Date.now()-touchStartTime;
   if(dt>500&&Math.abs(dx)<15&&Math.abs(dy)<15){playerMove('block');return;}
-  if(Math.abs(dx)>Math.abs(dy)){playerMove(dx>0?'right':'left');}
-  else if(Math.abs(dy)>Math.abs(dx)){playerMove(dy>0?'down':'up');}
+  if(Math.abs(dx)>Math.abs(dy)){playerMove(dx>0?'left':'right');}
+  else if(Math.abs(dy)>Math.abs(dx)){playerMove(dy>0?'up':'down');}
 });
 
+// 🔥 桌面滑鼠拖曳支援
+let mouseDown=false,mouseStartX=0,mouseStartY=0,mouseStartTime2=0;
+battleCanvas.addEventListener("mousedown",(e)=>{
+  if(!state.battleActive) return;
+  state.blockHeld=false;
+  mouseDown=true;
+  mouseStartX=e.clientX;mouseStartY=e.clientY;mouseStartTime2=Date.now();
+  state.swipeTrail=null;
+});
+battleCanvas.addEventListener("mousemove",(e)=>{
+  if(!state.battleActive||!mouseDown) return;
+  state.swipeTrail={x1:mouseStartX,y1:mouseStartY,x2:e.clientX,y2:e.clientY,time:Date.now()};
+});
+battleCanvas.addEventListener("mouseup",(e)=>{
+  if(!state.battleActive||!mouseDown) return;
+  mouseDown=false;
+  const dx=e.clientX-mouseStartX, dy=e.clientY-mouseStartY;
+  const dt=Date.now()-mouseStartTime2;
+  if(dt>500&&Math.abs(dx)<15&&Math.abs(dy)<15){playerMove("block");return;}
+  if(Math.abs(dx)>Math.abs(dy)){playerMove(dx>0?"left":"right");}
+  else if(Math.abs(dy)>Math.abs(dx)){playerMove(dy>0?"up":"down");}
+});
 
 // ============ ANIMATION LOOP ============
 const clock = new THREE.Clock();
@@ -1244,12 +1385,12 @@ window.addEventListener('resize',()=>{
   if(state.mode==='battle') drawBattleArena();
 });
 
-// ============ ORBIT HINT ============
+// ============ Welcome Txt ============
 (function(){
   const hint = document.createElement("div");
   hint.id = "orbit-hint";
-  hint.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:30;color:rgba(255,255,255,0.55);font-size:11px;font-family:monospace;pointer-events:none;transition:opacity 1s;text-align:center;text-shadow:0 0 10px rgba(0,240,255,0.4)";
-  hint.textContent = "拖曳旋轉 | 滾輪縮放 | 雙指縮放";
+  hint.style.cssText = "position:fixed;bottom:30%;left:50%;transform:translateX(-50%);z-index:30;color:rgba(255,255,255,0.55);font-size:20px;font-family:monospace;pointer-events:none;transition:opacity 1s;text-align:center;text-shadow:0 0 10px rgba(0,240,255,0.4)";
+  hint.textContent = WelcomeTxt;
   document.body.appendChild(hint);
   setTimeout(function(){ hint.style.opacity = "0"; setTimeout(function(){ hint.remove(); }, 1000); }, 10000);
 })();

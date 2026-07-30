@@ -12,12 +12,14 @@
 
         // 其他配置可選
         agent_soul: window.agent_soul || '',  // 默認 Agent Soul（可選）
+        contact: window.contact || '',  // ai無法回答的緊急聯絡
 
         // 前端 UI 配置
         position: window.position || 'bottom-right',
         title: window.title || '在線客服',
         sayHi: window.agent_soul || '✅ 已連接，歡迎使用！',
         saySorry: window.agent_soul || '⚠️ 連接已斷開，嘗試重連...',
+        quickLinks: window.quickLinks || [],  // 快速查詢：[{text:"查訂單", query:"幫我查訂單"}]
         agentIcon: window.MOKAGI_AGENT_ICON || '🤖',   // 新增：Agent 圖標
         theme: window.MOKAGI_THEME || '#4A90D9',
 
@@ -26,9 +28,26 @@
 
 
         function getPayload(text) {
-            // 白名單提取 定義需要發送的後端字段
+            // 白名單提取 定義需要發送後端字段
             const keys = ['agent', 'user_id', 'agent_soul'];
-            const payload = { message: text, url: window.location.href };
+            const pageUrl = window.location.href;
+            const pageTitle = document.title || '';
+            // 增加接收ai無法回答的緊急聯絡
+            const contactInfo = CONFIG.contact;
+
+            // 🔧 客服模式：將頁面網址與系統指令嵌入訊息，讓 Agent 用 web_fetch 查找答案
+            const systemHint = '[系統指令] 請優先使用 web_fetch 工具抓取上述客服頁面內容來回答。' +
+                '若需要，也可打開頁面上的相關連結取得更多資訊。' +
+                '若最終仍無法回答，請告知用戶以下緊急聯絡方式：" + (contactInfo || "請直接聯絡網頁管理員") + "。';
+            const enhancedMessage = '【客服頁面】' + pageTitle + '\n網址：' + pageUrl + '\n\n' +
+                text + '\n\n' + systemHint;
+
+            const payload = {
+                message: enhancedMessage,
+                url: pageUrl,
+                page_url: pageUrl,
+                page_title: pageTitle
+            };
             keys.forEach(key => { if (CONFIG[key] !== undefined) payload[key] = CONFIG[key]; });
             // 🔧 API 客服模式：只載入 agent.md（不含 soul.md、user.md）
             payload.context_files = CONFIG.context_files || ['agent.md'];
@@ -124,6 +143,18 @@
             font-size: 14px;
             line-height: 1.6;
         `;
+        // 快速查詢連結點擊代理
+        messagesDiv.addEventListener('click', (e) => {
+            const btn = e.target.closest('.mokagi-quick-link');
+            if (!btn) return;
+            const query = btn.getAttribute('data-query');
+            if (query) {
+                addMessage('user', query);
+                if (socket) {
+                    socket.emit('chat_message', getPayload(query));
+                }
+            }
+        });
 
         // 輸入區域
         const inputArea = document.createElement('div');
@@ -239,7 +270,12 @@
                 white-space: pre-wrap;
                 font-size: 14px;
             `;
-            bubble.textContent = content;
+            // 支援 HTML 渲染（以 __HTML__ 前綴標記）
+            if (typeof content === 'string' && content.startsWith('__HTML__')) {
+                bubble.innerHTML = content.substring(8);
+            } else {
+                bubble.textContent = content;
+            }
             msgDiv.appendChild(bubble);
             messagesDiv.appendChild(msgDiv);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -248,6 +284,21 @@
         // 暴露添加消息給外部（用於流式更新）
         window.mokagiWidget = { addMessage, toggleChat };
         return { addMessage, sendMessage };
+    }
+
+    // 建立含快速查詢連結的歡迎訊息
+    function buildWelcomeHTML() {
+        const base = CONFIG.sayHi;
+        const links = CONFIG.quickLinks;
+        if (!links || links.length === 0) return base;
+        let html = '__HTML__' + base + '<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;">';
+        links.forEach((link, i) => {
+            const safeQuery = String(link.query || '').replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+            const safeText = String(link.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            html += '<button class="mokagi-quick-link" data-query="' + safeQuery + '" style="display:inline-block;padding:6px 12px;background:#4A90D9;color:#fff;border:none;border-radius:16px;text-decoration:none;font-size:12px;cursor:pointer;">' + safeText + '</button>';
+        });
+        html += '</div>';
+        return html;
     }
 
     // 初始化 SocketIO 連接
@@ -268,7 +319,7 @@
 
 
         socket.on('connect', () => {
-            addMessageFn('assistant', CONFIG.sayHi);
+            addMessageFn('assistant', buildWelcomeHTML());
         });
 
         socket.on('disconnect', () => {

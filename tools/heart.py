@@ -54,17 +54,38 @@ def get_agent_dirs() -> List[str]:
     return [os.path.join(base, name) for name in os.listdir(base)
             if os.path.isdir(os.path.join(base, name))]
 
+# ---------- 持久化事件循環 ----------
+_heart_loop = None
+
+def get_heart_loop():
+    """取得心跳線程的持久事件循環（自動修復已關閉的 loop）"""
+    global _heart_loop
+    if _heart_loop is None or _heart_loop.is_closed():
+        _heart_loop = asyncio.new_event_loop()
+    return _heart_loop
+
 # ---------- 核心掃描（執行緒安全） ----------
 def scan_and_execute():
     """同步包裝，在執行緒中執行非同步掃描"""
-    loop = asyncio.new_event_loop()
+    loop = get_heart_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(_async_scan())
+    except RuntimeError as e:
+        if "closed" in str(e).lower():
+            logger.warning("心跳事件循環已關閉，自動重建")
+            global _heart_loop
+            _heart_loop = asyncio.new_event_loop()
+            loop = _heart_loop
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(_async_scan())
+            except Exception as e2:
+                logger.exception("心跳掃描非同步異常（重建後重試失敗）")
+        else:
+            logger.exception("心跳掃描非同步異常")
     except Exception as e:
         logger.exception("心跳掃描非同步異常")
-    finally:
-        loop.close()
 
 async def _async_scan():
     """非同步掃描：遍歷所有 Agents 與已註冊的心跳工具"""
@@ -139,10 +160,17 @@ def start_heart_thread():
     logger.info("❤️ 心跳線程已啟動")
 
 def stop_heart_thread():
+    global _heart_loop
     _heart_stop_event.set()
     if _heart_thread:
-        _heart_thread.join(timeout=2)
+        _heart_thread.join(timeout=10)
         logger.info("心跳線程已停止")
+    if _heart_loop and not _heart_loop.is_closed():
+        try:
+            _heart_loop.close()
+        except Exception:
+            pass
+        _heart_loop = None
 
 # ---------- /heart 管理指令 ----------
 async def handle_heart(args, chat_id: str = None, agent_config: dict = None):
@@ -168,12 +196,7 @@ async def handle_heart(args, chat_id: str = None, agent_config: dict = None):
 
     elif action == "scan":
         # 立即執行一次掃描（非同步）
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            await _async_scan()
-        finally:
-            loop.close()
+        await _async_scan()
         return "✅ 手動掃描完成"
 
     else:
