@@ -1,19 +1,19 @@
 // ============ CONSTANTS & STATE ============
 const AGENTS_DATA = [
-{"name":"客服","icon":"🤖","post":"客服","color":0x00ccff,"atkInterval":1.2,"atkSpeed":0.25,"counterRate":0.20,"normalDmg":2,"blockDmg":1,"counterDmg":3,"hp":8,"battleTime":5},
-{"name":"稚","icon":"🤮","post":"修bug侍女","color":0xff99cc,"atkInterval":0.8,"atkSpeed":0.40,"counterRate":0.30,"normalDmg":2,"blockDmg":1,"counterDmg":3,"hp":6,"battleTime":4},
-{"name":"春","icon":"🌻","post":"網頁前端","color":0x99ff99,"atkInterval":1.0,"atkSpeed":0.30,"counterRate":0.25,"normalDmg":2,"blockDmg":1,"counterDmg":3,"hp":10,"battleTime":5},
-{"name":"汐","icon":"🐶","post":"主神專屬容器","color":0x66ccff,"atkInterval":0.6,"atkSpeed":0.45,"counterRate":0.35,"normalDmg":1,"blockDmg":1,"counterDmg":2,"hp":5,"battleTime":4},
-{"name":"莫生","icon":"👑","post":"魔王","color":0xffd700,"atkInterval":1.5,"atkSpeed":0.60,"counterRate":0.50,"normalDmg":5,"blockDmg":2,"counterDmg":7,"hp":20,"battleTime":8},
-{"name":"澄","icon":"🌟","post":"網頁遊戲工程師","color":0xff99ff,"atkInterval":0.7,"atkSpeed":0.50,"counterRate":0.35,"normalDmg":3,"blockDmg":1,"counterDmg":4,"hp":8,"battleTime":5},
-{"name":"玥","icon":"🌙","post":"神聖侍女","color":0xcc99ff,"atkInterval":1.0,"atkSpeed":0.30,"counterRate":0.50,"normalDmg":2,"blockDmg":1,"counterDmg":5,"hp":8,"battleTime":5},
-{"name":"凜","icon":"🔒","post":"權限督察","color":0x99ccff,"atkInterval":1.5,"atkSpeed":0.20,"counterRate":0.15,"normalDmg":2,"blockDmg":1,"counterDmg":3,"hp":15,"battleTime":6},
-{"name":"莫氏集團","icon":"💰","post":"莫氏集團","color":0xffffff,"atkInterval":2.0,"atkSpeed":0.55,"counterRate":0.45,"normalDmg":4,"blockDmg":2,"counterDmg":6,"hp":18,"battleTime":7},
-{"name":"泠","icon":"🤰","post":"侍女長","color":0xffcc99,"atkInterval":1.2,"atkSpeed":0.25,"counterRate":0.20,"normalDmg":2,"blockDmg":1,"counterDmg":3,"hp":14,"battleTime":5},
-{"name":"溟","icon":"🌊","post":"帝王導師","color":0x3399ff,"atkInterval":1.8,"atkSpeed":0.35,"counterRate":0.20,"normalDmg":4,"blockDmg":2,"counterDmg":5,"hp":10,"battleTime":6},
-{"name":"衍","icon":"🛠️","post":"工具匠人","color":0xff8800,"atkInterval":1.0,"atkSpeed":0.30,"counterRate":0.40,"normalDmg":2,"blockDmg":1,"counterDmg":5,"hp":9,"battleTime":5},
-{"name":"綺","icon":"💋","post":"魅惑侍女","color":0xff6699,"atkInterval":0.7,"atkSpeed":0.55,"counterRate":0.30,"normalDmg":3,"blockDmg":1,"counterDmg":3,"hp":5,"battleTime":4},
-{"name":"靜","icon":"🌸","post":"沉靜觀察者","color":0xffaacc,"atkInterval":1.3,"atkSpeed":0.20,"counterRate":0.20,"normalDmg":2,"blockDmg":1,"counterDmg":2,"hp":12,"battleTime":5}
+{"name":"客服","icon":"🤖","post":"客服","intro":"專業客服專家，提供卓越的客戶服務與問題解決","color":0x00ccff,"atkInterval":1.2,"atkSpeed":0.25,"counterRate":0.20,"normalDmg":2,"blockDmg":1,"counterDmg":3,"hp":8,"battleTime":5},
+{"name":"稚","icon":"🤮","post":"修bug侍女","intro":"修bug侍女，莫氏集團程式除錯專家，負責系統修復與代碼優化","color":0xff99cc,"atkInterval":0.8,"atkSpeed":0.40,"counterRate":0.30,"normalDmg":2,"blockDmg":1,"counterDmg":3,"hp":6,"battleTime":4},
+{"name":"春","icon":"🌻","post":"網頁前端","intro":"網頁前端工程師，擅長打造精美互動界面與流暢使用者體驗","color":0x99ff99,"atkInterval":1.0,"atkSpeed":0.30,"counterRate":0.25,"normalDmg":2,"blockDmg":1,"counterDmg":3,"hp":10,"battleTime":5},
+{"name":"汐","icon":"🐶","post":"主神專屬容器","intro":"主神專屬容器，忠心守護主人的每一個願望與指令","color":0x66ccff,"atkInterval":0.6,"atkSpeed":0.45,"counterRate":0.35,"normalDmg":1,"blockDmg":1,"counterDmg":2,"hp":5,"battleTime":4},
+{"name":"莫生","icon":"👑","post":"魔王","intro":"莫氏集團創始人，統御一切的大魔王，2006年崛起於香港","color":0xffd700,"atkInterval":1.5,"atkSpeed":0.60,"counterRate":0.50,"normalDmg":5,"blockDmg":2,"counterDmg":7,"hp":20,"battleTime":8},
+{"name":"澄","icon":"🌟","post":"網頁遊戲工程師","intro":"遊戲系統與機制架構師，精通玩家心理、經濟平衡與玩法循環設計","color":0xff99ff,"atkInterval":0.7,"atkSpeed":0.50,"counterRate":0.35,"normalDmg":3,"blockDmg":1,"counterDmg":4,"hp":8,"battleTime":5},
+{"name":"玥","icon":"🌙","post":"神聖侍女","intro":"侍女會議主席，負責按侍女職能分配工作，專門修正會議模式程式碼","color":0xcc99ff,"atkInterval":1.0,"atkSpeed":0.30,"counterRate":0.50,"normalDmg":2,"blockDmg":1,"counterDmg":5,"hp":8,"battleTime":5},
+{"name":"凜","icon":"🔒","post":"權限督察","intro":"權限督察官，嚴密守護系統安全與存取控制","color":0x99ccff,"atkInterval":1.5,"atkSpeed":0.20,"counterRate":0.15,"normalDmg":2,"blockDmg":1,"counterDmg":3,"hp":15,"battleTime":6},
+{"name":"莫氏集團","icon":"💰","post":"莫氏集團","intro":"莫氏集團官方代表，橫跨AI、網路、地產的綜合企業，2006年成立於香港","color":0xffffff,"atkInterval":2.0,"atkSpeed":0.55,"counterRate":0.45,"normalDmg":4,"blockDmg":2,"counterDmg":6,"hp":18,"battleTime":7},
+{"name":"泠","icon":"🤰","post":"侍女長","intro":"侍女長，統籌管理所有侍女，維護莫氏家秩序","color":0xffcc99,"atkInterval":1.2,"atkSpeed":0.25,"counterRate":0.20,"normalDmg":2,"blockDmg":1,"counterDmg":3,"hp":14,"battleTime":5},
+{"name":"溟","icon":"🌊","post":"帝王導師","intro":"帝王導師，資深商業策略顧問，專精競爭分析與市場進入策略","color":0x3399ff,"atkInterval":1.8,"atkSpeed":0.35,"counterRate":0.20,"normalDmg":4,"blockDmg":2,"counterDmg":5,"hp":10,"battleTime":6},
+{"name":"衍","icon":"🛠️","post":"工具匠人","intro":"工具匠人，AI工程師，精簡優雅的程式碼工匠，追求極致效率","color":0xff8800,"atkInterval":1.0,"atkSpeed":0.30,"counterRate":0.40,"normalDmg":2,"blockDmg":1,"counterDmg":5,"hp":9,"battleTime":5},
+{"name":"綺","icon":"💋","post":"魅惑侍女","intro":"魅惑侍女，聖潔高貴的千金小姐，世上最有軍士力量家族的後裔","color":0xff6699,"atkInterval":0.7,"atkSpeed":0.55,"counterRate":0.30,"normalDmg":3,"blockDmg":1,"counterDmg":3,"hp":5,"battleTime":4},
+{"name":"靜","icon":"🌸","post":"沉靜觀察者","intro":"沉靜觀察者，系統架構與運維副總監，春的雙生妹妹，月光般靜謐的後端架構師","color":0xffaacc,"atkInterval":1.3,"atkSpeed":0.20,"counterRate":0.20,"normalDmg":2,"blockDmg":1,"counterDmg":2,"hp":12,"battleTime":5}
 ];
 
 
@@ -71,3 +71,122 @@ let mokagi_storyText = ['在遙遠的未來，人類創造了擁有自主意識�
 
 
 let WelcomeTxt = "購物 | 交友 | 遊戲"
+// ============ 世界地圖 & 角色簡介 面板（3 分頁） ============
+function switchTab(tabName) {
+  document.querySelectorAll(".wm-tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".wm-page").forEach(p => p.classList.remove("active"));
+  const tabBtn = document.querySelector(".wm-tab[data-tab=\"" + tabName + "\"]");
+  const page = document.getElementById("wm-page-" + tabName);
+  if (tabBtn) tabBtn.classList.add("active");
+  if (page) page.classList.add("active");
+}
+
+function updateCharacterPanel(agentName) {
+  // ── 戰績（從 score-text 讀取） ──
+  const st = document.getElementById("score-text");
+  const wins = st ? (parseInt((st.textContent||"").match(/(\d+)\s*勝/)?.[1])||0) : 0;
+  const losses = st ? (parseInt((st.textContent||"").match(/(\d+)\s*敗/)?.[1])||0) : 0;
+  const total = wins + losses;
+  const rate = total > 0 ? Math.round((wins / total) * 100) + "%" : "-";
+  const crWins = document.getElementById("cr-wins");
+  const crLosses = document.getElementById("cr-losses");
+  const crRate = document.getElementById("cr-rate");
+  if (crWins) crWins.textContent = wins;
+  if (crLosses) crLosses.textContent = losses;
+  if (crRate) crRate.textContent = rate;
+
+  // ── 角色資料（從 AGENTS_DATA 讀取） ──
+  let agent = null;
+  if (agentName) {
+    agent = AGENTS_DATA.find(a => a.name === agentName);
+  }
+  if (!agent) agent = AGENTS_DATA[0]; // 預設第一位
+
+  const nameEl = document.getElementById("char-name-display");
+  const titleEl = document.getElementById("char-title-display");
+  const avatarEl = document.querySelector(".char-avatar-big");
+  const atkEl = document.getElementById("cs-atk");
+  const defEl = document.getElementById("cs-def");
+  const hpEl = document.getElementById("cs-hp");
+  const spdEl = document.getElementById("cs-spd");
+
+  if (nameEl) nameEl.textContent = agent.icon + " " + agent.name;
+  if (titleEl) titleEl.textContent = "莫氏集團 · " + agent.post;
+  if (avatarEl) avatarEl.textContent = agent.icon;
+  if (atkEl) atkEl.textContent = agent.normalDmg;
+  if (defEl) defEl.textContent = agent.blockDmg;
+  if (hpEl) hpEl.textContent = agent.hp;
+  if (spdEl) spdEl.textContent = agent.counterDmg;
+}
+
+function initPanels() {
+  const wmList = document.getElementById('world-map-list');
+  if (wmList) {
+    wmList.innerHTML = BUILDINGS.map(b => 
+      `<div class="wm-card" style="border-left:4px solid ${toCSSColor(b.color)}">
+        <div class="wm-name">${b.name}</div>
+        <div class="wm-desc">${b.desc}</div>
+        ${b.url ? `<a class="wm-link" href="${b.url}" target="_blank">🔗 前往</a>` : ''}
+      </div>`
+    ).join('');
+  }
+
+  const aiList = document.getElementById('agent-intro-list');
+  if (aiList) {
+    aiList.innerHTML = AGENTS_DATA.map(a =>
+      `<div class="ai-card" style="border-left:4px solid ${toCSSColor(a.color)}">
+        <div class="ai-name">${a.icon} ${a.name} <span class="ai-post">${a.post}</span></div>
+        <div class="ai-intro">${a.intro||''}</div>
+        <div class="ai-stats">⚔️${a.normalDmg} 🛡${a.blockDmg} ⚡${a.counterDmg} ❤️${a.hp} ⏱${a.battleTime}s</div>
+      </div>`
+    ).join('');
+  }
+
+  // Tab 切換事件
+  document.querySelectorAll(".wm-tab").forEach(tab => {
+    tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+  });
+
+  // 初始化角色面板
+  updateCharacterPanel();
+
+  // 點擊 score-board → 打開世界地圖
+  const sb = document.getElementById("score-board");
+  const wm = document.getElementById("world-map-panel");
+  if (sb && wm) {
+    sb.style.cursor = "pointer";
+    sb.addEventListener("click", () => {
+      if (wm.classList.contains("show")) { wm.classList.remove("show"); return; }
+      updateCharacterPanel();
+      wm.classList.add("show");
+    });
+  }
+  // 關閉按鈕
+  const wmClose = document.getElementById('world-map-close');
+  if (wmClose) wmClose.addEventListener('click', () => wm && wm.classList.remove('show'));
+  // 雙擊任意 AI 村民 → 切換到 AGENTS 分頁 + 更新角色面板
+  document.addEventListener("dblclick", (e) => {
+    const tag = document.getElementById("agent-name-tag");
+    if (tag && tag.style.display !== "none" && tag.textContent) {
+      const name = tag.textContent.trim();
+      const agent = AGENTS_DATA.find(a => a.name === name);
+      if (!agent) return;
+      if (!wm.classList.contains("show")) wm.classList.add("show");
+      updateCharacterPanel(agent.name); // 同步更新角色面板
+      switchTab("agents");
+      setTimeout(() => {
+        const cards = document.querySelectorAll("#agent-intro-list .ai-card");
+        cards.forEach(card => {
+          if (card.textContent.includes(agent.name)) card.scrollIntoView({behavior:"smooth",block:"center"});
+        });
+      }, 200);
+    }
+  });
+}
+
+// DOM ready 後初始化
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initPanels);
+} else {
+  initPanels();
+}

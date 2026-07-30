@@ -1396,11 +1396,11 @@ async function sendUserMessage(content) {
         streamContainer.style.cssText = 'display:flex; flex-shrink:0; height:35%; min-height:180px; max-height:45vh; border-top:1px solid #3e3e42; background:#1e1e1e; position:relative; overflow:hidden;';
         streamContainer.innerHTML = `
             <div style="display:flex; flex-direction:column; height:100%;">
-                <div id="think-panel" style="flex:1; min-height:0; overflow-y:auto; padding:6px 10px; border-bottom:1px solid #3e3e42; white-space:pre-wrap; word-break:break-word;">
+                <div id="think-panel" style="max-height:30vh; overflow-y:auto; padding:6px 10px; border-bottom:1px solid #3e3e42; white-space:pre-wrap; word-break:break-word;">
                     <div style="font-weight:bold; font-size:0.85rem; color:#a09060; margin-bottom:4px;">💭 思考</div>
                     <div id="think-content" style="font-size:0.9rem; line-height:1.5;"></div>
                 </div>
-                <div id="reply-panel" style="flex:1; min-height:0; overflow-y:auto; padding:6px 10px; white-space:pre-wrap; word-break:break-word;">
+                <div id="reply-panel" style="flex:1; overflow-y:auto; padding:6px 10px; white-space:pre-wrap; word-break:break-word;">
                     <div style="font-weight:bold; font-size:0.9rem; color:#4ec9b0; margin-bottom:4px;">💬 回應</div>
                     <div id="reply-content" style="font-size:0.9rem; line-height:1.5;"></div>
                 </div>
@@ -2928,7 +2928,6 @@ socket.on('chat_stream', (data) => {
         }
         if (currentThinkDiv[agent]) {
             currentThinkDiv[agent].innerText = accumulatedThink[agent];
-            currentThinkDiv[agent].scrollTop = currentThinkDiv[agent].scrollHeight;
         }
     } else if (data.type === 'reply') {
         const subtype = data.subtype || 'normal';
@@ -2974,7 +2973,6 @@ socket.on('chat_stream', (data) => {
                 displayContent = `📋 執行結果\n\n${content}`;
             }
             currentReplyDiv[agent].innerText += displayContent;
-            currentReplyDiv[agent].scrollTop = currentReplyDiv[agent].scrollHeight;
         }
         const assistantMsg = currentReplyDiv[agent]?.closest('.message.assistant');
         if (assistantMsg) {
@@ -4204,10 +4202,7 @@ async function doCreateAgent() {
             const extraMsg = data.agent_md_created ? '\n✅ 角色模板已寫入 soul/agent.md' : '\n📝 已建立空白 soul/agent.md';
             alert(data.message + extraMsg);
             hideCreateAgentModal();
-            // idx|新增agent後直接打開對話框，不需整頁reload|20260730235000
-            agentList.push({ name: name, file: "." + name, post: "", last_active: Date.now() / 1000 });
-            renderAgentList();
-            activateAgent(name);
+            location.reload();
         } else {
             alert('❌ ' + data.message);
         }

@@ -48,7 +48,47 @@
 <div id="agent-name-tag"></div>
 <div id="agent-info-tag"></div>
 <div id="building-tooltip"></div>
-<div id="score-board">🏆 戰績<br><span id="score-text">0 勝 0 敗</span></div>
+<div id="score-board">🏆 格鬥競技場<br><span id="score-text">0 勝 0 敗</span><br><small style="color:#aaa;font-size:12px">點擊查看世界地圖</small></div>
+
+<!-- 世界地圖面板（3 分頁） -->
+<div id="world-map-panel">
+  <div id="world-map-header">
+    <div class="wm-tabs">
+      <button class="wm-tab active" data-tab="buildings">🏛️ 建築說明</button>
+      <button class="wm-tab" data-tab="character">🎭 玩家資料</button>
+      <button class="wm-tab" data-tab="agents">📋 AGENTS簡介</button>
+    </div>
+    <span id="world-map-close">✕</span>
+  </div>
+  <div id="world-map-body">
+    <div class="wm-page active" id="wm-page-buildings">
+      <div id="world-map-list"></div>
+    </div>
+    <div class="wm-page" id="wm-page-character">
+      <div id="character-content">
+        <div class="char-hero">
+          <div class="char-avatar-big">🧑</div>
+          <div class="char-name-big" id="char-name-display">冒險者</div>
+          <div class="char-title" id="char-title-display">莫氏集團 · 見習成員</div>
+        </div>
+        <div class="char-stats-grid">
+          <div class="char-stat"><span class="cs-label">⚔️ 攻擊力</span><span class="cs-val" id="cs-atk">2</span></div>
+          <div class="char-stat"><span class="cs-label">🛡️ 防禦力</span><span class="cs-val" id="cs-def">1</span></div>
+          <div class="char-stat"><span class="cs-label">❤️ 生命值</span><span class="cs-val" id="cs-hp">10</span></div>
+          <div class="char-stat"><span class="cs-label">⚡ 速度</span><span class="cs-val" id="cs-spd">5</span></div>
+        </div>
+        <div class="char-record">
+          <div class="cr-item win">🏆 <span id="cr-wins">0</span> 勝</div>
+          <div class="cr-item lose">💀 <span id="cr-losses">0</span> 敗</div>
+          <div class="cr-item rate">📊 勝率 <span id="cr-rate">-</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="wm-page" id="wm-page-agents">
+      <div id="agent-intro-list"></div>
+    </div>
+  </div>
+</div>
 
 <!-- 互動選單 -->
 <div id="interact-menu">

@@ -332,7 +332,6 @@
         .message.user .message-bubble { background: #0f4c5c; }
         /* === 舊 assistant 訊息 → 模擬 streaming 輸出樣式 === */
         .message.assistant .message-bubble {
-            height: 80vh;
             max-height: 80vh;
             display: flex;
             flex-direction: column;
@@ -340,29 +339,30 @@
             background: #1e1e1e;
             border: 1px solid #3e3e42;
             border-radius: 12px;
-            overflow: hidden;
+            overflow-y: auto;
             position: relative;
         }
         .assistant-stream {
             display: flex;
-            flex-direction: column;
-            height: 100%;
+            flex-direction: row;
             min-height: 0;
             overflow: hidden;
         }
         .assistant-think-panel {
-            flex: 0 0 40%;
+            flex: 1;
             min-height: 0;
+            min-width: 0;
             overflow-y: auto;
             padding: 8px 12px;
-            border-bottom: 1px solid #3e3e42;
+            border-right: 1px solid #3e3e42;
             white-space: pre-wrap;
             word-break: break-word;
             background: #1e1e18;
         }
         .assistant-reply-panel {
-            flex: 1 1 40%;
+            flex: 1;
             min-height: 0;
+            min-width: 0;
             overflow-y: auto;
             padding: 8px 12px;
             white-space: pre-wrap;

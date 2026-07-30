@@ -1,6 +1,6 @@
 :root{--cyan:#00f0ff;--pink:#ff2d78;--gold:#ffd700;--dark:#0a0a12;--panel:rgba(10,15,25,0.92);--glass:rgba(0,20,30,0.7)}
 *{margin:0;padding:0;box-sizing:border-box}
-body{overflow:hidden;background:#000;font-family:'Courier New','微軟正黑體','Noto Sans TC',monospace;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+body{overflow:hidden;background:#000;font-size:18px;font-family:'Courier New','微軟正黑體','Noto Sans TC',monospace;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 #three-canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;touch-action:pan-x pan-y pinch-zoom}
 #start-overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:50;pointer-events:all}
 #start-overlay .zone{position:absolute;z-index:51;transition:background 0.3s}
@@ -51,10 +51,10 @@ body{overflow:hidden;background:#000;font-family:'Courier New','微軟正黑體'
 .chat-msg.agent{align-self:flex-start;background:rgba(30,30,40,0.85);color:#f0f0f0;border-bottom-left-radius:4px}
 .chat-msg .think{font-size:0.9rem;color:#777;font-style:italic;margin-bottom:5px;padding:5px 10px;background:rgba(0,0,0,0.3);border-radius:6px;border-left:2px solid var(--cyan)}
 @keyframes msgIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-#chat-loading{display:none;color:#666;font-size:15px;padding:4px 16px;letter-spacing:2px;z-index:1}
+#chat-loading{display:none;color:#666;font-size:18px;padding:4px 16px;letter-spacing:2px;z-index:1}
 #chat-loading.show{display:block}
 #chat-input-area{display:flex;gap:8px;padding:10px 14px;border-top:1px solid rgba(0,255,255,0.15);z-index:1}
-#chat-input{flex:1;padding:10px 14px;background:rgba(0,0,0,0.4);border:1px solid rgba(0,255,255,0.3);border-radius:20px;color:#fff;font-family:'Courier New',monospace;font-size:17px;outline:none}
+#chat-input{flex:1;padding:10px 14px;background:rgba(0,0,0,0.4);border:1px solid rgba(0,255,255,0.3);border-radius:20px;color:#fff;font-family:'Courier New',monospace;font-size:20px;outline:none}
 #chat-input:focus{border-color:var(--cyan)}
 #chat-send{padding:10px 20px;background:rgba(0,255,255,0.15);border:1px solid var(--cyan);color:var(--cyan);border-radius:20px;cursor:pointer;font-family:'Courier New',monospace;transition:all 0.3s}
 #chat-send:hover{background:rgba(0,255,255,0.3)}
@@ -68,9 +68,9 @@ body{overflow:hidden;background:#000;font-family:'Courier New','微軟正黑體'
 .battle-hp-fill.player{background:linear-gradient(90deg,var(--cyan),#00ff88)}
 .battle-hp-fill.enemy{background:linear-gradient(90deg,var(--pink),#ff6600)}
 .battle-name{color:#fff;font-size:16px;letter-spacing:2px;text-align:center;min-width:60px}
-.battle-timer{color:var(--gold);font-size:28px;letter-spacing:3px;text-shadow:0 0 15px var(--gold)}
-#battle-log{color:#aaa;font-size:15px;letter-spacing:1px;text-align:center;margin-top:10px;min-height:20px}
-#battle-swipe-hint{color:rgba(255,255,255,0.5);font-size:12px;text-align:center;margin-top:8px;letter-spacing:1px;animation:hintPulse 2s ease-in-out infinite}
+.battle-timer{color:var(--gold);font-size:36px;letter-spacing:3px;text-shadow:0 0 15px var(--gold)}
+#battle-log{color:#aaa;font-size:18px;letter-spacing:1px;text-align:center;margin-top:10px;min-height:20px}
+#battle-swipe-hint{color:rgba(255,255,255,0.5);font-size:14px;text-align:center;margin-top:8px;letter-spacing:1px;animation:hintPulse 2s ease-in-out infinite}
 @keyframes hintPulse{0%,100%{opacity:0.4}50%{opacity:0.9}}
 #battle-arena.shake{animation:arenaShake 0.3s ease-out}
 @keyframes arenaShake{0%{transform:translate(6px,-4px)}20%{transform:translate(-5px,3px)}40%{transform:translate(3px,-2px)}60%{transform:translate(-2px,2px)}80%{transform:translate(1px,-1px)}100%{transform:translate(0,0)}}
@@ -96,7 +96,7 @@ body{overflow:hidden;background:#000;font-family:'Courier New','微軟正黑體'
 .interact-btn.fight:hover{background:rgba(255,45,120,0.15)}
 .interact-btn.race{border-color:#ff8c00;color:#ff8c00;text-decoration:none}
 .interact-btn.race:hover{background:rgba(255,140,0,0.15);box-shadow:0 0 20px rgba(255,140,0,0.35)}
-#score-board{display:none;position:fixed;top:80px;right:16px;z-index:25;background:var(--panel);border:1px solid var(--gold);border-radius:10px;padding:12px 16px;color:var(--gold);font-size:15px;letter-spacing:2px;backdrop-filter:blur(8px)}
+#score-board{display:none;position:fixed;top:80px;right:16px;z-index:25;background:var(--panel);border:1px solid var(--gold);border-radius:10px;padding:14px 20px;color:var(--gold);font-size:20px;letter-spacing:2px;backdrop-filter:blur(8px);cursor:pointer}
 #score-board.show{display:block}
 @media(max-width:600px){
 .menu-btn{padding:12px 30px;font-size:16px;min-width:180px}
@@ -107,9 +107,9 @@ body{overflow:hidden;background:#000;font-family:'Courier New','微軟正黑體'
 /* === 升級面板 === */
 #upgrade-panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--panel);border:2px solid var(--gold);border-radius:16px;padding:24px;text-align:center;display:none;min-width:280px;backdrop-filter:blur(10px)}
 #upgrade-panel.show{display:block;animation:fadeIn 0.3s}
-#upgrade-title{font-size:22px;color:var(--gold);font-weight:bold;margin-bottom:8px}
-#upgrade-points{font-size:16px;color:var(--cyan);margin-bottom:16px}
-.upgrade-btn{display:block;width:100%;padding:10px;margin:6px 0;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:8px;cursor:pointer;font-size:15px;transition:all 0.2s;text-align:left}
+#upgrade-title{font-size:26px;color:var(--gold);font-weight:bold;margin-bottom:8px}
+#upgrade-points{font-size:20px;color:var(--cyan);margin-bottom:16px}
+.upgrade-btn{display:block;width:100%;padding:12px;margin:6px 0;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:8px;cursor:pointer;font-size:18px;transition:all 0.2s;text-align:left}
 .upgrade-btn:hover{background:rgba(255,215,0,0.15);border-color:var(--gold)}
 .upgrade-btn:active{transform:scale(0.97)}
 .upgrade-btn .upgrade-val{float:right;color:var(--gold)}
@@ -118,14 +118,14 @@ body{overflow:hidden;background:#000;font-family:'Courier New','微軟正黑體'
 /* === 故事面板 === */
 #story-overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:180;background:rgba(0,0,0,0.85);display:none;justify-content:center;align-items:center}
 #story-overlay.show{display:flex;animation:fadeIn 0.5s}
-#story-box{background:var(--panel);border:2px solid var(--cyan);border-radius:20px;padding:32px;max-width:500px;text-align:center;backdrop-filter:blur(10px)}
-#story-box h2{color:var(--gold);font-size:26px;margin-bottom:16px}
-#story-box p{color:#ccc;font-size:16px;line-height:1.8;margin-bottom:24px;text-align:left}
-#story-start{padding:12px 32px;background:linear-gradient(135deg,var(--cyan),var(--pink));color:#fff;border:none;border-radius:30px;font-size:18px;cursor:pointer;font-weight:bold;transition:all 0.3s}
+#story-box{background:var(--panel);border:2px solid var(--cyan);border-radius:20px;padding:32px;max-width:500px;max-height:85vh;overflow-y:auto;text-align:center;backdrop-filter:blur(10px)}
+#story-box h2{color:var(--gold);font-size:30px;margin-bottom:16px}
+#story-box p{color:#ccc;font-size:20px;line-height:1.8;margin-bottom:24px;text-align:left}
+#story-start{padding:14px 36px;background:linear-gradient(135deg,var(--cyan),var(--pink));color:#fff;border:none;border-radius:30px;font-size:22px;cursor:pointer;font-weight:bold;transition:all 0.3s}
 #story-start:hover{transform:scale(1.05);box-shadow:0 0 30px rgba(0,240,255,0.3)}
 
 /* === Agent 資訊提示 === */
-#agent-info-tag{position:fixed;z-index:90;background:var(--panel);border:1px solid var(--cyan);border-radius:10px;padding:8px 14px;font-size:13px;color:#fff;pointer-events:none;display:none;white-space:nowrap;backdrop-filter:blur(6px)}
+#agent-info-tag{position:fixed;z-index:90;background:var(--panel);border:1px solid var(--cyan);border-radius:10px;padding:8px 14px;font-size:16px;color:#fff;color:#fff;pointer-events:none;display:none;white-space:nowrap;backdrop-filter:blur(6px)}
 #agent-info-tag.show{display:block}
 #agent-info-tag .ai-name{color:var(--gold);font-weight:bold}
 #agent-info-tag .ai-stat{color:#aaa;margin:0 4px}
@@ -133,3 +133,54 @@ body{overflow:hidden;background:#000;font-family:'Courier New','微軟正黑體'
 @keyframes fadeIn{from{opacity:0;transform:translate(-50%,-48%)}to{opacity:1;transform:translate(-50%,-50%)}}
 #story-overlay.show{animation:fadeIn2 0.5s}
 @keyframes fadeIn2{from{opacity:0}to{opacity:1}}
+
+/* === 世界地圖面板 === */
+#world-map-panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:210;background:var(--panel);border:2px solid var(--cyan);border-radius:16px;padding:0;display:none;min-width:360px;max-width:90vw;max-height:80vh;overflow-y:auto;backdrop-filter:blur(12px)}
+#world-map-panel.show{display:block;animation:fadeIn2 0.3s}
+#world-map-header{position:sticky;top:0;z-index:2;background:rgba(0,20,30,0.95);padding:16px 20px;font-size:22px;color:var(--cyan);border-bottom:1px solid rgba(0,240,255,0.2);display:flex;justify-content:space-between;align-items:center;font-weight:bold}
+#world-map-header span{cursor:pointer;color:#888;font-size:24px;transition:color 0.2s}
+#world-map-header span:hover{color:var(--pink)}
+#world-map-list{padding:12px}
+.wm-card{padding:12px 16px;margin:6px 0;background:rgba(255,255,255,0.03);border-radius:10px;transition:all 0.2s}
+.wm-card:hover{background:rgba(0,240,255,0.08)}
+.wm-name{font-size:18px;color:var(--gold);font-weight:bold;margin-bottom:4px}
+.wm-desc{font-size:15px;color:#ccc;line-height:1.5}
+.wm-link{display:inline-block;margin-top:6px;font-size:14px;color:var(--cyan);text-decoration:none;padding:4px 12px;border:1px solid var(--cyan);border-radius:14px;transition:all 0.2s}
+.wm-link:hover{background:rgba(0,240,255,0.15);box-shadow:0 0 12px rgba(0,240,255,0.3)}
+
+/* === 世界地圖分頁導航 === */
+.wm-tabs{display:flex;gap:4px;padding:0}
+.wm-tab{flex:1;padding:10px 8px;font-size:14px;font-weight:bold;background:rgba(255,255,255,0.04);color:#aaa;border:none;border-bottom:2px solid transparent;cursor:pointer;transition:all 0.2s;font-family:inherit}
+.wm-tab:hover{background:rgba(0,240,255,0.08);color:#fff}
+.wm-tab.active{color:var(--cyan);border-bottom-color:var(--cyan);background:rgba(0,240,255,0.1)}
+.wm-page{display:none;padding:0}
+.wm-page.active{display:block;animation:fadeIn2 0.3s}
+
+/* === 玩家資料面板 === */
+.char-hero{text-align:center;padding:20px 16px 12px}
+.char-avatar-big{font-size:64px;margin-bottom:8px}
+.char-name-big{font-size:24px;color:var(--gold);font-weight:bold}
+.char-title{font-size:15px;color:#aaa;margin-top:4px}
+.char-stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 16px 12px}
+.char-stat{background:rgba(255,255,255,0.04);border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center}
+.cs-label{font-size:14px;color:#aaa}
+.cs-val{font-size:20px;font-weight:bold;color:var(--cyan)}
+.char-record{display:flex;justify-content:space-around;padding:8px 16px 16px;gap:8px}
+.cr-item{font-size:15px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.03);text-align:center;flex:1}
+.cr-item.win{color:#4caf50}
+.cr-item.lose{color:#f44336}
+.cr-item.rate{color:var(--gold)}
+
+/* === 角色簡介面板 === */
+#agent-intro-panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:215;background:var(--panel);border:2px solid var(--pink);border-radius:16px;padding:0;display:none;min-width:360px;max-width:90vw;max-height:80vh;overflow-y:auto;backdrop-filter:blur(12px)}
+#agent-intro-panel.show{display:block;animation:fadeIn2 0.3s}
+#agent-intro-header{position:sticky;top:0;z-index:2;background:rgba(20,10,25,0.95);padding:16px 20px;font-size:22px;color:var(--pink);border-bottom:1px solid rgba(255,45,120,0.2);display:flex;justify-content:space-between;align-items:center;font-weight:bold}
+#agent-intro-header span{cursor:pointer;color:#888;font-size:24px;transition:color 0.2s}
+#agent-intro-header span:hover{color:var(--cyan)}
+#agent-intro-list{padding:12px}
+.ai-card{padding:12px 16px;margin:6px 0;background:rgba(255,255,255,0.03);border-radius:10px;transition:all 0.2s}
+.ai-card:hover{background:rgba(255,45,120,0.06)}
+.ai-name{font-size:18px;color:var(--gold);font-weight:bold;margin-bottom:4px}
+.ai-post{font-size:14px;color:#aaa;font-weight:normal}
+.ai-intro{font-size:15px;color:#ddd;line-height:1.5;margin:6px 0}
+.ai-stats{font-size:14px;color:var(--cyan);letter-spacing:2px;margin-top:4px}
