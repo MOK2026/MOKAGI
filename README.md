@@ -15,12 +15,9 @@
 
 # 需要更新:
 
-    暫時要手動刪除 一個錯誤的 工作流:
-    _job.json
 
 
-    index 輸出是 工具
-    的 全都摺疊顯示
+    index 輸出美化
 
     token 最近調用明細不夠 + 收費
 
@@ -61,12 +58,14 @@
 
     安裝費 = $ 5,000
     使用費 = 
-        10元(每百萬 tokens)
+         $18.00 hkd (每百萬 tokens)
     
     
 # 可用工具:
 
-<img width="739" height="437" alt="image" src="https://github.com/user-attachments/assets/1d93ca05-78f5-4e4c-8f7a-8e9aa8d4f9f9" />
+<img alt="image" src="html/img/1.jpg" />
+<img alt="image" src="html/img/2.jpg" />
+<img alt="image" src="html/img/會議模式.jpg" />
 
 # api 連接:
 
@@ -75,11 +74,11 @@
  - [無人駕駛]()
  - [網頁介紹]()
    
- + [連接你的系統](https://64071881.xyz/mokagi%E9%96%8B%E6%BA%90web%E8%81%8A%E5%A4%A9%E6%8E%A5%E5%8F%A3.html)
+ + [連接你的系統](https://64071881.xyz/project/api)
 
 # 可用 agent:
 
-<img width="280" height="308" alt="image" src="https://github.com/user-attachments/assets/4464e2f3-2e4e-4063-baeb-a670d614bdb9" />
+    客服
 
 
 ================================================
@@ -87,7 +86,7 @@
 
 # MOKAGI — 你的“真實世界”養成遊戲
 
-> update : 202607180221_暫時可用版  
+> update : 2026008011614_暫時可用版  
 
 
 > 這不是一個技術項目。  
@@ -173,9 +172,13 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
     /home/ubuntu/.mok/    # 她的家
     ├── core/             # 遊戲引擎（主程式）
     ├── agent/
-    │   └── <她的名字>/    # 她的專屬空間 
+    │   └── <她的名字>/    # 她的專屬空間
     │      ├── .<她的名字> # 她的個人檔案（模型、鑰匙等）
-    │      ├── soul/      # 👑 靈魂文件 (日常=SOUL.md, 工作=AGENTS.md,...)
+    │      ├── soul/      # 👑 靈魂文件 (
+                                日常(名,性格,語氣..人設)=SOUL.md,
+                                工作(負責範圍,工作流程,...)=AGENTS.md,
+                                用戶(用戶名,用戶習慣,保存路徑...)=user.md
+                                *可擴展*...)
     │      └── jobs/      # 工作目錄
     ├── .memory/          # 她的長期記憶庫
     ├── frontends/        # 聊天窗口（Web + Telegram）
@@ -184,6 +187,23 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
     ├── html/             # Web 界面靜態文件
     └── README.md         # 就是這個文件
 
+## 文件:
+
+    agents/.<agents>
+    agents/<agents>/soul/soul.md = 角色扮演(#工作模式不使用)
+    agents/<agents>/soul/agent.md = 工作風格(#只用在工作模式)
+    agents/<agents>/soul/user.md =  用戶背景(預設加入)
+
+## 文件使用時機:
+
+    多輪工具調用循環 =  無
+    會議模式 = agent.md、user.md
+    api客服模式 = agent.md、user.md
+    個人對話 = agent.md、soul.md、user.md
+    tg對話 = agent.md、soul.md、user.md
+
+
+===
 
 <img width="959" height="539" alt="image" src="https://github.com/user-attachments/assets/2fe7487a-20a3-478e-93cd-819191fbf76d" />
 
