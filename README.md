@@ -65,6 +65,8 @@
 
 <img alt="image" src="html/img/1.jpg" />
 <img alt="image" src="html/img/2.jpg" />
+<img alt="image" src="html/img/3.jpg" />
+<img alt="image" src="html/img/4.jpg" />
 <img alt="image" src="html/img/會議模式.jpg" />
 
 # api 連接:
@@ -204,14 +206,6 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
 
 
 ===
-
-<img width="959" height="539" alt="image" src="https://github.com/user-attachments/assets/2fe7487a-20a3-478e-93cd-819191fbf76d" />
-
-<img width="322" height="479" alt="image" src="https://github.com/user-attachments/assets/63b78888-7777-4716-8efc-f80bec31e759" />
-
-
-
-
 
 
 
