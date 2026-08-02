@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔧 工具控制檯</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Cascadia Code', 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            margin: 0;
+            padding: 16px;
+        }
+        h1 { color: #4ec9b0; display: flex; align-items: center; gap: 10px; }
+        .tool-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 16px;
+            margin-top: 20px;
+        }
+        .tool-card {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            padding: 12px;
+            transition: 0.2s;
+        }
+        .tool-card:hover { border-color: #4ec9b0; }
+        .tool-name {
+            font-weight: bold;
+            color: #4ec9b0;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .tool-desc { color: #aaa; font-size: 0.85rem; margin: 6px 0; }
+        .tool-params {
+            background: #1e1e1e;
+            padding: 8px;
+            border-radius: 4px;
+            margin: 8px 0;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .exec-area {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .exec-area textarea {
+            flex: 1;
+            background: #1e1e1e;
+            border: 1px solid #4ec9b0;
+            border-radius: 4px;
+            color: #d4d4d4;
+            padding: 4px;
+            font-family: inherit;
+            font-size: 0.8rem;
+            resize: vertical;
+            min-height: 40px;
+        }
+        button {
+            background: #4ec9b0;
+            border: none;
+            border-radius: 20px;
+            padding: 4px 16px;
+            font-weight: bold;
+            color: #1e1e1e;
+            cursor: pointer;
+        }
+        button:hover { background: #e0a800; }
+        .result-box {
+            background: #2d2d30;
+            border-radius: 4px;
+            padding: 8px;
+            margin-top: 6px;
+            font-size: 0.8rem;
+            max-height: 150px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .loading { color: #e0a800; }
+        .error { color: #ff6b6b; }
+        .success { color: #69db7c; }
+        .status-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #252526;
+            padding: 4px 16px;
+            border-top: 1px solid #3e3e42;
+            font-size: 0.8rem;
+            color: #aaa;
+            display: flex;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 工具控制檯 <span style="font-size:0.8rem; color:#888;">(獨立於 LLM，直接調用)</span></h1>
+    <div id="toolList" class="tool-grid">加載中...</div>
+    <div class="status-bar">
+        <span id="statusMsg">就緒</span>
+        <span id="toolCount"></span>
+    </div>
+
+    <script>
+        const toolList = document.getElementById('toolList');
+        const statusMsg = document.getElementById('statusMsg');
+        const toolCount = document.getElementById('toolCount');
+
+        // 加載工具列表
+        async function loadTools() {
+            try {
+                const resp = await fetch('/api/tools');
+                const data = await resp.json();
+                renderTools(data.tools);
+            } catch (e) {
+                toolList.innerHTML = `<div class="error">❌ 加載失敗: ${e.message}</div>`;
+            }
+        }
+
+        function renderTools(tools) {
+            if (!tools.length) {
+                toolList.innerHTML = '<div>⚠️ 沒有找到任何工具</div>';
+                return;
+            }
+            toolCount.textContent = `共 ${tools.length} 個工具`;
+            let html = '';
+            tools.forEach(t => {
+                const paramsJson = JSON.stringify(t.parameters || {}, null, 2);
+                html += `
+                    <div class="tool-card" data-name="${t.name}">
+                        <div class="tool-name"><span>${t.icon || '🔧'}</span> ${t.name}</div>
+                        <div class="tool-desc">${t.description || '無描述'}</div>
+                        <div class="tool-params"><strong>參數 schema:</strong> <pre>${paramsJson}</pre></div>
+                        <div class="exec-area">
+                            <textarea placeholder='例如 {"key":"value"}'></textarea>
+                            <button onclick="executeTool(this)">▶ 執行</button>
+                        </div>
+                        <div class="result-box" style="display:none;"></div>
+                    </div>
+                `;
+            });
+            toolList.innerHTML = html;
+        }
+
+        // 執行工具
+        async function executeTool(btn) {
+            const card = btn.closest('.tool-card');
+            const name = card.dataset.name;
+            const input = card.querySelector('textarea');
+            const resultBox = card.querySelector('.result-box');
+            const rawArgs = input.value.trim();
+            let args = {};
+            if (rawArgs) {
+                try {
+                    args = JSON.parse(rawArgs);
+                } catch (e) {
+                    resultBox.style.display = 'block';
+                    resultBox.className = 'result-box error';
+                    resultBox.textContent = `❌ JSON 解析錯誤: ${e.message}`;
+                    return;
+                }
+            }
+
+            resultBox.style.display = 'block';
+            resultBox.className = 'result-box loading';
+            resultBox.textContent = '⏳ 執行中...';
+            statusMsg.textContent = `執行 ${name}...`;
+
+            try {
+                const resp = await fetch('/api/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, arguments: args })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.success) {
+                    resultBox.className = 'result-box success';
+                    resultBox.textContent = `✅ 成功\n${data.result}`;
+                    statusMsg.textContent = `✅ ${name} 執行完成`;
+                } else {
+                    resultBox.className = 'result-box error';
+                    resultBox.textContent = `❌ 執行失敗\n${data.error || '未知錯誤'}`;
+                    statusMsg.textContent = `❌ ${name} 執行失敗`;
+                }
+            } catch (e) {
+                resultBox.className = 'result-box error';
+                resultBox.textContent = `❌ 請求失敗: ${e.message}`;
+                statusMsg.textContent = `❌ 請求失敗`;
+            }
+        }
+
+        // 初始化
+        loadTools();
+    </script>
+</body>
+</html>
