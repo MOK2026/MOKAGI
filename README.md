@@ -63,11 +63,6 @@
     
 # 可用工具:
 
-<img alt="image" src="html/img/1.jpg" />
-<img alt="image" src="html/img/2.jpg" />
-<img alt="image" src="html/img/3.jpg" />
-<img alt="image" src="html/img/4.jpg" />
-<img alt="image" src="html/img/會議模式.jpg" />
 
 # api 連接:
 
@@ -203,6 +198,13 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
     api客服模式 = agent.md、user.md
     個人對話 = agent.md、soul.md、user.md
     tg對話 = agent.md、soul.md、user.md
+
+
+<img alt="image" src="html/img/1.jpg" />
+<img alt="image" src="html/img/2.jpg" />
+<img alt="image" src="html/img/3.jpg" />
+<img alt="image" src="html/img/4.jpg" />
+<img alt="image" src="html/img/會議模式.jpg" />
 
 
 ===
