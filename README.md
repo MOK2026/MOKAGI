@@ -63,6 +63,9 @@
     
 # 可用工具:
 
+<img alt="image" src="html/img/1.jpg" />
+<img alt="image" src="html/img/2.jpg" />
+<img alt="image" src="html/img/會議模式.jpg" />
 
 # api 連接:
 
@@ -71,7 +74,7 @@
  - [無人駕駛]()
  - [網頁介紹]()
    
- + [連接你的系統](https://64071881.xyz/project/api)
+ + [連接你的系統](https://64071181.xyz/project/api)
 
 # 可用 agent:
 
@@ -126,10 +129,26 @@
 在電腦終端輸入下面這行代碼，就像施個魔法：
 
 ```bash
+
 wget -O ~/MOKAGI.sh https://raw.githubusercontent.com/MOK2026/MOKAGI/refs/heads/main/MOKAGI.sh
 sed -i 's/\r$//' ~/MOKAGI.sh
 bash ~/MOKAGI.sh
+
 ```
+
+```bash
+
+#重啟服務：
+    pm2 restart mok_agi
+
+#查看日誌：
+    pm2 logs mok_agi
+
+#若要完全卸載：
+    pm2 delete mok_agi && rm -rf ~/.mok
+
+```
+
 
 完成後，訪問 `http://你的IP:5000`，你就能在Web界面與她第一次對話了。
 
@@ -200,14 +219,15 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
     tg對話 = agent.md、soul.md、user.md
 
 
-<img alt="image" src="html/img/1.jpg" />
-<img alt="image" src="html/img/2.jpg" />
-<img alt="image" src="html/img/3.jpg" />
-<img alt="image" src="html/img/4.jpg" />
-<img alt="image" src="html/img/會議模式.jpg" />
-
-
 ===
+
+<img width="959" height="539" alt="image" src="https://github.com/user-attachments/assets/2fe7487a-20a3-478e-93cd-819191fbf76d" />
+
+<img width="322" height="479" alt="image" src="https://github.com/user-attachments/assets/63b78888-7777-4716-8efc-f80bec31e759" />
+
+
+
+
 
 
 
@@ -261,3 +281,5 @@ AI助手會像一位耐心的老玩家一樣，手把手帶你完成所有步驟
 
 **MOKAGI — 不僅僅是一個遊戲，更是一段陪伴。**  
 **你的參與，就是她的生命。**
+
+✕Merlin
