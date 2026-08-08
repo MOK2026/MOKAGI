@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>🏁 汐の3D主観賽車</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;user-select:none}
+body{overflow:hidden;background:#000;font-family:'Segoe UI',sans-serif;touch-action:manipulation;-webkit-touch-callout:none}
+canvas{display:block}
+
+#hud{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
+
+#speed{position:absolute;bottom:160px;right:20px;text-align:right}
+#speedVal{color:#0ff;font-size:48px;font-weight:900;text-shadow:0 0 30px rgba(0,255,255,.7);font-family:monospace;letter-spacing:2px;line-height:1}
+#unit{color:#8af;font-size:14px;font-family:monospace;opacity:.8}
+
+#dist{position:absolute;top:20px;right:20px;color:#fff;font-size:16px;text-shadow:0 0 15px rgba(255,255,255,.3);font-family:monospace;opacity:.8}
+#score{position:absolute;top:20px;left:20px;color:#ff0;font-size:16px;text-shadow:0 0 15px rgba(255,255,0,.3);font-family:monospace;opacity:.8}
+
+#boostBar{position:absolute;bottom:160px;left:20px;width:10px;height:80px;background:rgba(255,255,255,.1);border-radius:5px;overflow:hidden}
+#boostFill{position:absolute;bottom:0;width:100%;background:linear-gradient(to top,#0ff,#08f);border-radius:5px;transition:height .1s}
+
+#gyroHint{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:14px;background:rgba(0,0,0,.7);padding:8px 16px;border-radius:20px;pointer-events:none;display:none;z-index:20}
+#gyroHint.show{display:block}
+
+/* 控制按鈕區 */
+#ctrls{position:fixed;bottom:0;left:0;width:100%;height:150px;display:flex;align-items:center;justify-content:space-between;padding:0 15px;z-index:15;pointer-events:none}
+#ctrls>*{pointer-events:auto}
+
+.ctrl-btn{border:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;cursor:pointer;transition:transform .05s,box-shadow .05s;-webkit-tap-highlight-color:transparent;outline:none;touch-action:manipulation}
+.ctrl-btn:active,.ctrl-btn.pressed{transform:scale(.9)}
+
+/* 煞車（左） */
+#btnBrake{width:70px;height:70px;background:rgba(255,60,60,.35);border:3px solid rgba(255,80,80,.7);box-shadow:0 0 20px rgba(255,0,0,.3)}
+#btnBrake:active,#btnBrake.pressed{box-shadow:0 0 40px rgba(255,0,0,.7)}
+
+/* 氮氣（右） */
+#btnBoost{width:65px;height:65px;background:rgba(0,180,255,.3);border:3px solid rgba(0,200,255,.6);box-shadow:0 0 20px rgba(0,150,255,.3)}
+#btnBoost:active,#btnBoost.pressed{box-shadow:0 0 40px rgba(0,200,255,.7)}
+
+/* 加速（中央大按鈕） */
+#btnAccel{width:110px;height:110px;background:rgba(0,255,100,.25);border:4px solid rgba(0,255,150,.7);box-shadow:0 0 30px rgba(0,255,100,.4);font-size:28px;flex-shrink:0}
+#btnAccel:active,#btnAccel.pressed{box-shadow:0 0 60px rgba(0,255,150,.8);transform:scale(.88)}
+
+/* 陀螺儀狀態指示 */
+#gyroStatus{position:fixed;top:50px;left:50%;transform:translateX(-50%);color:#0f0;font-size:12px;z-index:20;pointer-events:none;opacity:.7;display:none}
+#gyroStatus.active{display:block}
+
+/* 碰撞畫面 */
+#crash{position:fixed;top:0;left:0;width:100%;height:100%;z-index:100;display:none;justify-content:center;align-items:center;flex-direction:column;background:rgba(0,0,0,.8)}
+#crash.show{display:flex}
+#crash h2{color:#f44;font-size:40px;margin-bottom:10px;text-shadow:0 0 30px red}
+#crash p{color:#fff;font-size:18px;margin:5px 0}
+#crash button{margin-top:20px;padding:12px 40px;font-size:20px;border:none;border-radius:30px;background:#f44;color:#fff;cursor:pointer;pointer-events:auto}
+#crash button:active{background:#c00}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="speed"><span id="speedVal">0</span><br><span id="unit">km/h</span></div>
+  <div id="dist">🏁 <span id="distVal">0</span> m</div>
+  <div id="score">⭐ <span id="scoreVal">0</span></div>
+  <div id="boostBar"><div id="boostFill" style="height:100%"></div></div>
+</div>
+
+<div id="gyroHint">📱 傾斜手機來轉向</div>
+<div id="gyroStatus">陀螺儀: 等待中...</div>
+
+<div id="ctrls">
+  <button id="btnBrake" class="ctrl-btn">🛑</button>
+  <button id="btnAccel" class="ctrl-btn">🏎️</button>
+  <button id="btnBoost" class="ctrl-btn">⚡</button>
+</div>
+
+<div id="crash">
+  <h2> 😈 找到了 😱！</h2>
+  <p>距離: <span id="crashDist">0</span> m</p>
+  <p>分數: <span id="crashScore">0</span>(可增加技能點數)</p>
+  <button id="btnRestart">🔄 看守疏忽 再次逃走 (可獲得新技能)</button>
+  <button id="btnBack">↩ 返回村莊</button>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+
+// ===== 🎮 陀螺儀敏感度（改這裡！）=====
+const GYRO_DEAD_ZONE = 5;    // 死區 ±度（越大越不敏感，手機平放不偏）
+const GYRO_SENSITIVITY = 40; // 靈敏度（傾斜40度=滿轉向，越小越靈敏）
+// ===== 場景 =====
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x112244);
+scene.fog=new THREE.Fog(0x112244,30,120);
+
+const camera=new THREE.PerspectiveCamera(70,window.innerWidth/window.innerHeight,0.3,200);
+camera.position.set(0,2,0);
+camera.lookAt(0,1.5,-30);
+
+// ===== 光源 =====
+const sun=new THREE.DirectionalLight(0xffffff,1.2);
+sun.position.set(20,40,10);
+sun.castShadow=true;
+sun.shadow.mapSize.set(512,512);
+sun.shadow.camera.near=0.5;sun.shadow.camera.far=150;
+sun.shadow.camera.left=-30;sun.shadow.camera.right=30;
+sun.shadow.camera.top=30;sun.shadow.camera.bottom=-30;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0x334466,0.6));
+
+// ===== 道路 =====
+const RW=8, RL=20, SEGS=80, LW=2.8;
+const segs=[];
+const roadTex=new THREE.CanvasTexture((()=>{
+  const c=document.createElement('canvas');c.width=512;c.height=64;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle='#333';ctx.fillRect(0,0,512,64);
+  for(let i=0;i<64;i+=8){ctx.fillStyle=i%16===0?'#555':'#333';ctx.fillRect(0,i,512,8);}
+  ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.setLineDash([30,20]);ctx.beginPath();ctx.moveTo(128,32);ctx.lineTo(384,32);ctx.stroke();
+  ctx.setLineDash([]);ctx.strokeStyle='#ff0';ctx.lineWidth=2;ctx.strokeRect(0,0,512,64);
+  return c;
+})());
+roadTex.wrapS=THREE.RepeatWrapping;roadTex.wrapT=THREE.RepeatWrapping;roadTex.repeat.set(1,1);
+
+const planeGeo=new THREE.PlaneGeometry(RW,RL);
+const planeMat=new THREE.MeshStandardMaterial({map:roadTex,roughness:0.8,side:THREE.DoubleSide});
+for(let i=0;i<SEGS;i++){
+  const p=new THREE.Mesh(planeGeo,planeMat);
+  p.rotation.x=-Math.PI/2;p.position.z=-i*RL;p.receiveShadow=true;
+  scene.add(p);segs.push(p);
+}
+
+// ===== 路邊 =====
+for(let i=0;i<SEGS;i++){
+  const z=-i*RL;
+  for(let side=-1;side<=1;side+=2){
+    const post=new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08,0.08,1.2,6),
+      new THREE.MeshStandardMaterial({color:0x888888,metalness:0.6,roughness:0.4})
+    );
+    post.position.set(side*(RW/2+0.5),0.6,z);post.castShadow=true;scene.add(post);
+    const rail=new THREE.Mesh(
+      new THREE.BoxGeometry(0.06,0.06,RL),
+      new THREE.MeshStandardMaterial({color:0xcccccc,metalness:0.8,roughness:0.2})
+    );
+    rail.position.set(side*(RW/2+0.5),1.1,z);scene.add(rail);
+  }
+}
+
+// ===== 樹木 =====
+const trees=[];
+for(let i=0;i<SEGS*2;i++){
+  const z=-i*(RL*0.5)-Math.random()*10;
+  for(let side=-1;side<=1;side+=2){
+    if(Math.random()<0.5)continue;
+    const x=side*(RW/2+2+Math.random()*15);
+    const g=new THREE.Group();
+    const trunkH=1.5+Math.random()*3;
+    const trunk=new THREE.Mesh(
+      new THREE.CylinderGeometry(0.15,0.2,trunkH,6),
+      new THREE.MeshStandardMaterial({color:0x8B4513,roughness:1})
+    );
+    trunk.position.y=trunkH/2;trunk.castShadow=true;g.add(trunk);
+    for(let j=0;j<3;j++){
+      const foliage=new THREE.Mesh(
+        new THREE.ConeGeometry(0.6+j*0.3,1.2,8),
+        new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(0.25+Math.random()*0.15,0.7,0.2+Math.random()*0.3),roughness:0.9})
+      );
+      foliage.position.y=trunkH+j*0.8;foliage.castShadow=true;g.add(foliage);
+    }
+    g.position.set(x,0,z);scene.add(g);trees.push(g);
+  }
+}
+
+// ===== 交通車 =====
+const traffic=[], cColors=[0xee3333,0x33cc33,0x3366ee,0xeeee33,0xee44ee,0xff8800,0x44dddd,0xdd88ff];
+function mkCar(z,lane){
+  const g=new THREE.Group(), col=cColors[Math.floor(Math.random()*cColors.length)];
+  const b=new THREE.Mesh(new THREE.BoxGeometry(1.5,0.45,2.8),new THREE.MeshStandardMaterial({color:col,roughness:0.3,metalness:0.5}));
+  b.position.y=0.35;b.castShadow=true;g.add(b);
+  const tp=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.3,1.7),new THREE.MeshStandardMaterial({color:0x88ccff,roughness:0.1,metalness:0.7,transparent:true,opacity:0.5}));
+  tp.position.set(0,0.75,-0.2);g.add(tp);
+  const wm=new THREE.MeshStandardMaterial({color:0x222,roughness:1});
+  for(let wx=-1;wx<=1;wx+=2)for(let wz=-1;wz<=1;wz+=2){
+    const w=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.12,8),wm);
+    w.rotation.x=Math.PI/2;w.position.set(wx*0.7,0.22,wz*1.2);g.add(w);
+  }
+  const lm=new THREE.MeshStandardMaterial({color:0xff2200,emissive:0xff0000,emissiveIntensity:0.4});
+  new THREE.Mesh(new THREE.SphereGeometry(0.1,6,6),lm).position.set(0.5,0.35,-1.45);
+  new THREE.Mesh(new THREE.SphereGeometry(0.1,6,6),lm).position.set(-0.5,0.35,-1.45);
+  g.position.set((lane-1)*LW,0,z);
+  return {g,spd:6+Math.random()*14,lane,z};
+}
+for(let i=4;i<SEGS;i+=4){
+  const z=-i*RL-Math.random()*RL, lane=Math.floor(Math.random()*3);
+  const c=mkCar(z,lane);scene.add(c.g);traffic.push(c);
+}
+
+// ===== 遊戲變量 =====
+let spd=0, maxSpd=160, dist=0, score=0, dead=false;
+let off=0, tOff=0, curve=0, tilt=0;
+let boost=100;
+const keys={};
+
+// ===== 陀螺儀 =====
+let gyroEnabled=false, gyroGamma=0, gyroCalibrated=false, gyroCenter=0;
+
+const gyroStatus=document.getElementById('gyroStatus');
+const gyroHint=document.getElementById('gyroHint');
+
+function handleOrientation(e){
+  if(!gyroEnabled) return;
+  const gamma=e.gamma||0; // -90~90, 右傾為正
+  if(!gyroCalibrated){
+    gyroCenter=gamma;
+    gyroCalibrated=true;
+    gyroStatus.textContent='陀螺儀: ✅ 已啟用 (傾斜手機轉向)';
+    gyroHint.classList.remove('show');
+  }
+  gyroGamma=gamma-gyroCenter;
+}
+
+async function enableGyro(){
+  // iOS 需要權限
+  if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+    try{
+      const perm=await DeviceOrientationEvent.requestPermission();
+      if(perm==='granted'){
+        gyroEnabled=true;
+        window.addEventListener('deviceorientation',handleOrientation);
+        gyroStatus.textContent='陀螺儀: ✅ 已啟用';
+        gyroStatus.classList.add('active');
+        gyroHint.classList.add('show');
+        setTimeout(()=>gyroHint.classList.remove('show'),3000);
+      }
+    }catch(e){
+      gyroStatus.textContent='陀螺儀: ❌ 權限被拒';
+      gyroStatus.classList.add('active');
+    }
+  }else if('DeviceOrientationEvent' in window){
+    // Android / 一般瀏覽器
+    gyroEnabled=true;
+    window.addEventListener('deviceorientation',handleOrientation);
+    gyroStatus.textContent='陀螺儀: ✅ 已啟用';
+    gyroStatus.classList.add('active');
+    gyroHint.classList.add('show');
+    setTimeout(()=>gyroHint.classList.remove('show'),3000);
+  }else{
+    gyroStatus.textContent='陀螺儀: ❌ 不支援此裝置';
+    gyroStatus.classList.add('active');
+  }
+}
+
+// 自動嘗試啟用陀螺儀
+enableGyro();
+
+// 也綁定點擊來觸發（iOS 需要使用者手勢）
+document.addEventListener('click',()=>{
+  if(!gyroEnabled) enableGyro();
+},{once:false});
+
+// ===== 鍵盤輸入 =====
+document.addEventListener('keydown',e=>{keys[e.key]=true;if(e.key==='r'||e.key==='R')restart()});
+document.addEventListener('keyup',e=>keys[e.key]=false);
+
+// ===== 虛擬按鈕 =====
+function bindBtn(id,key){
+  const btn=document.getElementById(id);
+  if(!btn) return;
+  btn.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();keys[key]=true;btn.classList.add('pressed');});
+  btn.addEventListener('pointerup',e=>{e.preventDefault();e.stopPropagation();keys[key]=false;btn.classList.remove('pressed');});
+  btn.addEventListener('pointerleave',e=>{keys[key]=false;btn.classList.remove('pressed');});
+  btn.addEventListener('pointercancel',e=>{keys[key]=false;btn.classList.remove('pressed');});
+}
+bindBtn('btnAccel','ArrowUp');
+bindBtn('btnBrake','ArrowDown');
+bindBtn('btnBoost','Shift');
+
+// 陀螺儀控制左右（不綁按鈕，直接讀取 gyroGamma）
+// 但保留鍵盤 ArrowLeft/Right 用於桌面
+
+// ===== 碰撞 =====
+function collide(){
+  if(Math.abs(off)>RW/2-0.6)return true;
+  for(const c of traffic){
+    if(Math.abs(c.z)<2.8){
+      const dx=c.g.position.x-off;
+      if(Math.abs(dx)<1.7)return true;
+    }
+  }
+  return false;
+}
+
+function restart(){
+  spd=0;dist=0;score=0;dead=false;off=0;tOff=0;curve=0;boost=100;
+  // 重新校正陀螺儀中心
+  gyroCalibrated=false;
+  document.getElementById('crash').style.display='none';
+  document.getElementById('crash').classList.remove('show');
+  traffic.forEach((c,i)=>{c.z=-(4+i*4)*RL-Math.random()*RL;c.g.position.z=c.z;c.lane=Math.floor(Math.random()*3);c.g.position.x=(c.lane-1)*LW;c.spd=6+Math.random()*14;});
+}
+
+// 按鈕事件綁定
+document.getElementById("btnRestart").addEventListener("pointerdown",e=>{e.stopPropagation();restart();});
+document.getElementById("btnBack").addEventListener("pointerdown",e=>{e.stopPropagation();location.href="../game/";});
+
+// ===== 更新 =====
+function update(dt){
+  if(dead)return;
+  const boostKey=keys['Shift']||keys['shift'];
+  
+  // 加速
+  if(keys['ArrowUp']){
+    const b=boostKey&&boost>0?1.6:1;
+    spd=Math.min(spd+50*dt*b,maxSpd*(boostKey&&boost>0?1.3:1));
+    if(boostKey&&boost>0)boost=Math.max(0,boost-15*dt);
+  }else if(keys['ArrowDown'])spd=Math.max(spd-80*dt,0);
+  else spd=Math.max(spd-8*dt,0);
+  
+  // 自然回boost
+  if(!boostKey||!keys['ArrowUp'])boost=Math.min(100,boost+5*dt);
+  
+  // 轉向 - 鍵盤 + 陀螺儀
+  const ts=spd>3?12*(1+spd/maxSpd):0;
+  
+  // 陀螺儀控制方向（等比轉向：傾越多轉越多）
+  if(gyroEnabled && gyroCalibrated){
+    const raw=gyroGamma;
+    if(Math.abs(raw)>GYRO_DEAD_ZONE){
+      const steer=(raw>0?1:-1)*Math.min(1, (Math.abs(raw)-GYRO_DEAD_ZONE)/GYRO_SENSITIVITY);
+      tOff+=steer*ts*dt;
+      tilt=Math.max(-0.35, Math.min(0.35, tilt+steer*6*dt));
+    } else {
+      tilt*=0.92;
+    }
+  } else if(keys['ArrowLeft']){
+    tOff-=ts*dt;tilt=Math.max(tilt-6*dt,-0.35);
+  } else if(keys['ArrowRight']){
+    tOff+=ts*dt;tilt=Math.min(tilt+6*dt,0.35);
+  } else {
+    tilt*=0.92;
+  }
+  
+  // 彎道
+  curve+=dt*0.25;
+  tOff+=Math.sin(curve)*6*dt;
+  
+  off+=(tOff-off)*Math.min(1,3*dt);
+  
+  // 移動世界
+  const mv=spd*dt*0.5;
+  dist+=mv;
+  
+  for(const s of segs){
+    s.position.z+=mv;
+    if(s.position.z>RL)s.position.z-=SEGS*RL;
+  }
+  for(const t of trees){
+    t.position.z+=mv;
+    if(t.position.z>RL*2)t.position.z-=SEGS*RL;
+  }
+  for(const c of traffic){
+    c.z+=mv+c.spd*dt*0.3;
+    if(c.z>RL*2){c.z-=SEGS*RL;c.lane=Math.floor(Math.random()*3);c.g.position.x=(c.lane-1)*LW;c.spd=6+Math.random()*14;}
+    c.g.position.z=c.z;
+  }
+  
+  // 相機
+  camera.position.x=off;
+  camera.position.z=0;
+  camera.rotation.z=-tilt*0.4;
+  camera.rotation.y=-off*0.015;
+  camera.position.y=2.0+Math.sin(dist*0.4)*0.015*spd/40;
+  
+  // 碰撞
+  if(collide()){dead=true;
+    document.getElementById('crash').style.display='flex';
+    document.getElementById('crash').classList.add('show');
+    document.getElementById('crashDist').textContent=Math.floor(dist);
+    document.getElementById('crashScore').textContent=Math.floor(score);
+  }
+  
+  // 得分
+  score+=spd*dt*0.08;
+  
+  // HUD
+  document.getElementById('speedVal').textContent=Math.floor(spd);
+  document.getElementById('distVal').textContent=Math.floor(dist);
+  document.getElementById('scoreVal').textContent=Math.floor(score);
+  document.getElementById('boostFill').style.height=Math.floor(boost)+'%';
+}
+
+// ===== 主迴圈 =====
+let last=performance.now();
+function loop(t){
+  requestAnimationFrame(loop);
+  const dt=Math.min((t-last)/1000,0.1);
+  last=t;
+  update(dt);
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(loop);
+
+// ===== 縮放 =====
+window.addEventListener('resize',()=>{
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+});
+</script>
+</body>
+</html>

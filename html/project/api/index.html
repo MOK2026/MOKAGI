@@ -1,0 +1,332 @@
+
+
+<!--
+  MOKAGI 開源 Web 聊天接口 — 使用說明文檔
+  設計目標：最精簡但詳細，給 LLM 看的完整使用說明
+  版本：2026-07-30
+  倉庫：https://github.com/MOK2026/MOKAGI/
+-->
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MOKAGI 開源 Web 聊天接口</title>
+<meta name="description" content="MOKAGI api.js 嵌入說明：一個 script tag 即可為任何網站加上 AI 客服聊天氣泡。在載入 api.js 之前設定 window 全域變數即可自訂 Agent、快速查詢按鈕、主題色。後端透過 Socket.IO 接收 chat_message 事件，欄位包含 message、agent、user_id、url、agent_soul。快速查詢按鈕透過 window.quickLinks 配置，自動在歡迎訊息渲染並代理點擊發送。支援流式回覆 chat_stream 事件。適用於靜態 HTML、CMS、任何網頁。">
+<style>
+/* === 遊戲互動風格：暗黑底 + 霓虹配色 === */
+:root {
+  --bg: #0a0a0f;
+  --card: #12121a;
+  --border: #1e1e30;
+  --text: #c8c8d4;
+  --accent: #00e5a0;
+  --accent2: #5b8def;
+  --warn: #f0c040;
+  --code-bg: #0d0d16;
+  --glow: 0 0 20px rgba(0,229,160,0.15);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "JetBrains Mono", "Noto Sans TC", monospace;
+  line-height: 1.7;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(ellipse at 20% 20%, rgba(0,229,160,0.04) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 80%, rgba(91,141,239,0.04) 0%, transparent 60%);
+}
+.container { max-width: 860px; margin: 0 auto; padding: 30px 20px 60px; }
+
+/* 標題區 */
+.hero {
+  text-align: center; padding: 40px 0 30px;
+  border-bottom: 1px solid var(--border); margin-bottom: 30px;
+}
+.hero h1 {
+  font-size: 2rem; color: #fff; letter-spacing: 2px;
+  text-shadow: 0 0 30px rgba(0,229,160,0.3);
+}
+.hero .sub {
+  color: var(--accent); font-size: 0.9rem; margin-top: 6px;
+}
+.hero .badge {
+  display: inline-block; margin-top: 14px; padding: 4px 14px;
+  background: #1a2a24; border: 1px solid #2a4a3a; border-radius: 20px;
+  font-size: 0.78rem; color: var(--accent);
+}
+
+/* 卡片 */
+.card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 24px; margin-bottom: 20px;
+  transition: box-shadow 0.3s;
+}
+.card:hover { box-shadow: var(--glow); }
+.card h2 {
+  font-size: 1.15rem; color: #fff; margin-bottom: 14px;
+  display: flex; align-items: center; gap: 8px;
+}
+.card h2 .icon { font-size: 1.3rem; }
+.card h3 {
+  color: var(--accent2); font-size: 0.95rem; margin: 16px 0 8px;
+  border-left: 3px solid var(--accent2); padding-left: 10px;
+}
+
+/* 程式碼 */
+pre {
+  background: var(--code-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px; overflow-x: auto;
+  font-size: 0.82rem; line-height: 1.5; margin: 10px 0;
+  position: relative;
+}
+pre code { color: #a8d8c8; }
+pre .cmt { color: #5a7a6a; }
+pre .str { color: #e0c070; }
+pre .key { color: #7eb8da; }
+pre .fn  { color: #c0a0e0; }
+
+/* 表格 */
+table {
+  width: 100%; border-collapse: collapse; margin: 10px 0;
+  font-size: 0.84rem;
+}
+th, td {
+  text-align: left; padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+th { color: var(--accent); font-weight: 600; white-space: nowrap; }
+td:first-child { color: #e0e0f0; font-weight: 500; white-space: nowrap; }
+
+/* 快速連結按鈕展示 */
+.ql-demo {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0;
+}
+.ql-demo button {
+  display: inline-block; padding: 6px 14px;
+  background: linear-gradient(135deg, #1a3a50, #1a2a40);
+  color: #8cd0f0; border: 1px solid #2a4a60; border-radius: 18px;
+  font-size: 0.82rem; cursor: pointer; transition: all 0.2s;
+}
+.ql-demo button:hover {
+  background: linear-gradient(135deg, #2a5a80, #1a3a60);
+  box-shadow: 0 0 12px rgba(91,141,239,0.25);
+  transform: translateY(-1px);
+}
+
+/* 提示 */
+.note {
+  background: #1a1a14; border-left: 3px solid var(--warn);
+  padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 10px 0;
+  font-size: 0.82rem; color: #c8b870;
+}
+
+/* 步驟 */
+.step { counter-reset: step; list-style: none; }
+.step li {
+  counter-increment: step; padding: 6px 0 6px 32px; position: relative;
+}
+.step li::before {
+  content: counter(step);
+  position: absolute; left: 0; top: 6px;
+  width: 22px; height: 22px; line-height: 22px; text-align: center;
+  background: var(--accent); color: #000; border-radius: 50%;
+  font-size: 0.75rem; font-weight: 700;
+}
+
+/* Footer */
+.footer {
+  text-align: center; padding: 20px; color: #555;
+  font-size: 0.78rem; border-top: 1px solid var(--border); margin-top: 20px;
+}
+.footer a { color: var(--accent2); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- ====== 封面 ====== -->
+<div class="hero">
+  <h1>⚡ MOKAGI Web 聊天接口</h1>
+  <div class="sub">一個 script tag，讓任何網站擁有 AI 客服</div>
+  <div class="badge">🔗 github.com/MOK2026/MOKAGI</div>
+</div>
+
+<!-- ====== 快速開始 ====== -->
+<div class="card">
+  <h2><span class="icon">🚀</span> 30 秒嵌入</h2>
+  <p>在 HTML 的 <code>&lt;/body&gt;</code> 前加入這一行：</p>
+  <pre><code>&lt;<span class="key">script</span> <span class="fn">src</span>=<span class="str">"https://64071181.xyz/static/api.js"</span>&gt;&lt;/<span class="key">script</span>&gt;</code></pre>
+  <p style="margin-top:12px;">✅ 完成。頁面右下角會出現 AI 客服氣泡，連接到後端 Agent。</p>
+  <div class="note">⚠️ 後端需運行 <code>mok_web.py</code>（Socket.IO 伺服器）並在 <code>~/.mok/agent/</code> 目錄下配置好 <code>agent.md</code></div>
+</div>
+
+<!-- ====== 配置總覽 ====== -->
+<div class="card">
+  <h2><span class="icon">⚙️</span> 配置項總覽</h2>
+  <p>在 <code>api.js</code> <strong>之前</strong>設定 <code>window</code> 變數即可覆蓋預設值：</p>
+  <table>
+    <tr><th>window 變數</th><th>類型</th><th>預設值</th><th>說明</th></tr>
+    <tr><td><code>MOKAGI_AGENT</code></td><td>string</td><td>"客服"</td><td>Agent 名稱，對應後端 agent 目錄</td></tr>
+    <tr><td><code>MOKAGI_SERVER</code></td><td>string</td><td>當前網域</td><td>Socket.IO 後端地址</td></tr>
+    <tr><td><code>MOKAGI_USER_ID</code></td><td>string</td><td>自動 UUID</td><td>用戶識別（持久存 localStorage）</td></tr>
+    <tr><td><code>MOKAGI_AGENT_ICON</code></td><td>string</td><td>"🤖"</td><td>聊天氣泡圖示</td></tr>
+    <tr><td><code>MOKAGI_THEME</code></td><td>string</td><td>"#4A90D9"</td><td>主題色</td></tr>
+    <tr><td><code>agent_soul</code></td><td>string</td><td>""</td><td>AI 性格提示詞</td></tr>
+    <tr><td><code>contact</code></td><td>string</td><td>""</td><td>AI 無法回答時的緊急聯絡方式</td></tr>
+    <tr><td><code>title</code></td><td>string</td><td>"在線客服"</td><td>聊天窗標題</td></tr>
+    <tr><td><code>position</code></td><td>string</td><td>"bottom-right"</td><td>氣泡位置</td></tr>
+    <tr><td><code>quickLinks</code></td><td>array</td><td>[]</td><td>⭐ 快速查詢按鈕（見下方）</td></tr>
+  </table>
+</div>
+
+<!-- ====== 快速查詢按鈕 ====== -->
+<div class="card">
+  <h2><span class="icon">🔘</span> 快速查詢按鈕 <code style="font-size:0.7rem;color:var(--warn);">window.quickLinks</code></h2>
+  <p>設定一組預設查詢按鈕，自動渲染在歡迎訊息中。使用者點擊即發送對應查詢：</p>
+
+  <h3>📋 設定方式</h3>
+  <pre><code><span class="cmt">&lt;!-- 在 api.js 之前設定 --&gt;</span>
+&lt;<span class="key">script</span>&gt;
+<span class="fn">window</span>.<span class="key">quickLinks</span> = [
+    { <span class="str">text</span>: <span class="str">"📦 查訂單"</span>,   <span class="str">query</span>: <span class="str">"我想查詢訂單狀態"</span> },
+    { <span class="str">text</span>: <span class="str">"🔄 退換貨"</span>,   <span class="str">query</span>: <span class="str">"我想申請退換貨"</span> },
+    { <span class="str">text</span>: <span class="str">"💰 運費查詢"</span>, <span class="str">query</span>: <span class="str">"運費怎麼算？"</span> },
+    { <span class="str">text</span>: <span class="str">"📞 聯絡客服"</span>, <span class="str">query</span>: <span class="str">"我要聯絡客服人員"</span> },
+];
+&lt;/<span class="key">script</span>&gt;
+&lt;<span class="key">script</span> <span class="fn">src</span>=<span class="str">"https://64071181.xyz/static/api.js"</span>&gt;&lt;/<span class="key">script</span>&gt;</code></pre>
+
+  <h3>🎮 即時預覽</h3>
+  <div class="ql-demo">
+    <button>📦 查訂單</button>
+    <button>🔄 退換貨</button>
+    <button>💰 運費查詢</button>
+    <button>📞 聯絡客服</button>
+  </div>
+  <p style="font-size:0.8rem;color:#777;margin-top:8px;">▲ 實際渲染效果：深色圓角按鈕，hover 有霓虹光效</p>
+
+  <h3>🔧 技術實現</h3>
+  <p>api.js 內部透過<strong>事件代理</strong>監聽 <code>.mokagi-quick-link</code> 點擊：</p>
+  <pre><code><span class="cmt">// api.js 第 146-155 行</span>
+<span class="fn">messagesDiv</span>.<span class="key">addEventListener</span>(<span class="str">click</span>, (<span class="fn">e</span>) => {
+    <span class="key">const</span> btn = <span class="fn">e</span>.<span class="fn">target</span>.<span class="key">closest</span>(<span class="str">.mokagi-quick-link</span>);
+    <span class="key">if</span> (!btn) <span class="key">return</span>;
+    <span class="key">const</span> query = btn.<span class="fn">getAttribute</span>(<span class="str">data-query</span>);
+    <span class="key">if</span> (query) {
+        <span class="fn">addMessage</span>(<span class="str">user</span>, query);              <span class="cmt">// 顯示用戶消息</span>
+        <span class="fn">socket</span>.<span class="key">emit</span>(<span class="str">chat_message</span>, <span class="fn">getPayload</span>(query)); <span class="cmt">// 發送到後端</span>
+    }
+});</code></pre>
+</div>
+
+<!-- ====== 完整範例 ====== -->
+<div class="card">
+  <h2><span class="icon">📦</span> 完整嵌入範例</h2>
+  <pre><code>&lt;!DOCTYPE html&gt;
+&lt;<span class="key">html</span>&gt;
+&lt;<span class="key">head</span>&gt;&lt;<span class="key">meta</span> <span class="fn">charset</span>=<span class="str">"UTF-8"</span>&gt;&lt;/<span class="key">head</span>&gt;
+&lt;<span class="key">body</span>&gt;
+  <span class="cmt">&lt;!-- 你的網頁內容 --&gt;</span>
+  &lt;<span class="key">h1</span>&gt;我的商店&lt;/<span class="key">h1</span>&gt;
+
+  <span class="cmt">&lt;!-- 🔧 配置 MOKAGI（必須在 api.js 之前） --&gt;</span>
+  &lt;<span class="key">script</span>&gt;
+    <span class="fn">window</span>.<span class="key">MOKAGI_AGENT</span>      = <span class="str">客服</span>;
+    <span class="fn">window</span>.<span class="key">MOKAGI_SERVER</span>     = <span class="str">https://64071181.xyz</span>;
+    <span class="fn">window</span>.<span class="key">MOKAGI_AGENT_ICON</span> = <span class="str">💬</span>;
+    <span class="fn">window</span>.<span class="key">agent_soul</span>       = <span class="str">你是一位熱情的網店客服，語氣親切。</span>;
+    <span class="fn">window</span>.<span class="key">contact</span>          = <span class="str">客服專線：0800-123-456</span>;
+    <span class="fn">window</span>.<span class="key">quickLinks</span>       = [
+      { <span class="str">text</span>: <span class="str">"📦 查訂單"</span>, <span class="str">query</span>: <span class="str">"我想查詢訂單狀態"</span> },
+      { <span class="str">text</span>: <span class="str">"🔄 退換貨"</span>, <span class="str">query</span>: <span class="str">"退換貨政策是什麼？"</span> },
+    ];
+  &lt;/<span class="key">script</span>&gt;
+
+  <span class="cmt">&lt;!-- 🚀 載入 MOKAGI 聊天組件 --&gt;</span>
+  &lt;<span class="key">script</span> <span class="fn">src</span>=<span class="str">"https://64071181.xyz/static/api.js"</span>&gt;&lt;/<span class="key">script</span>&gt;
+&lt;/<span class="key">body</span>&gt;
+&lt;/<span class="key">html</span>&gt;</code></pre>
+</div>
+
+<!-- ====== 後端介面 ====== -->
+<div class="card">
+  <h2><span class="icon">🔌</span> 後端接口：mok_web.py</h2>
+  <p>前端透過 Socket.IO 發送 <code>chat_message</code> 事件，後端接收以下欄位：</p>
+
+  <table>
+    <tr><th>欄位</th><th>類型</th><th>必填</th><th>說明</th></tr>
+    <tr><td><code>message</code></td><td>string</td><td>✅</td><td>用戶輸入的訊息文字</td></tr>
+    <tr><td><code>agent</code></td><td>string</td><td>✅</td><td>Agent 名稱，對應 ~/.mok/agent/ 目錄</td></tr>
+    <tr><td><code>user_id</code></td><td>string</td><td></td><td>用戶唯一識別碼</td></tr>
+    <tr><td><code>url</code></td><td>string</td><td></td><td>用戶當前頁面網址</td></tr>
+    <tr><td><code>agent_soul</code></td><td>string</td><td></td><td>AI 性格提示詞</td></tr>
+    <tr><td><code>page_url</code></td><td>string</td><td></td><td>頁面網址（備份欄位）</td></tr>
+    <tr><td><code>page_title</code></td><td>string</td><td></td><td>頁面標題（自動抓取 document.title）</td></tr>
+    <tr><td><code>context_files</code></td><td>array</td><td></td><td>上下文檔案列表，預設 ["agent.md"]</td></tr>
+  </table>
+
+  <h3>📡 後端回應事件</h3>
+  <table>
+    <tr><th>事件名</th><th>方向</th><th>說明</th></tr>
+    <tr><td><code>chat_message</code></td><td>前端→後端</td><td>用戶發送訊息</td></tr>
+    <tr><td><code>chat_reply</code></td><td>後端→前端</td><td>AI 完整回覆</td></tr>
+    <tr><td><code>chat_stream</code></td><td>後端→前端</td><td>⭐ AI 流式回覆（type: "reply" 時累積顯示）</td></tr>
+  </table>
+
+  <h3>🐍 後端範例</h3>
+  <pre><code><span class="key">@socketio.on</span>(<span class="str">chat_message</span>)
+<span class="key">def</span> <span class="fn">handle_chat_message</span>(data):
+    user_msg    = data.get(<span class="str">message</span>, <span class="str"></span>).strip()
+    agent_name  = data.get(<span class="str">agent</span>, <span class="str"></span>)
+    user_id     = data.get(<span class="str">user_id</span>)
+    page_url    = data.get(<span class="str">url</span>, <span class="str"></span>)
+    agent_soul  = data.get(<span class="str">agent_soul</span>, <span class="str"></span>)
+
+    <span class="cmt"># 調用 AI 產生回覆...</span>
+    reply = <span class="fn">call_ai_agent</span>(agent_name, user_msg, agent_soul)
+
+    <span class="cmt"># 回傳完整回覆</span>
+    <span class="fn">socketio</span>.<span class="key">emit</span>(<span class="str">chat_reply</span>, {<span class="str">message</span>: reply})
+
+    <span class="cmt"># 或使用流式回覆</span>
+    <span class="key">for</span> chunk <span class="key">in</span> <span class="fn">call_ai_stream</span>(agent_name, user_msg):
+        <span class="fn">socketio</span>.<span class="key">emit</span>(<span class="str">chat_stream</span>, {
+            <span class="str">type</span>: <span class="str">reply</span>,
+            <span class="str">content</span>: chunk
+        })</code></pre>
+</div>
+
+<!-- ====== LLM 使用說明 ====== -->
+<div class="card">
+  <h2><span class="icon">🤖</span> 給 LLM 的使用摘要</h2>
+  <p style="font-size:0.82rem;color:#888;">當用戶問「如何在我的網站嵌入 MOKAGI 聊天」時，以下是最精簡的回答模板：</p>
+
+  <ol class="step">
+    <li>在 <code>&lt;/body&gt;</code> 前加入 <code>&lt;script src="https://64071181.xyz/static/api.js"&gt;&lt;/script&gt;</code></li>
+    <li>（可選）在 api.js 之前設定 <code>window.MOKAGI_AGENT</code> 指定 Agent 名稱</li>
+    <li>（可選）設定 <code>window.quickLinks</code> 陣列加入快速查詢按鈕</li>
+    <li>後端需運行 Socket.IO 伺服器，監聽 <code>chat_message</code> 事件</li>
+    <li>Agent 設定檔放在 <code>~/.mok/agent/&lt;名稱&gt;/agent.md</code></li>
+  </ol>
+
+  <div class="note">💡 api.js 會自動收集 <code>document.title</code>、當前 URL，並包裝成增強訊息發送給後端。</div>
+</div>
+
+<!-- ====== .agent 上傳提示 ====== -->
+<div class="card">
+  <h2><span class="icon">📤</span> Agent 發佈</h2>
+  <p>創建好的 <code>.agent</code> 設定檔可上傳到 MOKAGI 官方平台，讓其他人直接使用你的 Agent：</p>
+  <p style="color:var(--accent);">🔗 上傳入口：<a href="https://github.com/MOK2026/MOKAGI/" target="_blank" style="color:var(--accent2);">github.com/MOK2026/MOKAGI</a></p>
+</div>
+
+<div class="footer">
+  MOKAGI Open Source Project · 
+  <a href="https://64071181.xyz/static/api.js" target="_blank">api.js 直接連結</a> · 
+  <a href="https://github.com/MOK2026/MOKAGI/" target="_blank">GitHub</a>
+</div>
+
+</div>
+</body>
+</html>

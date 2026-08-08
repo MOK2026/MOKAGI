@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MOKAGI 用量帳單</title>
+    <style>
+        :root {
+            --bg: #1e1e2e;
+            --card: #252536;
+            --card2: #2a2a3d;
+            --accent: #4ec9b0;
+            --accent2: #569cd6;
+            --gold: #f0c060;
+            --text: #d4d4d4;
+            --text2: #a0a0b0;
+            --text3: #707088;
+            --border: #3e3e52;
+            --danger: #f44747;
+            --radius: 12px;
+            --shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, 'Segoe UI', 'Noto Sans TC', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        /* ===== Header ===== */
+        .header {
+            background: linear-gradient(135deg, #1a3a3a 0%, #1e2e3a 50%, #1a2a3a 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 24px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            backdrop-filter: blur(10px);
+        }
+        .header-inner {
+            max-width: 960px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .header h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .header h1 .icon { font-size: 1.6rem; }
+        .recharge-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--gold);
+            color: #1a1a2e;
+            padding: 10px 20px;
+            border-radius: 24px;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            box-shadow: 0 2px 8px rgba(240,192,96,0.3);
+        }
+        .recharge-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px rgba(240,192,96,0.45);
+            background: #f5c970;
+        }
+        .recharge-btn .arrow { transition: transform 0.2s; }
+        .recharge-btn:hover .arrow { transform: translateX(3px); }
+
+        /* ===== Main ===== */
+        .main {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 20px 16px 40px;
+        }
+
+        /* ===== Loading / Error ===== */
+        .loading, .error {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text2);
+        }
+        .loading .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error { color: var(--danger); }
+
+        /* ===== Hero Card ===== */
+        .hero-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 28px 24px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow);
+        }
+        .hero-card .label {
+            font-size: 0.85rem;
+            color: var(--text2);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .hero-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: flex-end;
+        }
+        .hero-col { flex: 1; min-width: 180px; }
+        .hero-col.big {
+            flex: 2;
+            min-width: 240px;
+        }
+        .hero-tokens {
+            font-size: 2.6rem;
+            font-weight: 800;
+            color: var(--accent);
+            line-height: 1.1;
+            word-break: break-all;
+        }
+        .hero-cost {
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: var(--gold);
+            line-height: 1.1;
+        }
+        .hero-rate {
+            font-size: 0.8rem;
+            color: var(--text3);
+            margin-top: 4px;
+        }
+        .divider {
+            width: 1px;
+            background: var(--border);
+            align-self: stretch;
+            min-height: 60px;
+        }
+
+        /* ===== Section ===== */
+        .section {
+            margin-bottom: 20px;
+        }
+        .section-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-title .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot.agent { background: #569cd6; }
+        .dot.model { background: #ce9178; }
+        .dot.recent { background: #c586c0; }
+
+        /* ===== Grid Cards ===== */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+        }
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            box-shadow: var(--shadow);
+            transition: transform 0.15s;
+        }
+        .stat-card:hover { transform: translateY(-1px); }
+        .stat-card .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        .stat-card .card-name {
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: #e0e0e0;
+            word-break: break-all;
+        }
+        .stat-card .card-tokens {
+            font-weight: 700;
+            font-size: 1.15rem;
+            color: var(--accent);
+            white-space: nowrap;
+        }
+        .stat-card .card-cost {
+            font-size: 0.85rem;
+            color: var(--gold);
+            font-weight: 600;
+            margin-top: 2px;
+        }
+        .stat-card .card-bar-wrap {
+            margin-top: 10px;
+            height: 4px;
+            background: var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .stat-card .card-bar {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.4s ease;
+        }
+        .bar-teal { background: var(--accent); }
+        .bar-blue { background: var(--accent2); }
+        .bar-gold { background: var(--gold); }
+
+        /* ===== Recent Calls Table (Desktop) ===== */
+        .table-wrap {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }
+        .table-wrap .table-scroll {
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        table.recent-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+            min-width: 750px;
+        }
+        table.recent-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        table.recent-table th {
+            background: #2a2a3d;
+            color: var(--text2);
+            font-weight: 600;
+            padding: 10px 12px;
+            text-align: left;
+            white-space: nowrap;
+            border-bottom: 2px solid var(--border);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        table.recent-table th.right { text-align: right; }
+        table.recent-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #2e2e40;
+            vertical-align: middle;
+        }
+        table.recent-table tbody tr {
+            transition: background 0.15s;
+        }
+        table.recent-table tbody tr:hover {
+            background: #2a2a3d;
+        }
+        table.recent-table .cell-time {
+            color: var(--text2);
+            white-space: nowrap;
+            font-size: 0.78rem;
+        }
+        table.recent-table .cell-agent {
+            font-weight: 600;
+            color: #e0e0e0;
+        }
+        table.recent-table .cell-model {
+            color: var(--text2);
+            font-size: 0.78rem;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        table.recent-table .cell-num {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        table.recent-table .cell-cost {
+            text-align: right;
+            color: var(--gold);
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        /* ===== Recent Calls Mobile Cards ===== */
+        .recent-mobile-list { display: none; }
+
+        .recent-mobile-card {
+            background: var(--card2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 8px;
+        }
+        .recent-mobile-card .rmc-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .recent-mobile-card .rmc-agent {
+            font-weight: 700;
+            color: #e0e0e0;
+            font-size: 0.9rem;
+        }
+        .recent-mobile-card .rmc-time {
+            font-size: 0.72rem;
+            color: var(--text3);
+            white-space: nowrap;
+        }
+        .recent-mobile-card .rmc-model {
+            font-size: 0.75rem;
+            color: var(--text2);
+            margin-bottom: 10px;
+        }
+        .recent-mobile-card .rmc-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 0.8rem;
+            padding: 3px 0;
+        }
+        .recent-mobile-card .rmc-label {
+            color: var(--text3);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .recent-mobile-card .rmc-val {
+            font-weight: 600;
+            color: #e0e0e0;
+            font-variant-numeric: tabular-nums;
+        }
+        .recent-mobile-card .rmc-cost {
+            color: var(--gold);
+            font-weight: 700;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .header { padding: 14px 16px; }
+            .header h1 { font-size: 1.15rem; }
+            .recharge-btn { padding: 8px 16px; font-size: 0.82rem; }
+
+            .main { padding: 12px 10px 30px; }
+
+            .hero-card { padding: 20px 16px; }
+            .hero-tokens { font-size: 2rem; }
+            .hero-cost { font-size: 1.8rem; }
+            .hero-row { gap: 12px; }
+            .divider { display: none; }
+
+            .grid-2 { grid-template-columns: 1fr; }
+
+            /* 手機版隱藏表格，顯示卡片 */
+            .table-wrap .table-scroll { display: none; }
+            .recent-mobile-list { display: block; }
+
+            .section-title { font-size: 0.95rem; }
+        }
+
+        @media (max-width: 400px) {
+            .hero-tokens { font-size: 1.6rem; }
+            .hero-cost { font-size: 1.4rem; }
+            .hero-col { min-width: 130px; }
+            .hero-col.big { min-width: 160px; }
+        }
+
+        /* ===== Empty State ===== */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text2);
+        }
+        .empty-state .empty-icon { font-size: 3rem; margin-bottom: 12px; }
+
+        /* ===== Footer ===== */
+        .footer {
+            text-align: center;
+            padding: 16px;
+            color: var(--text3);
+            font-size: 0.75rem;
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        /* ===== Tabs ===== */
+        .tab-nav {
+            display: flex;
+            gap: 4px;
+            padding: 0 0 14px 0;
+            border-bottom: 2px solid var(--border);
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .tab-btn {
+            padding: 10px 22px;
+            border: none;
+            background: transparent;
+            color: var(--text2);
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.2s;
+            white-space: nowrap;
+            font-family: inherit;
+        }
+        .tab-btn:hover {
+            background: var(--card2);
+            color: var(--text);
+        }
+        .tab-btn.active {
+            background: var(--card);
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .tab-panel {
+            display: none;
+            padding-top: 8px;
+        }
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* ===== Responsive tabs ===== */
+        @media (max-width: 600px) {
+            .tab-nav { gap: 2px; }
+            .tab-btn { padding: 8px 14px; font-size: 0.8rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="header-inner">
+        <h1><span class="icon">📊</span> MOKAGI 用量帳單</h1>
+        <a class="recharge-btn" href="https://64071181.github.io/PayAki/" target="_blank" rel="noopener">
+            💰 充值 <span class="arrow">→</span>
+        </a>
+    </div>
+</div>
+
+<div class="main" id="app">
+    <div class="loading">
+        <div class="spinner"></div>
+        加載中...
+    </div>
+</div>
+
+<div class="footer">
+    MOKAGI · HK$18 / 百萬 token · 數據每 5 分鐘更新
+</div>
+
+<script>
+(async function() {
+    const app = document.getElementById('app');
+    const formatNum = (n) => n.toLocaleString();
+    const MokAgi_Token_Price_HK = 18 / 1_000_000; // 18 HKD per million tokens
+    const formatHKD = (tokens) => {
+        const cost = tokens * MokAgi_Token_Price_HK;
+        if (cost < 0.01) return 'HK$' + cost.toFixed(4);
+        if (cost < 1) return 'HK$' + cost.toFixed(3);
+        return 'HK$' + cost.toFixed(2);
+    };
+
+    function escapeHtml(str) {
+        if (!str) return '-';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    try {
+        const res = await fetch('/api/token_stats');
+        const data = await res.json();
+
+        const totalTokens = data.total_tokens || 0;
+        const totalCost = totalTokens * MokAgi_Token_Price_HK;
+        const maxTokens = Math.max(
+            totalTokens,
+            ...(data.by_agent || []).map(x => x.tokens),
+            ...(data.by_model || []).map(x => x.tokens),
+            1
+        );
+
+        let html = '';
+
+        // ── Hero Card ──
+        html += `
+        <div class="hero-card">
+            <div class="label">📊 累積總用量</div>
+            <div class="hero-row">
+                <div class="hero-col big">
+                    <div class="hero-tokens">${formatNum(totalTokens)}</div>
+                    <div style="font-size:0.85rem;color:var(--text2);">tokens</div>
+                </div>
+                <div class="divider"></div>
+                <div class="hero-col">
+                    <div class="hero-cost">HK$${totalCost.toFixed(2)}</div>
+                    <div class="hero-rate">HK$18 / 百萬 token</div>
+                </div>
+            </div>
+        </div>`
+
+        // ── Tab Navigation ──
+        html += `<div class="tab-nav">
+            <button class="tab-btn active" data-tab="tab-agent">🤖 按 Agent 統計</button>
+            <button class="tab-btn" data-tab="tab-model">🧠 按模型統計</button>
+            <button class="tab-btn" data-tab="tab-recent">🕒 最近調用明細</button>
+            <button class="tab-btn" data-tab="tab-conv">💬 最近對話</button>
+        </div>`
+
+        // ── Tab: Agent ──
+        html += `<div class="tab-panel active" id="tab-agent">`;
+
+        // ── By Agent ──
+        if (data.by_agent && data.by_agent.length) {
+            html += `<div class="section">
+                <div class="grid-2">`;
+            for (const item of data.by_agent) {
+                const pct = totalTokens > 0 ? (item.tokens / maxTokens * 100) : 0;
+                html += `
+                <div class="stat-card">
+                    <div class="card-top">
+                        <span class="card-name">${escapeHtml(item.agent_name)}</span>
+                        <span class="card-tokens">${formatNum(item.tokens)}</span>
+                    </div>
+                    <div class="card-cost">${formatHKD(item.tokens)}</div>
+                    <div class="card-bar-wrap"><div class="card-bar bar-teal" style="width:${pct}%"></div></div>
+                </div>`;
+            }
+            html += `</div></div>`;
+        }
+        html += `</div>`;
+
+        // ── Tab: Model ──
+        html += `<div class="tab-panel" id="tab-model">`;
+
+        // ── By Model ──
+        if (data.by_model && data.by_model.length) {
+            html += `<div class="section">
+                <div class="grid-2">`;
+            for (const item of data.by_model) {
+                const pct = totalTokens > 0 ? (item.tokens / maxTokens * 100) : 0;
+                html += `
+                <div class="stat-card">
+                    <div class="card-top">
+                        <span class="card-name">${escapeHtml(item.model_name || 'unknown')}</span>
+                        <span class="card-tokens">${formatNum(item.tokens)}</span>
+                    </div>
+                    <div class="card-cost">${formatHKD(item.tokens)}</div>
+                    <div class="card-bar-wrap"><div class="card-bar bar-blue" style="width:${pct}%"></div></div>
+                </div>`;
+            }
+            html += `</div></div>`;
+        }
+        html += `</div>`;
+
+        // ── Tab: Recent ──
+        html += `<div class="tab-panel" id="tab-recent">`;
+
+        // ── Recent Calls ──
+        if (data.recent && data.recent.length) {
+            html += `<div class="section">`;
+
+            // Desktop table
+            html += `<div class="table-wrap"><div class="table-scroll">
+                <table class="recent-table">
+                    <thead>
+                        <tr>
+                            <th>時間</th>
+                            <th>Agent</th>
+                            <th>模型</th>
+                            <th class="right">Prompt</th>
+                            <th class="right">生成</th>
+                            <th class="right">總計</th>
+                            <th class="right">費用</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+            for (const row of data.recent) {
+                const time = new Date(row.timestamp * 1000);
+                const timeStr = time.toLocaleDateString('zh-TW', { month:'numeric',day:'numeric' }) + ' ' +
+                                time.toLocaleTimeString('zh-TW', { hour:'2-digit',minute:'2-digit' });
+                const cost = row.total_tokens * MokAgi_Token_Price_HK;
+                html += `
+                        <tr>
+                            <td class="cell-time">${timeStr}</td>
+                            <td class="cell-agent">${escapeHtml(row.agent_name)}</td>
+                            <td class="cell-model" title="${escapeHtml(row.model_name || '')}">${escapeHtml(row.model_name || '-')}</td>
+                            <td class="cell-num">${formatNum(row.prompt_tokens)}</td>
+                            <td class="cell-num">${formatNum(row.completion_tokens)}</td>
+                            <td class="cell-num" style="color:var(--accent);font-weight:700;">${formatNum(row.total_tokens)}</td>
+                            <td class="cell-cost">HK$${cost.toFixed(4)}</td>
+                        </tr>`;
+            }
+            html += `</tbody></table></div></div>`;
+
+            // Mobile cards
+            html += `<div class="recent-mobile-list">`;
+            for (const row of data.recent) {
+                const time = new Date(row.timestamp * 1000);
+                const timeStr = time.toLocaleDateString('zh-TW', { month:'numeric',day:'numeric' }) + ' ' +
+                                time.toLocaleTimeString('zh-TW', { hour:'2-digit',minute:'2-digit' });
+                const cost = row.total_tokens * MokAgi_Token_Price_HK;
+                html += `
+                <div class="recent-mobile-card">
+                    <div class="rmc-top">
+                        <span class="rmc-agent">${escapeHtml(row.agent_name)}</span>
+                        <span class="rmc-time">${timeStr}</span>
+                    </div>
+                    <div class="rmc-model">🧠 ${escapeHtml(row.model_name || 'unknown')}</div>
+                    <div class="rmc-row">
+                        <span class="rmc-label">Prompt</span><span class="rmc-val">${formatNum(row.prompt_tokens)}</span>
+                        <span class="rmc-label">生成</span><span class="rmc-val">${formatNum(row.completion_tokens)}</span>
+                    </div>
+                    <div class="rmc-row" style="border-top:1px solid var(--border); margin-top:4px; padding-top:8px;">
+                        <span class="rmc-label">總計</span>
+                        <span class="rmc-val" style="color:var(--accent);font-size:0.95rem;">${formatNum(row.total_tokens)} tokens</span>
+                        <span class="rmc-cost">HK$${cost.toFixed(4)}</span>
+                    </div>
+                </div>`;
+            }
+            html += `</div></div>`;
+        }
+        html += `</div>`;
+
+        // ── Tab: Conversations ──
+        html += `<div class="tab-panel" id="tab-conv">`;
+
+        // ── Conversations ──
+        if (data.conversations && data.conversations.length) {
+            html += `<div class="section">
+                <div class="grid-2">`;
+            for (const conv of data.conversations) {
+                const time = new Date(conv.time * 1000).toLocaleString('zh-TW');
+                html += `
+                <div class="stat-card">
+                    <div class="card-top">
+                        <span class="card-name">${escapeHtml(conv.agent)}</span>
+                        <span class="card-tokens">${formatNum(conv.tokens)}</span>
+                    </div>
+                    <div class="card-cost">${formatHKD(conv.tokens)}</div>
+                    <div style="font-size:0.72rem;color:var(--text3);margin-top:6px;">${time}</div>
+                </div>`;
+            }
+            html += `</div></div>`;
+        }
+        html += `</div>`;
+
+        // ── Empty ──
+        if (!data.by_agent?.length && !data.by_model?.length && !data.recent?.length && !data.conversations?.length) {
+            html = `
+            <div class="empty-state">
+                <div class="empty-icon">📭</div>
+                <p>暫無用量數據</p>
+                <p style="font-size:0.85rem;color:var(--text3);">開始對話後，用量統計會在這裡顯示</p>
+            </div>`;
+        }
+
+        app.innerHTML = html;
+
+        // ── Tab Switching ──
+        const tabBtns = document.querySelectorAll(".tab-btn");
+        const tabPanels = document.querySelectorAll(".tab-panel");
+        tabBtns.forEach(btn => {
+            btn.addEventListener("click", () => {
+                const target = btn.getAttribute("data-tab");
+                tabBtns.forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                tabPanels.forEach(p => p.classList.remove("active"));
+                const panel = document.getElementById(target);
+                if (panel) panel.classList.add("active");
+            });
+        });
+
+    } catch (err) {
+        console.error(err);
+        app.innerHTML = '<div class="error">❌ 加載用量數據失敗，請確認已連線到 MOKAGI 伺服器</div>';
+    }
+})();
+</script>
+
+</body>
+</html>

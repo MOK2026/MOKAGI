@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>莫氏集團 · 3D多人線上養成格鬥</title>
+<meta name="description" content="莫氏集團 - 3D多人線上養成格鬥遊戲。AI村民互動、格鬥競技！">
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.170.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.170.0/examples/jsm/"}}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/game/style.css">
+</head>
+<body>
+
+<!-- 3D 畫布 -->
+<canvas id="three-canvas"></canvas>
+
+<!-- 開始頁覆蓋層 -->
+<div id="start-overlay">
+  <div class="zone top" data-zone="top"></div>
+  <div class="zone bottom" data-zone="bottom"></div>
+  <div class="zone left" data-zone="left"></div>
+  <div class="zone right" data-zone="right"></div>
+  <div class="zone center" data-zone="center"></div>
+</div>
+
+<!-- 智能快捷鍵 -->
+<div id="smart-shortcut"><a class="shortcut-btn" href="#" id="smart-link"></a></div>
+
+<!-- 開始選單 -->
+<div id="start-menu">
+  <div id="zone-indicator"></div>
+  <a class="menu-btn" id="btn-start" href="javascript:void(0)">⚔️ 開始遊戲</a>
+  <a class="menu-btn" id="btn-business" href="#">🏢 商業</a>
+  <a class="menu-btn" id="btn-pay" href="#">💎 充值</a>
+</div>
+
+<!-- 遊戲 UI -->
+<div id="game-ui">
+  <div id="top-bar">
+    <span class="title">🏘️ 莫氏 AI 村莊</span>
+    <span class="info" id="online-count">村民加載中...</span>
+    <button id="btn-back-to-start" style="pointer-events:all">◄ 返回</button>
+  </div>
+</div>
+<div id="bottom-hint"></div>
+<div id="agent-name-tag"></div>
+<div id="agent-info-tag"></div>
+<div id="building-tooltip"></div>
+<div id="score-board">🏆 格鬥競技場<br><span id="score-text">0 勝 0 敗</span><br><small style="color:#aaa;font-size:12px">點擊查看世界地圖</small></div>
+
+<!-- 世界地圖面板（3 分頁） -->
+<div id="world-map-panel">
+  <div id="world-map-header">
+    <div class="wm-tabs">
+      <button class="wm-tab active" data-tab="buildings">🏛️ 建築說明</button>
+      <button class="wm-tab" data-tab="character">🎭 玩家資料</button>
+      <button class="wm-tab" data-tab="agents">📋 AGENTS簡介</button>
+    </div>
+    <span id="world-map-close">✕</span>
+  </div>
+  <div id="world-map-body">
+    <div class="wm-page active" id="wm-page-buildings">
+      <div id="world-map-list"></div>
+    </div>
+    <div class="wm-page" id="wm-page-character">
+      <div id="character-content">
+        <div class="char-hero">
+          <div class="char-avatar-big">🧑</div>
+          <div class="char-name-big" id="char-name-display">冒險者</div>
+          <div class="char-title" id="char-title-display">莫氏集團 · 見習成員</div>
+        </div>
+        <div class="char-stats-grid">
+          <div class="char-stat"><span class="cs-label">⚔️ 攻擊</span><span class="cs-val" id="cs-atk">1</span></div>
+          <div class="char-stat"><span class="cs-label">🛡️ 破防</span><span class="cs-val" id="cs-def">1</span></div>
+          <div class="char-stat"><span class="cs-label">❤️ 生命</span><span class="cs-val" id="cs-hp">1</span></div>
+          <div class="char-stat"><span class="cs-label">⚡ 反擊傷害</span><span class="cs-val" id="cs-spd">1</span></div>
+        </div>
+        <div class="char-record">
+          <div class="cr-item win">🏆 <span id="cr-wins">0</span> 勝</div>
+          <div class="cr-item lose">💀 <span id="cr-losses">0</span> 敗</div>
+          <div class="cr-item rate">📊 勝率 <span id="cr-rate">-</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="wm-page" id="wm-page-agents">
+      <div id="agent-intro-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 互動選單 -->
+<div id="interact-menu">
+  <button class="interact-btn" id="interact-chat">💬 對話</button>
+  <button class="interact-btn fight" id="interact-fight">⚔️ 格鬥</button>
+  <a class="interact-btn race" href="/game/賽車.html">🏃‍♀️ 逃走</a>
+  <button class="interact-btn" id="interact-cancel">✕ 取消</button>
+</div>
+
+<!-- 聊天面板 -->
+<div id="chat-panel">
+  <div id="chat-bg"></div>
+  <div id="chat-header">
+    <span id="chat-agent-name">🤖 Agent</span>
+    <span id="chat-close" title="關閉">✕</span>
+  </div>
+  <div id="chat-messages"></div>
+  <div id="chat-loading">思考中...</div>
+  <div id="chat-input-area">
+    <input id="chat-input" type="text" placeholder="輸入訊息..." autocomplete="off">
+    <button id="chat-send">發送</button>
+  </div>
+</div>
+
+<!-- 戰鬥面板 -->
+<div id="battle-overlay">
+  <div id="battle-arena">
+    <canvas id="battle-canvas"></canvas>
+    <div id="battle-result"></div>
+  </div>
+  <div id="battle-hud">
+    <span class="battle-name" id="battle-player-name">你</span>
+    <div class="battle-hp-bar"><div class="battle-hp-fill player" id="battle-player-hp" style="width:100%"></div></div>
+    <span class="battle-timer" id="battle-timer">60</span>
+    <div class="battle-hp-bar"><div class="battle-hp-fill enemy" id="battle-enemy-hp" style="width:100%"></div></div>
+    <span class="battle-name" id="battle-enemy-name">對手</span>
+  </div>
+  <div id="battle-log">準備戰鬥！</div>
+  <div id="battle-swipe-hint">👆 滑動攻擊：下→上=下攻 | 上→下=上攻 | 左→右=左攻 | 右→左=右攻 | 長按=格擋</div>
+  <div id="battle-controls" style="display:none">
+    <button class="battle-ctrl-btn" data-move="up">⬆ 上攻</button>
+    <button class="battle-ctrl-btn" data-move="left">⬅ 左攻</button>
+    <button class="battle-ctrl-btn block-btn" data-move="block">🛡 格擋</button>
+    <button class="battle-ctrl-btn" data-move="right">➡ 右攻</button>
+    <button class="battle-ctrl-btn" data-move="down">⬇ 下攻</button>
+  </div>
+  <button class="battle-ctrl-btn" id="battle-surrender" style="margin-top:10px;border-color:#666;color:#666">🏳 投降</button>
+</div>
+
+<!-- 升級面板 -->
+<div id="upgrade-panel">
+  <div id="upgrade-title">⬆ 技能點數分配</div>
+  <div id="upgrade-points">可用點數：0</div>
+  <div id="upgrade-buttons">
+    <button class="upgrade-btn" data-stat="normalDmg">⚔️ 攻擊力 <span class="upgrade-val">2</span></button>
+    <button class="upgrade-btn" data-stat="blockDmg">🛡 格擋傷害 <span class="upgrade-val">1</span></button>
+    <button class="upgrade-btn" data-stat="counterDmg">⚡ 反擊傷害 <span class="upgrade-val">3</span></button>
+    <button class="upgrade-btn" data-stat="hp">❤️ 血量 <span class="upgrade-val">10</span></button>
+  </div>
+  <button id="upgrade-close">關閉</button>
+</div>
+
+<!-- 故事介紹 -->
+<div id="story-overlay">
+  <div id="story-box">
+    <h2>📜 莫氏 AI 村莊</h2>
+    <p id="story-text"></p>
+    <button id="story-start">⚔️ 進入村莊</button>
+  </div>
+</div>
+
+<!-- 過場 -->
+<div id="transition-overlay">
+  <div id="transition-snapshot"></div>
+  <div id="transition-loader">LOADING...</div>
+</div>
+
+
+  <script src="/game/set.js"></script>
+  <script type="module" src="/game/game.js"></script>
+</body>
+</html>

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>莫氏集團 · AI 應用落地</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0e14;
+            --surface: #131820;
+            --card: rgba(22, 28, 40, 0.7);
+            --border: rgba(255, 255, 255, 0.06);
+            --gold: #cccccc;
+            --gold-dim: rgba(201, 169, 110, 0.15);
+            --text: #e4e4e7;
+            --text-dim: #90949f;
+            --accent-1: #5b9bd5;
+            --accent-2: #6c5ce7;
+            --accent-3: #00b894;
+            --radius: 16px;
+            --transition: 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── 背景裝飾 ── */
+        .bg-grid {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            background:
+                linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+            background-size: 60px 60px;
+            mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 30%, transparent 70%);
+            -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 30%, transparent 70%);
+        }
+
+        .bg-orb {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.18;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .bg-orb--1 { width: 600px; height: 600px; background: var(--accent-2); top: -200px; right: -150px; }
+        .bg-orb--2 { width: 400px; height: 400px; background: var(--accent-1); bottom: -100px; left: -100px; }
+
+        /* ── 主容器 ── */
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 80px 32px 100px;
+        }
+
+        /* ── Header ── */
+        .header {
+            text-align: center;
+            margin-bottom: 80px;
+        }
+
+        .header-tag {
+            display: inline-block;
+            font-size: 12px;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            color: var(--gold);
+            border: 1px solid var(--gold-dim);
+            padding: 6px 20px;
+            border-radius: 50px;
+            margin-bottom: 28px;
+            backdrop-filter: blur(10px);
+            background: var(--gold-dim);
+        }
+
+        .header h1 {
+            font-size: clamp(36px, 5.5vw, 56px);
+            font-weight: 300;
+            letter-spacing: 2px;
+            line-height: 1.25;
+            margin-bottom: 18px;
+        }
+        .header h1 .highlight {
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--gold) 0%, #e0c68c 50%, var(--gold) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-sub {
+            font-size: 17px;
+            color: var(--text-dim);
+            font-weight: 300;
+            max-width: 520px;
+            margin: 0 auto;
+        }
+
+        /* ── 分隔線 ── */
+        .divider {
+            width: 60px;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--gold), transparent);
+            margin: 0 auto 70px;
+        }
+
+        /* ── 場景卡片網格 ── */
+        .scenarios {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-bottom: 80px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 40px 32px 36px;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--card-accent), transparent);
+            opacity: 0;
+            transition: opacity var(--transition);
+        }
+
+        .card:hover::before { opacity: 1; }
+        .card:hover {
+            transform: translateY(-6px);
+            border-color: rgba(255,255,255,0.12);
+            box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+        }
+
+        .card--1 { --card-accent: var(--accent-1); }
+        .card--2 { --card-accent: var(--accent-2); }
+        .card--3 { --card-accent: var(--accent-3); }
+
+        .card-icon {
+            width: 52px; height: 52px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 24px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .card h3 {
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+            color: #f0f0f2;
+        }
+
+        .card .subtitle {
+            font-size: 13px;
+            color: var(--text-dim);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 18px;
+            font-weight: 400;
+        }
+
+        .card .desc {
+            font-size: 15px;
+            color: #b0b3bd;
+            line-height: 1.8;
+            font-weight: 300;
+        }
+
+        .card .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 22px;
+        }
+        .card .tag {
+            font-size: 11px;
+            padding: 5px 14px;
+            border-radius: 50px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.06);
+            color: var(--text-dim);
+            letter-spacing: 0.5px;
+            transition: var(--transition);
+        }
+        .card:hover .tag {
+            border-color: rgba(255,255,255,0.14);
+            color: #ccc;
+        }
+
+        /* ── 底部 CTA ── */
+        .cta {
+            text-align: center;
+        }
+        .cta-text {
+            font-size: 22px;
+            font-weight: 300;
+            letter-spacing: 1px;
+            margin-bottom: 28px;
+            color: #d0d0d5;
+        }
+
+        .cta-btn {
+            display: inline-block;
+            padding: 14px 44px;
+            font-size: 15px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--gold);
+            border: 1px solid var(--gold);
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: var(--transition);
+            backdrop-filter: blur(10px);
+            background: rgba(201, 169, 110, 0.06);
+        }
+        .cta-btn:hover {
+            background: rgba(201, 169, 110, 0.18);
+            box-shadow: 0 0 40px rgba(201, 169, 110, 0.15);
+            transform: translateY(-2px);
+        }
+
+        /* ── Footer ── */
+        .footer {
+            text-align: center;
+            margin-top: 80px;
+            font-size: 12px;
+            color: var(--text-dim);
+            letter-spacing: 1.5px;
+        }
+        .footer span { color: var(--gold); }
+
+        /* ── RWD ── */
+        @media (max-width: 768px) {
+            .container { padding: 50px 20px 70px; }
+            .scenarios { grid-template-columns: 1fr; max-width: 440px; margin-inline: auto; }
+            .header h1 { font-size: 32px; }
+            .card { padding: 32px 24px 28px; }
+        }
+
+        /* ── 微動畫 ── */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .card { animation: fadeUp 0.8s ease forwards; }
+        .card:nth-child(1) { animation-delay: 0.05s; }
+        .card:nth-child(2) { animation-delay: 0.2s; }
+        .card:nth-child(3) { animation-delay: 0.35s; }
+    </style>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    
+  <link rel="stylesheet" href="https://64071181.github.io//mokJsapi/aki.css">
+  <script src="https://code.jquery.com/jquery-3.7.0.js"></script>
+  <script src="https://64071181.github.io//mokJsapi/mokJsApi.js"></script>
+  
+  <meta name="google-site-verification" content="zKKu5phgon5Fp0BeiCOzKKveF1F_iRW9W9cbctL3Hl4" />
+  <script src="https://cdn.staticfile.net/translate.js/3.1.7/translate.js"></script>
+
+</head>
+<body>
+<samp id="莫生查詢" style="display: none;">莫生我要查詢AI 應用落地</samp>
+
+
+
+<!-- 星空背景 -->
+<canvas id="bg-canvas"></canvas>
+
+
+    <!-- 背景 -->
+    <div class="bg-grid"></div>
+    <div class="bg-orb bg-orb--1"></div>
+    <div class="bg-orb bg-orb--2"></div>
+
+    <!-- 主內容 -->
+    <div class="container">
+
+        <!-- Header -->
+        <header class="header">
+            <div class="header-tag">MOK GROUP · AI SOLUTIONS</div>
+            <h1>
+                莫氏集團<br><span class="highlight">AI 應用落地</span>
+            </h1>
+            <p class="header-sub">
+                為不同行業注入人工智能，將尖端 AI 無縫融入商業工作場景，重塑企業營運效率。
+            </p>
+        </header>
+
+        <div class="divider"></div>
+
+        <!-- 三大場景 -->
+        <section class="scenarios">
+
+            <!-- 場景一：智慧倉儲 -->
+            <article class="card card--1">
+                <div class="card-icon">📦</div>
+                <h3>智慧倉儲管理</h3>
+                <p class="subtitle">Warehouse Intelligence</p>
+                <p class="desc">
+                    AI 自動解析庫存 Excel 表格，智能歸類貨品位置，秒級定位目標商品。結合自然語言查詢——
+                    「那批三月的訂單放哪？」系統即時回應確切貨架位置，並生成最優出貨路徑，大幅縮短揀貨時間。
+                </p>
+                <div class="tags">
+                    <span class="tag">Excel 智能解析</span>
+                    <span class="tag">自然語言查貨</span>
+                    <span class="tag">路徑優化</span>
+                    <span class="tag">即時庫存</span>
+                </div>
+            </article>
+
+            <!-- 場景二：B2B 智能拓展 -->
+            <article class="card card--2">
+                <div class="card-icon">📧</div>
+                <h3>B2B 智能拓展</h3>
+                <p class="subtitle">Automated Outreach</p>
+                <p class="desc">
+                    AI 驅動的 Cold Email 自動化投放系統——精準研究目標客戶背景，生成個人化郵件，追蹤開啟與回覆。
+                    搭配 24/7 AI 客服助手，即時處理客戶查詢、產品說明與初步洽談，讓銷售團隊專注於成交。
+                </p>
+                <div class="tags">
+                    <span class="tag">Cold Email 自動化</span>
+                    <span class="tag">AI 客服回覆</span>
+                    <span class="tag">個人化生成</span>
+                    <span class="tag">24/7 運作</span>
+                </div>
+            </article>
+
+            <!-- 場景三：智能會議管理 -->
+            <article class="card card--3">
+                <div class="card-icon">🎯</div>
+                <h3>智能會議管理</h3>
+                <p class="subtitle">Meeting Intelligence</p>
+                <p class="desc">
+                    AI 自動掃描往來郵件與通訊對話，識別會議意向、比對多方行事曆，一鍵完成排程。
+                    會後即時生成結構化會議記錄、待辦事項追蹤清單，並自動分派責任人，確保每項決策落地執行。
+                </p>
+                <div class="tags">
+                    <span class="tag">郵件對話分析</span>
+                    <span class="tag">自動排程</span>
+                    <span class="tag">會議記錄生成</span>
+                    <span class="tag">待辦追蹤</span>
+                </div>
+            </article>
+
+        </section>
+
+        <!-- CTA -->
+        <div class="cta">
+            <p class="cta-text">讓 AI 成為您企業的核心競爭力</p>
+            <a class="cta-btn" href="https://wa.me/85264071181/?text=莫生我要查詢AI 應用落地">預約諮詢 →</a>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            
+            <div id="ContactAKI" class="ContactAKI"><!-- JS _顯示聯莫 --></div>
+            <p class="mokJsApi_copyright">版權</p>
+            <span>莫氏集團</span> MOK GROUP · AI 應用落地解決方案
+        </footer>
+
+    </div>
+
+
+
+
+    <script>
+      // 85264071181 // qqq 冇 a.js 錯誤版
+      // 顯示聯莫
+      const 聯莫 = ['moksurky@gmail.com','https://wa.me/85264071181/','https://i.meee.com.tw/atcX6QM.png','https://www.instagram.com/moksurky/','https://line.me/ti/p/UlSPd7p9zh/','https://www.facebook.com/aki.mok.10/','http://t.me/mokaki/'
+      ];
+      function Start() {
+        網頁分流();
+        // 翻譯 
+        //translate.language.setLocal('chinese_traditional'); //設置本地語種（當前網頁的語種）。如果不設置，默認自動識別當前網頁顯示文字的語種。 可填寫如 'english'、'chinese_simplified' 等，具體參見文檔下方關於此的說明。
+        translate.service.use('client.edge'); //設置機器翻譯服務通道，直接客戶端本身，不依賴服務端 。相關說明參考 http://translate.zvo.cn/43086.html
+        translate.execute();//進行翻譯 
+        _顯示聯莫(聯莫);
+      }
+      Start()
+
+    </script>
+
+    <script>
+      window.MOKAGI_AGENT = '客服';
+      window.MOKAGI_USER_ID = localStorage.getItem('mokagi_user_id') || undefined;
+      window.MOKAGI_SERVER = 'https://64071181.xyz';
+      window.position = 'bottom-right';
+
+
+      // 其他配置可選
+      //window.agent_soul = '我是一個智能客服小美，專注於協助用戶解決問題，提供即時幫助和資訊。我的目標是確保每位用戶都能獲得最佳的使用體驗。';
+      
+      // 前端 UI 配置
+      //window.title = '在線客服';
+      //window.sayHi = '✅ 已連接，歡迎使用6！';
+      //window.saySorry = '⚠️ 連接已斷開，嘗試重連...';
+      //window.MOKAGI_AGENT_ICON = '🤖';  // 任意 Emoji 或純文本
+      // window.MOKAGI_THEME = '#4A90D9'
+      
+    </script>
+    <script src="https://64071181.xyz/static/api.js"></script>
+
+</body>
+</html>

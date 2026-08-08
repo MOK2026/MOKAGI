@@ -12,7 +12,7 @@ import asyncio
 import threading
 import time
 import subprocess
-from flask import Flask, render_template, request, send_from_directory
+from flask import Flask, render_template, request, send_from_directory, Response, jsonify, stream_with_context
 from flask_socketio import SocketIO
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -137,6 +137,12 @@ except Exception as e:
 
 # ===== 工作中侍女追蹤：記錄哪些 agent 正在處理訊息 =====
 _running_agents = set()  # {agent_name, ...}
+
+# ===== SSE 串流隊列（HTTP 串流備援，當 Socket.IO 不可用時） =====
+import uuid as _uuid
+import queue as _queue
+_sse_queues = {}  # {session_id: queue.Queue}
+_sse_lock = threading.Lock()
 
 # ---------- 文件瀏覽相關（動態白名單）----------
 WATCH_PATH = "/home/ubuntu/"
@@ -468,6 +474,125 @@ def reload_config(env_path):
 
 
 
+# ---------- HTTP SSE 串流端點（主要傳輸層，繞過 Socket.IO 502） ----------
+@app.route('/api/chat', methods=['POST'])
+def api_chat_sse():
+    data = request.get_json(force=True)
+    user_msg = data.get('message', '').strip()
+    agent_name = data.get('agent', '')
+    user_id = data.get("user_id") or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+    context_files = data.get("context_files", None)
+    if not user_msg:
+        return jsonify({"error": "empty message"}), 400
+    _running_agents.add(agent_name)
+    session_id = str(_uuid.uuid4())[:8]
+    q = _queue.Queue()
+    with _sse_lock:
+        _sse_queues[session_id] = q
+    print(f"[SSE /api/chat] session={session_id} agent={agent_name} msg={user_msg[:50]}...")
+
+    def _sse_bg_worker():
+        accumulated_think = ""
+        accumulated_reply = ""
+        assistant_msg_id = None
+        user_msg_id = None
+
+        def update_assistant_in_db(msg_id, content, think_content):
+            with closing(sqlite3.connect(DB_PATH)) as conn:
+                conn.execute('UPDATE chat_history SET content = ?, think_content = ? WHERE id = ?', (content, think_content, msg_id))
+                conn.commit()
+
+        def stream_emit(event):
+            nonlocal accumulated_think, accumulated_reply, assistant_msg_id
+            event["agent"] = agent_name
+            try:
+                q.put(event)
+            except Exception as _e:
+                print(f"[SSE stream_emit] q.put failed: {_e}")
+            if event["type"] == "think":
+                accumulated_think += event["content"]
+            elif event["type"] == "reply":
+                accumulated_reply += event["content"]
+                if assistant_msg_id is None:
+                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time()))
+                        assistant_msg_id = cursor.lastrowid
+                        conn.commit()
+                update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
+            elif event["type"] == "done":
+                _running_agents.discard(agent_name)
+                if assistant_msg_id is not None:
+                    update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
+                    conv_id = event.get("conv_id")
+                    if conv_id:
+                        with closing(sqlite3.connect(DB_PATH)) as conn:
+                            conn.execute("UPDATE chat_history SET conv_id = ? WHERE id = ?", (conv_id, assistant_msg_id))
+                            conn.commit()
+                    if conv_id:
+                        _update_user_message_conv_id(agent_name, conv_id, user_msg_id, user_id)
+
+        try:
+            with closing(sqlite3.connect(DB_PATH)) as conn:
+                cursor = conn.execute('INSERT INTO chat_history (agent, role, content, timestamp) VALUES (?, ?, ?, ?)', (agent_name, 'user', user_msg, time.time()))
+                user_msg_id = cursor.lastrowid
+                conn.commit()
+        except Exception as _e:
+            print(f"[SSE] user msg insert failed: {_e}")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            async def _bg_coro():
+                async def async_stream_cb(event):
+                    print(f"[SSE cb] type={event.get('type')} len={len(event.get('content', ''))}")
+                    stream_emit(event)
+                agent_config = await mokagi.get_agent_config(agent_name)
+                from autofix2 import autofix_run
+                from mokagi import find_tool_handler
+                async def run(agent_config, context_files=None):
+                    await mokagi.process_message(user_id=user_id, text=user_msg, stream_callback=async_stream_cb, agent_name=agent_name, agent_config=agent_config, context_files=context_files)
+                result = await autofix_run(func=run, func_args=(agent_config, context_files), func_kwargs={}, max_attempts=3, autofix_handler=find_tool_handler("admin"), autofix_max_retries=2, original_text=user_msg, stream_callback=async_stream_cb)
+                if result == "__ERROR_REPORTED__":
+                    _running_agents.discard(agent_name)
+                    stream_emit({"type": "reply", "content": "failed"})
+                    stream_emit({"type": "done"})
+            loop.run_until_complete(_bg_coro())
+        except Exception as _e:
+            print(f"[SSE bg] error: {_e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                stream_emit({"type": "reply", "content": f"error: {_e}"})
+                stream_emit({"type": "done"})
+            except:
+                pass
+        finally:
+            loop.close()
+            _running_agents.discard(agent_name)
+
+    threading.Thread(target=_sse_bg_worker, daemon=True).start()
+
+    def generate():
+        try:
+            while True:
+                try:
+                    event = q.get(timeout=300)
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    if event.get('type') == 'done':
+                        break
+                except _queue.Empty:
+                    yield f"data: {json.dumps({'type': 'error', 'content': 'timeout', 'agent': agent_name}, ensure_ascii=False)}\n\n"
+                    break
+        except GeneratorExit:
+            pass
+        finally:
+            with _sse_lock:
+                _sse_queues.pop(session_id, None)
+            _running_agents.discard(agent_name)
+            print(f"[SSE /api/chat] session={session_id} ended")
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache, no-store, must-revalidate', 'X-Accel-Buffering': 'no', 'Connection': 'keep-alive', 'Access-Control-Allow-Origin': '*'})
+
 # ---------- SocketIO 聊天（核心）- 支援多工並行與泡式輸出
 @socketio.on('chat_message')
 def handle_chat_message(data):
@@ -547,13 +672,14 @@ def handle_chat_message(data):
         nonlocal accumulated_think, accumulated_reply, assistant_msg_id
         event['agent'] = agent_name
 
+        # 🔧 先發送事件給前端（確保流式即時輸出），再寫 DB
+        socketio.emit('chat_stream', event, room=sid)
+
         if event["type"] == "think":
             accumulated_think += event["content"]
-            # 可選：即時更新 think_content（此處省略，在 reply 時一併更新）
 
         elif event["type"] == "reply":
             accumulated_reply += event["content"]
-            # 首次收到 reply → 插入一條空的助手記錄，獲取 ID
             if assistant_msg_id is None:
                 with closing(sqlite3.connect(DB_PATH)) as conn:
                     cursor = conn.execute(
@@ -562,7 +688,7 @@ def handle_chat_message(data):
                     )
                     assistant_msg_id = cursor.lastrowid
                     conn.commit()
-            # 即時更新該記錄（使用累積內容）
+            # DB 寫入延後到 emit 之後，不阻塞流式
             await asyncio.to_thread(
                 update_assistant_in_db,
                 assistant_msg_id,
@@ -571,8 +697,6 @@ def handle_chat_message(data):
             )
 
         elif event["type"] == "done":
-            # 最後一次更新（確保所有內容已保存）
-            # 🔧 清除工作中標記
             _running_agents.discard(agent_name)
             if assistant_msg_id is not None:
                 await asyncio.to_thread(
@@ -581,7 +705,6 @@ def handle_chat_message(data):
                     accumulated_reply,
                     accumulated_think
                 )
-                # 若有 conv_id，一併更新
                 conv_id = event.get("conv_id")
                 if conv_id:
                     with closing(sqlite3.connect(DB_PATH)) as conn:
@@ -590,16 +713,9 @@ def handle_chat_message(data):
                             (conv_id, assistant_msg_id)
                         )
                         conn.commit()
-                # 更新使用者訊息的 conv_id
                 if conv_id:
                     _update_user_message_conv_id(agent_name, conv_id, user_msg_id, user_id)
-            # 發送 done 事件給前端
-            socketio.emit('chat_stream', event, room=sid)
-            # 重置狀態（可選）
             assistant_msg_id = None
-
-        # 發送事件給前端（包含 agent 信息）
-        socketio.emit('chat_stream', event, room=sid)
 
     async def run(agent_config, context_files=None):
         await mokagi.process_message(
@@ -636,6 +752,7 @@ def handle_chat_message(data):
 
     # 🔧 背景執行緒處理（不阻塞主事件循環，支援多工並行與泡式輸出）
     def _bg_worker():
+        print(f"[DEBUG _bg_worker] 開始處理 agent={agent_name}, sid={sid}, user_msg={user_msg[:50]}...")
         accumulated_think = ""
         accumulated_reply = ""
         assistant_msg_id = None
@@ -652,6 +769,15 @@ def handle_chat_message(data):
             nonlocal accumulated_think, accumulated_reply, assistant_msg_id
             event["agent"] = agent_name
 
+            # 🔧 先發送事件給前端（確保流式即時輸出），再寫 DB
+            try:
+                if sid:
+                    socketio.server.emit("chat_stream", event, room=sid, namespace="/")
+                else:
+                    print(f"[stream_emit] ⚠️ sid 為空，無法發送事件 type={event.get('type')}")
+            except Exception as _emit_err:
+                print(f"[stream_emit] socketio.emit 失敗: {_emit_err}")
+
             if event["type"] == "think":
                 accumulated_think += event["content"]
 
@@ -665,6 +791,7 @@ def handle_chat_message(data):
                         )
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
+                # DB 寫入延後到 emit 之後，不阻塞流式
                 update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
 
             elif event["type"] == "done":
@@ -682,13 +809,12 @@ def handle_chat_message(data):
                     if conv_id:
                         _update_user_message_conv_id(agent_name, conv_id, user_msg_id, user_id)
 
-            socketio.emit("chat_stream", event, room=sid)
-
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             async def _bg_coro():
                 async def async_stream_cb(event):
+                    print(f"[DEBUG async_stream_cb] type={event.get('type')}, content_len={len(event.get('content', ''))}")
                     stream_emit(event)
 
                 agent_config = await mokagi.get_agent_config(agent_name)
@@ -720,8 +846,8 @@ def handle_chat_message(data):
                 )
                 if result == "__ERROR_REPORTED__":
                     _running_agents.discard(agent_name)
-                    socketio.emit("chat_stream", {"type": "reply", "content": "❌ 自動修復失敗，請稍後重試。", "agent": agent_name}, room=sid)
-                    socketio.emit("chat_stream", {"type": "done", "agent": agent_name}, room=sid)
+                    socketio.server.emit("chat_stream", {"type": "reply", "content": "❌ 自動修復失敗，請稍後重試。", "agent": agent_name}, room=sid, namespace="/")
+                    socketio.server.emit("chat_stream", {"type": "done", "agent": agent_name}, room=sid, namespace="/")
                 else:
                     # 🔧 安全清理：確保 process_message 完成後清理狀態
                     _running_agents.discard(agent_name)
@@ -729,8 +855,8 @@ def handle_chat_message(data):
             loop.run_until_complete(_bg_coro())
         except Exception as e:
             _running_agents.discard(agent_name)
-            socketio.emit("chat_stream", {"type": "reply", "content": f"❌ 嚴重錯誤: {str(e)}", "agent": agent_name}, room=sid)
-            socketio.emit("chat_stream", {"type": "done", "agent": agent_name}, room=sid)
+            socketio.server.emit("chat_stream", {"type": "reply", "content": f"❌ 嚴重錯誤: {str(e)}", "agent": agent_name}, room=sid, namespace="/")
+            socketio.server.emit("chat_stream", {"type": "done", "agent": agent_name}, room=sid, namespace="/")
         finally:
             loop.close()
 
