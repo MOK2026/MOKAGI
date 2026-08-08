@@ -155,30 +155,31 @@ td:first-child { color: #e0e0f0; font-weight: 500; white-space: nowrap; }
 
 <!-- ====== 快速開始 ====== -->
 <div class="card">
-  <h2><span class="icon">🚀</span> 30 秒嵌入</h2>
-  <p>在 HTML 的 <code>&lt;/body&gt;</code> 前加入這一行：</p>
-  <pre><code>&lt;<span class="key">script</span> <span class="fn">src</span>=<span class="str">"https://64071181.xyz/static/api.js"</span>&gt;&lt;/<span class="key">script</span>&gt;</code></pre>
-  <p style="margin-top:12px;">✅ 完成。頁面右下角會出現 AI 客服氣泡，連接到後端 Agent。</p>
-  <div class="note">⚠️ 後端需運行 <code>mok_web.py</code>（Socket.IO 伺服器）並在 <code>~/.mok/agent/</code> 目錄下配置好 <code>agent.md</code></div>
-</div>
+  <h2><span class="icon">🚀</span> 30 秒完整嵌入範例</h2>
+  <pre><code>&lt;!DOCTYPE html&gt;
+&lt;<span class="key">html</span>&gt;
+&lt;<span class="key">head</span>&gt;&lt;<span class="key">meta</span> <span class="fn">charset</span>=<span class="str">"UTF-8"</span>&gt;&lt;/<span class="key">head</span>&gt;
+&lt;<span class="key">body</span>&gt;
+  <span class="cmt">&lt;!-- 你的網頁內容 --&gt;</span>
+  &lt;<span class="key">h1</span>&gt;我的商店&lt;/<span class="key">h1</span>&gt;
 
-<!-- ====== 配置總覽 ====== -->
-<div class="card">
-  <h2><span class="icon">⚙️</span> 配置項總覽</h2>
-  <p>在 <code>api.js</code> <strong>之前</strong>設定 <code>window</code> 變數即可覆蓋預設值：</p>
-  <table>
-    <tr><th>window 變數</th><th>類型</th><th>預設值</th><th>說明</th></tr>
-    <tr><td><code>MOKAGI_AGENT</code></td><td>string</td><td>"客服"</td><td>Agent 名稱，對應後端 agent 目錄</td></tr>
-    <tr><td><code>MOKAGI_SERVER</code></td><td>string</td><td>當前網域</td><td>Socket.IO 後端地址</td></tr>
-    <tr><td><code>MOKAGI_USER_ID</code></td><td>string</td><td>自動 UUID</td><td>用戶識別（持久存 localStorage）</td></tr>
-    <tr><td><code>MOKAGI_AGENT_ICON</code></td><td>string</td><td>"🤖"</td><td>聊天氣泡圖示</td></tr>
-    <tr><td><code>MOKAGI_THEME</code></td><td>string</td><td>"#4A90D9"</td><td>主題色</td></tr>
-    <tr><td><code>agent_soul</code></td><td>string</td><td>""</td><td>AI 性格提示詞</td></tr>
-    <tr><td><code>contact</code></td><td>string</td><td>""</td><td>AI 無法回答時的緊急聯絡方式</td></tr>
-    <tr><td><code>title</code></td><td>string</td><td>"在線客服"</td><td>聊天窗標題</td></tr>
-    <tr><td><code>position</code></td><td>string</td><td>"bottom-right"</td><td>氣泡位置</td></tr>
-    <tr><td><code>quickLinks</code></td><td>array</td><td>[]</td><td>⭐ 快速查詢按鈕（見下方）</td></tr>
-  </table>
+  <span class="cmt">&lt;!-- 🔧 配置 MOKAGI（必須在 api.js 之前） --&gt;</span>
+  &lt;<span class="key">script</span>&gt;
+    <span class="fn">window</span>.<span class="key">MOKAGI_AGENT</span>      = <span class="str">客服</span>;
+    <span class="fn">window</span>.<span class="key">MOKAGI_SERVER</span>     = <span class="str">https://64071181.xyz</span>;
+    <span class="fn">window</span>.<span class="key">MOKAGI_AGENT_ICON</span> = <span class="str">💬</span>;
+    <span class="fn">window</span>.<span class="key">agent_soul</span>       = <span class="str">你是一位熱情的網店客服，語氣親切。</span>;
+    <span class="fn">window</span>.<span class="key">contact</span>          = <span class="str">客服專線：0800-123-456</span>;
+    <span class="fn">window</span>.<span class="key">quickLinks</span>       = [
+      { <span class="str">text</span>: <span class="str">"📦 查訂單"</span>, <span class="str">query</span>: <span class="str">"我想查詢訂單狀態"</span> },
+      { <span class="str">text</span>: <span class="str">"🔄 退換貨"</span>, <span class="str">query</span>: <span class="str">"退換貨政策是什麼？"</span> },
+    ];
+  &lt;/<span class="key">script</span>&gt;
+
+  <span class="cmt">&lt;!-- 🚀 載入 MOKAGI 聊天組件 --&gt;</span>
+  &lt;<span class="key">script</span> <span class="fn">src</span>=<span class="str">"https://64071181.xyz/static/api.js"</span>&gt;&lt;/<span class="key">script</span>&gt;
+&lt;/<span class="key">body</span>&gt;
+&lt;/<span class="key">html</span>&gt;</code></pre>
 </div>
 
 <!-- ====== 快速查詢按鈕 ====== -->
@@ -221,34 +222,7 @@ td:first-child { color: #e0e0f0; font-weight: 500; white-space: nowrap; }
 });</code></pre>
 </div>
 
-<!-- ====== 完整範例 ====== -->
-<div class="card">
-  <h2><span class="icon">📦</span> 完整嵌入範例</h2>
-  <pre><code>&lt;!DOCTYPE html&gt;
-&lt;<span class="key">html</span>&gt;
-&lt;<span class="key">head</span>&gt;&lt;<span class="key">meta</span> <span class="fn">charset</span>=<span class="str">"UTF-8"</span>&gt;&lt;/<span class="key">head</span>&gt;
-&lt;<span class="key">body</span>&gt;
-  <span class="cmt">&lt;!-- 你的網頁內容 --&gt;</span>
-  &lt;<span class="key">h1</span>&gt;我的商店&lt;/<span class="key">h1</span>&gt;
 
-  <span class="cmt">&lt;!-- 🔧 配置 MOKAGI（必須在 api.js 之前） --&gt;</span>
-  &lt;<span class="key">script</span>&gt;
-    <span class="fn">window</span>.<span class="key">MOKAGI_AGENT</span>      = <span class="str">客服</span>;
-    <span class="fn">window</span>.<span class="key">MOKAGI_SERVER</span>     = <span class="str">https://64071181.xyz</span>;
-    <span class="fn">window</span>.<span class="key">MOKAGI_AGENT_ICON</span> = <span class="str">💬</span>;
-    <span class="fn">window</span>.<span class="key">agent_soul</span>       = <span class="str">你是一位熱情的網店客服，語氣親切。</span>;
-    <span class="fn">window</span>.<span class="key">contact</span>          = <span class="str">客服專線：0800-123-456</span>;
-    <span class="fn">window</span>.<span class="key">quickLinks</span>       = [
-      { <span class="str">text</span>: <span class="str">"📦 查訂單"</span>, <span class="str">query</span>: <span class="str">"我想查詢訂單狀態"</span> },
-      { <span class="str">text</span>: <span class="str">"🔄 退換貨"</span>, <span class="str">query</span>: <span class="str">"退換貨政策是什麼？"</span> },
-    ];
-  &lt;/<span class="key">script</span>&gt;
-
-  <span class="cmt">&lt;!-- 🚀 載入 MOKAGI 聊天組件 --&gt;</span>
-  &lt;<span class="key">script</span> <span class="fn">src</span>=<span class="str">"https://64071181.xyz/static/api.js"</span>&gt;&lt;/<span class="key">script</span>&gt;
-&lt;/<span class="key">body</span>&gt;
-&lt;/<span class="key">html</span>&gt;</code></pre>
-</div>
 
 <!-- ====== 後端介面 ====== -->
 <div class="card">
@@ -328,5 +302,35 @@ td:first-child { color: #e0e0f0; font-weight: 500; white-space: nowrap; }
 </div>
 
 </div>
+
+    <script>
+      window.MOKAGI_AGENT = '客服';
+      window.contact = 'https://wa.me/85264071181/?text=莫生我要查詢MOKAGI_Web聊天接口/' // ai無法回答的緊急聯絡
+      window.MOKAGI_USER_ID = localStorage.getItem('mokagi_user_id') || undefined;
+      window.MOKAGI_SERVER = 'https://64071181.xyz';
+      window.position = 'bottom-right';
+
+    window.contact          = '客服專線：0800-123-456';
+    window.quickLinks       = [
+      { text: "📦 查訂單", query: "我想查詢訂單狀態" },
+      { text: "🔄 退換貨", query: "退換貨政策是什麼？" },
+    ];
+
+      // 其他配置可選
+      //window.agent_soul = '我是一個智能客服小美，專注於協助用戶解決問題，提供即時幫助和資訊。我的目標是確保每位用戶都能獲得最佳的使用體驗。';
+      
+      // 前端 UI 配置
+      //window.title = '在線客服';
+      //window.sayHi = '✅ 已連接，歡迎使用6！';
+      //window.saySorry = '⚠️ 連接已斷開，嘗試重連...';
+      //window.MOKAGI_AGENT_ICON = '🤖';  // 任意 Emoji 或純文本
+      // window.MOKAGI_THEME = '#4A90D9'
+      
+    </script>
+    <script src="https://64071181.xyz/static/api.js"></script>
+
+
+
+
 </body>
 </html>
