@@ -174,7 +174,7 @@ download_github_dir() {
     echo -e "${YELLOW}正在下載 ${remote_dir}/ 所有檔案...${NC}"
     mkdir -p "${target_path}"
 
-    # 用 GitHub API 取得目錄檔案清單（只取 file 類型，不遞迴子目錄）
+    # 用 GitHub API 取得目錄檔案清單（遞迴下載子目錄）
     local api_url="https://api.github.com/repos/MOK2026/MOKAGI/contents/${remote_dir}"
     local temp_file=$(mktemp)
 
@@ -190,8 +190,11 @@ download_github_dir() {
     # 解析 JSON，取出所有 type 為 file 的 name
     local file_names=$(grep -E '"name"|"type"' "$temp_file" | paste - - | grep -E '"type":\s*"file"' | sed -E 's/.*"name":\s*"([^"]+)".*/\1/')
 
-    if [ -z "$file_names" ]; then
-        echo -e "${YELLOW}⚠️ ${remote_dir}/ 目錄中沒有找到任何檔案。${NC}"
+    # 解析 JSON，取出所有 type 為 dir 的 name（遞迴下載用）
+    local dir_names=$(grep -E '"name"|"type"' "$temp_file" | paste - - | grep -E '"type":\s*"dir"' | sed -E 's/.*"name":\s*"([^"]+)".*/\1/')
+
+    if [ -z "$file_names" ] && [ -z "$dir_names" ]; then
+        echo -e "${YELLOW}⚠️ ${remote_dir}/ 目錄中沒有找到任何檔案或子目錄。${NC}"
         rm -f "$temp_file"
         return 0
     fi
@@ -209,6 +212,14 @@ download_github_dir() {
     done
 
     rm -f "$temp_file"
+
+    # 遞迴下載子目錄
+    if [ -n "$dir_names" ]; then
+        for dname in $dir_names; do
+            download_github_dir "${remote_dir}/${dname}" "${local_dir}/${dname}"
+        done
+    fi
+
     echo -e "${GREEN}✅ ${remote_dir}/ 下載完成，共 ${count} 個檔案。${NC}"
 }
 
