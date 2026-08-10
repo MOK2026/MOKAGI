@@ -9,7 +9,7 @@
 
 
 set -o pipefail
-update_date="202607271012_暫時可用版"
+update_date="202608110022_出街版"
 MOKAGIName="mok"
 PROJECT_DIR="${HOME}/.${MOKAGIName}"
 AGENT_ROOT="${PROJECT_DIR}/agent"
