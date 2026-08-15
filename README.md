@@ -4,8 +4,7 @@
 
 [玩](https://64071181.xyz/game)
 
-<iframe width="560" height="315" src="https://www.youtube.com/embed/k89e-dwZV7k?si=XroID4hrviNeE6ho" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-
+[![MOKAGI 開發日常](https://youtu.be/k89e-dwZV7k?si=_E25VjZgKy6ReFyW)](https://i.ytimg.com/an_webp/k89e-dwZV7k/mqdefault_6s.webp?du=3000&sqp=CNKpgdQG&rs=AOn4CLDgxfZ9bDLPEyNjkYKUXSCPrtcycw)
 
 
 
