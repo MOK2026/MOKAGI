@@ -1,6 +1,14 @@
 
 # 202608110022_出街版
 
+
+[玩](https://64071181.xyz/game)
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/k89e-dwZV7k?si=XroID4hrviNeE6ho" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
+
+
+
 # 風險:
 
     必須在 /soul/ 寫明檔案權威
