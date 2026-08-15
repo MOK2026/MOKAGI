@@ -2,10 +2,16 @@
 # 202608110022_出街版
 
 
-[玩](https://64071181.xyz/game)
+# [玩](https://64071181.xyz/game)
 
-[![MOKAGI 開發日常](https://youtu.be/k89e-dwZV7k?si=_E25VjZgKy6ReFyW)](https://i.ytimg.com/an_webp/k89e-dwZV7k/mqdefault_6s.webp?du=3000&sqp=CNKpgdQG&rs=AOn4CLDgxfZ9bDLPEyNjkYKUXSCPrtcycw)
 
+# MOKAGI 開發日常:
+
+<p align="center">
+  <a href="https://youtu.be/k89e-dwZV7k?si=8q7jyPBMUYKKPOeK">
+    <img src="https://i.ytimg.com/an_webp/k89e-dwZV7k/mqdefault_6s.webp?du=3000&sqp=CNKpgdQG&rs=AOn4CLDgxfZ9bDLPEyNjkYKUXSCPrtcycw" alt="MOKAGI 開發日常" width="60%">
+  </a>
+</p>
 
 
 # 風險:
