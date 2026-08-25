@@ -64,7 +64,7 @@ body {
 .agent-select-area label { font-size: 11px; color: var(--dim); display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; user-select: none; }
 .agent-select-area label .collapse-arrow { font-size: 12px; transition: transform 0.3s; }
 .agent-select-area.collapsed label .collapse-arrow { transform: rotate(-90deg); }
-.agent-select-content { overflow: hidden; transition: max-height 0.35s ease, opacity 0.3s; max-height: 300px; opacity: 1; }
+.agent-select-content { overflow: hidden auto; transition: max-height 0.35s ease, opacity 0.3s; max-height: 30vh; opacity: 1; }
 .agent-select-area.collapsed .agent-select-content { max-height: 0; opacity: 0; margin-bottom: 0; }
 .agent-select-area.collapsed { padding-bottom: 6px; }
 .agent-checkboxes {
@@ -123,12 +123,20 @@ body {
 }
 .btn-run-all:hover { filter: brightness(1.2); }
 .btn-run-all:disabled { opacity: 0.5; cursor: not-allowed; }
+/* 按鈕說明 */
+.action-hints {
+    margin-top: 8px; padding: 8px 10px;
+    background: #1a1f27; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 11px; color: var(--dim); line-height: 1.7;
+}
+.action-hints div { display: flex; align-items: flex-start; gap: 4px; }
+.action-hints b { color: var(--text); }
 
 /* 任務列表 */
 .task-list {
-    flex: 1; overflow-y: auto; padding: 8px;
+    flex: 1 1 auto; overflow-y: auto; padding: 8px;
     display: flex; flex-direction: column; gap: 6px;
-    min-height: 0;
+    min-height: 140px;
 }
 .task-item {
     padding: 10px 12px; background: var(--bg); border-radius: 8px;
@@ -258,10 +266,12 @@ body {
 /* 響應式 */
 @media (max-width: 768px) {
     .meeting-container { flex-direction: column; }
-    .task-panel { flex: 1 1 100%; height: 55vh; max-height: 55vh; display: flex; flex-direction: column; overflow: hidden; }
-    .task-panel .task-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-    .task-input-area textarea { height: 65px; }
-    .task-input-area { padding: 6px 10px; }
+    .task-panel { flex: 1 1 100%; height: 72vh; max-height: 72vh; display: flex; flex-direction: column; overflow: hidden; }
+    .task-panel .task-list { flex: 1 1 auto; min-height: 18vh; overflow-y: auto; }
+    .task-input-area { padding: 6px 10px; flex-shrink: 0; overflow: visible; max-height: none; }
+    .task-input-area textarea { height: 55px; max-height: 25vh; }
+    .action-hints { margin-top: 6px; padding: 6px 8px; font-size: 10px; line-height: 1.6; }
+    .agent-select-content { max-height: 20vh; }
     .agent-select-area { padding: 6px 10px; }
     .agent-cards-grid { grid-template-columns: 1fr; }
     .mode-panel { right: 10px; bottom: 75px; }
@@ -303,10 +313,15 @@ body {
             <textarea id="meetingInput" placeholder="輸入會議總任務…
 例如：建立一個電商網站，包含首頁、商品頁、購物車、結帳流程"></textarea>
             <div class="btn-row">
-                <button class="btn-primary" id="btnAnalyze">🧠 分析分工</button>
-                <button class="btn-secondary" id="btnQuickDraft">⚡ 快速啟動</button>
+                <button class="btn-primary" id="btnAnalyze" title="由總AI分析任務，自動拆解並分派給各Agent">🧠 分析分工</button>
+                <button class="btn-secondary" id="btnQuickDraft" title="不經分析，直接將任務派發給已選Agent">⚡ 快速啟動</button>
             </div>
-            <button class="btn-run-all" id="btnRunAll" disabled>🚀 全部並行執行</button>
+            <button class="btn-run-all" id="btnRunAll" disabled title="所有已選Agent同時並行處理任務">🚀 全部並行執行</button>
+            <div class="action-hints">
+                <div>🧠 <b>分析分工</b>：總AI分析任務，自動拆解分派給各 Agent</div>
+                <div>⚡ <b>快速啟動</b>：不經分析，直接派發給已選 Agent</div>
+                <div>🚀 <b>全部並行執行</b>：所有已選 Agent 同時並行處理</div>
+            </div>
         </div>
 
         <!-- 分工任務列表 -->
@@ -395,6 +410,8 @@ const $agentSelectArea = document.getElementById('agentSelectArea');
 function toggleAgentSelect() {
     $agentSelectArea.classList.toggle('collapsed');
 }
+// 手機版預設摺疊 Agent 選擇區（節省空間，避免擠壓任務列表）
+if (window.innerWidth <= 768) $agentSelectArea.classList.add('collapsed');
 
 // ==================== 面板摺疊 ====================
 function toggleTaskPanel() {
@@ -726,7 +743,10 @@ function quickDispatch() {
     renderTaskList();
     $meetingStatus.textContent = `⚡ 快速分工：${tasks.length} 個任務`;
     $btnRunAll.disabled = false;
-    showToast(`⚡ 已為 ${agents.length} 位 Agent 建立相同任務`);
+    showToast(`⚡ 已將任務直接派發給 ${agents.length} 位 Agent（並行執行）`);
+
+    // 🔧 快速啟動：不經分析，直接將 meetingInput 內容派發給已選 Agent 並立即並行執行
+    setTimeout(() => runAllTasks(), 100);
 }
 
 function parseAndCreateTasks(text) {
@@ -846,10 +866,9 @@ function renderTaskList() {
     $btnRunAll.disabled = false;
 }
 
-// ==================== 隊列依序執行（模擬並行） ====================
+// ==================== 全部並行執行（真正多工） ====================
 $btnRunAll.addEventListener('click', runAllTasks);
 
-let executionQueue = [];
 let isExecuting = false;
 
 function runAllTasks() {
@@ -864,39 +883,43 @@ function runAllTasks() {
         if (statusEl) { statusEl.textContent = '🟢 待命'; statusEl.className = 'agent-status idle'; }
     });
 
-    // 建立執行隊列
-    executionQueue = tasks.filter(t => t.status === 'waiting' || t.status === 'done').map(t => ({...t}));
+    // 收集所有待執行任務
+    const pendingTasks = tasks.filter(t => t.status === 'waiting' || t.status === 'done').map(t => ({...t}));
     tasks.forEach(t => { if (t.status === 'done') t.status = 'waiting'; });
-
-    isExecuting = false;
-    $meetingStatus.textContent = `🚀 開始依序執行 (${executionQueue.length} 個任務)`;
-    showToast(`🚀 ${executionQueue.length} 個 Agent 開始依序工作！`);
-    $btnRunAll.disabled = true;
-
-    processNextInQueue();
-}
-
-function processNextInQueue() {
-    if (executionQueue.length === 0) {
-        isExecuting = false;
-        $btnRunAll.disabled = false;
-        $meetingStatus.textContent = `✅ 全部完成 (${tasks.length} 個任務)`;
-        showToast('🎉 所有 Agent 任務完成！');
-        return;
-    }
+    if (pendingTasks.length === 0) { showToast('⚠️ 無待執行任務'); return; }
 
     isExecuting = true;
-    const queuedTask = executionQueue.shift();
-    // 找到對應的實際 task
-    const task = tasks.find(t => t.id === queuedTask.id);
-    if (!task) { processNextInQueue(); return; }
+    $btnRunAll.disabled = true;
+    $btnQuickDraft.disabled = true;
+    $btnAnalyze.disabled = true;
+    $meetingStatus.textContent = `🚀 ${pendingTasks.length} 個 Agent 同時並行執行中…`;
+    showToast(`🚀 ${pendingTasks.length} 個 Agent 已同時派發（真正並行）`);
 
-    $meetingStatus.textContent = `🟡 ${task.agent} 執行中… (剩餘 ${executionQueue.length} 個)`;
-    runSingleTask(task, () => {
-        // 完成後繼續下一個
-        processNextInQueue();
+    // 🔧 真正並行：同時對所有任務 emit，各自完成即回調
+    let completed = 0;
+    pendingTasks.forEach(qt => {
+        const task = tasks.find(t => t.id === qt.id);
+        if (!task) { completed++; checkAllDone(); return; }
+        runSingleTask(task, () => {
+            completed++;
+            checkAllDone();
+        });
     });
+
+    function checkAllDone() {
+        $meetingStatus.textContent = `🚀 並行執行中… 已完成 ${completed}/${pendingTasks.length}`;
+        if (completed >= pendingTasks.length) {
+            isExecuting = false;
+            $btnRunAll.disabled = false;
+            $btnQuickDraft.disabled = false;
+            $btnAnalyze.disabled = false;
+            $meetingStatus.textContent = `✅ 全部完成 (${tasks.length} 個任務)`;
+            showToast('🎉 所有 Agent 任務完成！');
+        }
+    }
 }
+
+// （已移除：原依序隊列執行，改為上方真正並行）
 
 function runSingleTask(task, onComplete) {
     task.status = 'running';
@@ -922,6 +945,8 @@ function runSingleTask(task, onComplete) {
 
     const handler = (data) => {
         if (resolved) return;
+        // 🔧 並行模式：只接收自己 agent 的 stream 事件（後端事件帶 data.agent）
+        if (data.agent && data.agent !== task.agent) return;
         if (data.type === 'reply') {
             accumulated += data.content;
             const out = document.getElementById(task.cardId + '-output');

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>春房間0725</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 
     <!-- Markdown 渲染庫 -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -15,8 +15,14 @@
 
     <!-- Monaco Editor -->
     <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
-    <link rel="stylesheet" href="/static/style.css">
-<script src="/static/main.js?v=20260808c"></script>
+    <link rel="stylesheet" href="{{ asset_url('style.css') }}">
+<!-- ══ MOKAGI 統一計費（唯一價格源：core/mok_price.py）══ -->
+    <script>window.MOKAGI_PRICE = {{ MOKAGI_PRICE | tojson }};</script>
+    <script src="{{ asset_url('mok_price.js') }}"></script>
+    <script src="{{ asset_url('notify.js') }}"></script>
+    <script src="{{ asset_url('main.js') }}"></script>
+    <!-- QuickNav 快捷提示套件 by indexPage -->
+    <link rel="stylesheet" href="{{ asset_url('quicknav/quicknav.css') }}">
 
 
 </head>
@@ -61,7 +67,7 @@
 
 
         <div class="agent-header">
-            <span><button id="createQiBtn" style="background:#4ec9b0; margin-left:8px; padding:2px 8px;">➕</button><button id="meetingBtn" style="background:#4ec9b0; margin-left:8px; padding:2px 8px;" onclick="location.href='會議模式'">📋 會議</button></span>
+            <span><button id="createQiBtn" style="background:#4ec9b0; margin-left:8px; padding:2px 8px;">➕</button><button id="meetingBtn" style="background:#4ec9b0; margin-left:8px; padding:2px 8px;" onclick="location.href='會議模式'">📋 會議</button><button id="clearAllJobsBtn" style="background:#e05561; margin-left:8px; padding:2px 8px;" title="一鍵清空所有 Agent 的 _job.json">🧹 清空Jobs</button></span>
             
             <button class="collapse-btn" id="toggleAgentSidebar">◀</button>
         </div>
@@ -75,11 +81,14 @@
     <!-- 中央聊天區 -->
     <div class="chat-main">
         <div id="haveOnline" class="chat-header">
-    <span id="agentHeaderDisplay"></span>
-    <button id="showPendingBtn" style="display:none; margin-left:10px; background:#4ec9b0; border:none; border-radius:16px; padding:2px 12px; cursor:pointer; font-size:0.8rem;">📋 未完成工作</button>
-    <button id="showToolProcessBtn" style="display:none; margin-left:6px; background:#e0a800; border:none; border-radius:16px; padding:2px 12px; cursor:pointer; font-size:0.8rem;">🔧 工具過程</button>
-    <button id="showSemanticBtn" style="display:none; margin-left:6px; background:#4a7a9c; border:none; border-radius:16px; padding:2px 12px; cursor:pointer; font-size:0.8rem;">🔍 語義搜索</button>
-    <button id="showExperienceBtn" style="display:none; margin-left:6px; background:#7a5a4a; border:none; border-radius:16px; padding:2px 12px; cursor:pointer; font-size:0.8rem;">📚 經驗參考</button>
+    <div class="chat-header-left">
+        <span id="agentHeaderDisplay"></span>
+        <button id="showPendingBtn" style="display:none; margin-left:10px; background:#4ec9b0; border:none; border-radius:16px; padding:2px 12px; cursor:pointer; font-size:0.8rem;">📋 未完成工作</button>
+        <button id="showToolProcessBtn" style="display:none; margin-left:6px; background:#e0a800; border:none; border-radius:16px; padding:2px 12px; cursor:pointer; font-size:0.8rem;">🔧 工具過程</button>
+        <button id="showSemanticBtn" style="display:none; margin-left:6px; background:#4a7a9c; border:none; border-radius:16px; padding:2px 12px; cursor:pointer; font-size:0.8rem;">🔍 語義搜索</button>
+        <button id="showExperienceBtn" style="display:none; margin-left:6px; background:#7a5a4a; border:none; border-radius:16px; padding:2px 12px; cursor:pointer; font-size:0.8rem;">📚 經驗參考</button>
+    </div>
+    <button id="stopBtn" title="緊急重啟" style="display:inline-flex !important; margin-left:auto;">🚫 <span class="btn-label">緊急重啟</span></button>
 </div>
         <div class="chat-messages" id="chatMessages">
             <div id="message-list"></div>
@@ -104,6 +113,7 @@
         <div class="chat-input-area">
             <!-- 工作中指示器 - 3D 侍女工作場景 -->
             <div id="workingIndicator" class="working-indicator" style="display:none;">
+                <div class="work-wave"></div>
                 <div class="work-scene">
                     <div class="work-monitor">
                         <div class="work-screen"></div>
@@ -118,28 +128,33 @@
                     </div>
                     <div class="work-desk"></div>
                 </div>
-                <span class="working-text">侍女 工作中...</span>
+                <span class="working-text" id="workingText">工作中...</span>
             </div>
             <!-- 輸入區域 wrapper -->
             <div id="chatInputWrapper">
                 <div class="drag-hint">📁 放開以加入檔案</div>
                 <!-- 新增附件容器 -->
                 <div id="attachmentsContainer" class="attachments-area" style="display: none;"></div>
-                <textarea id="chatInput" rows="2" placeholder="(Enter換行，Shift+Enter發送)"></textarea>
+                <textarea id="chatInput" rows="2" placeholder="(Enter換行，Shift+Enter發送 · 可Ctrl+V貼截圖)"></textarea>
             </div>
             <div class="btnBox">
 
-                <button id="menuToggle" class="mobile-menu-toggle">⚙️</button>
-                <button id="mobileOpenLeftBtn" class="mobile-panel-btn" title="選擇對話">💬 選擇對話</button>
-                <button id="jumpBtn" title="對話歷史">📋 對話歷史</button>
+                <button id="menuToggle" class="mobile-menu-toggle" title="agent頭像">⚙️</button>
+                <button id="mobileOpenLeftBtn" class="mobile-panel-btn" title="選擇對話">💬 <span class="btn-label">選擇對話</span></button>
+                <button id="jumpBtn" title="對話歷史">📋 <span class="btn-label">對話歷史</span></button>
+                <button id="mobileOpenRightBtn" class="mobile-panel-btn" title="工作">🖥️ <span class="btn-label">工作</span></button>
+
                 <div id="jumpDropdown" class="jump-dropdown" style="display:none;"></div>
                 
-                <button id="loadCodeBtn" title="加入文件夾">📂 加入文件夾</button>
-                <button id="attachFileBtn" title="加入檔案">📎 加入檔案</button>
-                <button id="mobileOpenRightBtn" class="mobile-panel-btn" title="工作">🖥️ 工作</button>
-                <button id="stopBtn" title="緊急重啟">🚫 緊急重啟</button>
-                <button id="clearChatBtn" title="清空對話">🗑️ 清空對話</button>
-                <button id="sendBtn" title="送出">📨 送出</button>
+                <!-- 水晶盤層：點 工作 🖥️ 展開的額外鍵 -->
+                <div class="crystal-plate" id="crystalPlate">
+                    <button id="loadCodeBtn" title="加入文件夾">📂 <span class="btn-label">加入文件夾</span></button>
+                    <button id="attachFileBtn" title="加入檔案">📎 <span class="btn-label">加入檔案</span></button>
+                    <button id="clearChatBtn" title="清空對話">🗑️ <span class="btn-label">清空對話</span></button>
+                    <button id="fontSizeBtn" title="放大字體">🔠 <span class="btn-label" id="fontSizeLabel">放大字體</span></button>
+                </div>
+                <button id="recordBtn" title="錄音">🎤 <span class="btn-label">錄音</span></button>
+                <button id="sendBtn" title="送出">📨 <span class="btn-label">送出</span></button>
                 <button id="scrollToBottomBtn" title="回到最新">↓</button>
             </div>
         </div>
@@ -158,10 +173,13 @@
                 <button data-tool="tools">🔧 工具</button>
                 <button data-tool="ascii">🎨 ASCII</button>
                 <button data-tool="search">🔍 搜尋</button>
+                <button data-tool="bookmark">📑 書籤</button>
                 <button data-tool="novnc">🖥️ 桌面</button>
+                <button data-tool="backup">💾 備份</button>
             </div>
             <button id="agentInfoBtn" class="agent-info-btn" title="查看 Agent 資訊">🌸</button>
             <button id="openToolsPanel2" title="再開一組工具面板">➕</button>
+            <button id="notebookBtn" title="筆記">📝 筆記</button>
             <button id="toggleToolsPanel">❌</button>
         </div>
         <div class="tools-content" id="toolsContent"></div>
@@ -181,10 +199,22 @@
             <button data-tool="tools" data-panel="2">🔧 工具</button>
             <button data-tool="ascii" data-panel="2">🎨 ASCII</button>
             <button data-tool="search" data-panel="2">🔍 搜尋</button>
+            <button data-tool="backup" data-panel="2">💾 備份</button>
         </div>
         <button id="closeToolsPanel2" title="關閉">❌</button>
     </div>
     <div class="tools-content" id="toolsContent2"></div>
+</div>
+
+<!-- 筆記浮動面板（右下） -->
+<div class="notebook-panel-float" id="notebookPanel" style="display:none;">
+    <div class="tools-header-float" id="notebookPanelDragHandle">
+        <span class="notebook-title">📝 筆記</span>
+        <button id="closeNotebookPanel" title="關閉">❌</button>
+    </div>
+    <div class="notebook-content">
+        <iframe src="/webTools/K_notebook2.html" style="width:100%; height:100%; border:none;"></iframe>
+    </div>
 </div>
 
 <!-- 滾動到底部按鈕 -->
@@ -241,7 +271,7 @@
                 <input type="text" id="newAgentName" placeholder="輸入名字（中英文、數字、_-）" maxlength="30" />
             </div>
             <div class="create-agent-field">
-                <label>🎭 選擇角色模板 <span class="role-hint">（可選，從 Agency Agents 挑選）</span></label>
+                <label>🎭 選擇角色模板 <span class="role-hint">（可選，自訂角色 + Agency Agents）</span></label>
                 <div class="role-search-box">
                     <input type="text" id="roleSearchInput" placeholder="🔍 搜尋角色..." />
                 </div>
@@ -263,6 +293,10 @@
 
 
 
+
+<!-- QuickNav 快捷提示套件 by indexPage -->
+<script src="{{ asset_url('quicknav/quicknav.js') }}"></script>
+<script>QuickNav.init({ input: '#chatInput' });</script>
 
 </body>
 </html>

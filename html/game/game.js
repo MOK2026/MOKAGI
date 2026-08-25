@@ -78,7 +78,6 @@ const scoreText = $('score-text');
 // ============ LOCALSTORAGE ============
 function lsGet(k,d){try{const v=localStorage.getItem('mokafight_'+k);return v?JSON.parse(v):d}catch(e){return d}}
 function lsSet(k,v){try{localStorage.setItem('mokafight_'+k,JSON.stringify(v))}catch(e){}}
-function getPlayerName(){const uid=localStorage.getItem('mokagi_user_id');return uid||('guest_'+Date.now());}
 
 // Zone stats: {top:{start:5,business:2,pay:1}, ...}
 let zoneStats = lsGet('zone_stats',{});
@@ -324,7 +323,7 @@ BUILDINGS.forEach(b=>{
   nctx.fillStyle="rgba(0,0,0,0.75)";nctx.beginPath();nctx.roundRect(10,10,492,76,12);nctx.fill();
   nctx.strokeStyle="#00f0ff";nctx.lineWidth=3;nctx.beginPath();nctx.roundRect(10,10,492,76,12);nctx.stroke();
   nctx.fillStyle="#00f0ff";nctx.font="bold 28px \"Courier New\",\"微軟正黑體\",monospace";nctx.textAlign="center";
-  nctx.fillText(b.name,256,58);
+  nctx.fillText((getPlayerLevel() >= (b.lv||1)) ? b.name : "???",256,58);
   const nameTex = new THREE.CanvasTexture(nameCanvas);nameTex.minFilter=THREE.LinearFilter;
   // 立體名稱標籤 - BoxGeometry 前後貼文字，360度可見
   const nameGeo = new THREE.BoxGeometry(3.5,0.7,0.12);
@@ -340,7 +339,8 @@ BUILDINGS.forEach(b=>{
   nameLabel.add(nameEdgeLine);
 
   group.position.set(b.pos[0],b.pos[1],b.pos[2]);
-  group.userData = {name:b.name,desc:b.desc,isBuilding:true};
+  group.userData = {name:b.name,desc:b.desc,isBuilding:true,lv:(b.lv||1)};
+  group.visible = (getPlayerLevel() >= (b.lv||1));
   scene.add(group);
   buildingMeshes.push(group);
 });
@@ -390,7 +390,7 @@ function createAgentNPC(agentData,x,z){
   const glowMat = new THREE.MeshBasicMaterial({color:agentColor,transparent:true,opacity:0.7});
   const glow = new THREE.Mesh(glowGeo,glowMat);glow.rotation.x=Math.PI/2;glow.position.y=0.1;group.add(glow);
   // Label Sprite (always faces camera - 文字有厚度不消失)
-  const agentMeta = AGENTS_DATA.find(a=>a.name===name)||{icon:"🤖",post:"村民",color:0x00ffcc};
+  const agentMeta = AGENTS_DATA.find(a=>a.name===name)||{icon:"🤖",post:"統治者",color:0x00ffcc};
   const labelCanvas = document.createElement('canvas');
   labelCanvas.width=512;labelCanvas.height=148;
   const lctx=labelCanvas.getContext('2d');
@@ -427,16 +427,28 @@ function createAgentNPC(agentData,x,z){
 function spawnAgents(){
   agentNPCs.forEach(a=>scene.remove(a));
   agentNPCs.length=0;
-  const count = AGENTS_DATA.length;
+  const lv = getPlayerLevel();
+  const visibleAgents = AGENTS_DATA.filter(a => (a.lv||1) <= lv);
   // 城市感散落：集中在中央廣場周圍，不重疊建築物
   const spawnSpots=[{x:2,z:4},{x:-8,z:-6},{x:10,z:-8},{x:-14,z:10},{x:-5,z:15},{x:7,z:-15},{x:16,z:3},{x:-18,z:-4},{x:12,z:12}];
-  for(let i=0;i<count;i++){
+  visibleAgents.forEach((agent,i)=>{
     const spot=spawnSpots[i]||{x:(Math.random()-0.5)*40,z:(Math.random()-0.5)*40};
-    createAgentNPC(AGENTS_DATA[i],spot.x,spot.z);
-  }
-  onlineCount.textContent = '👥 '+count+' 位村民在線';
+    createAgentNPC(agent,spot.x,spot.z);
+  });
+  onlineCount.textContent = '👥 '+visibleAgents.length+' 位統治者在線';
 }
 spawnAgents();
+
+// 🔥 玩家升級後刷新地圖顯示（建築物 + AGENTS 依等級解鎖）
+function refreshWorldVisibility(){
+  const lv = getPlayerLevel();
+  buildingMeshes.forEach(g=>{
+    if(g.userData && g.userData.lv !== undefined){
+      g.visible = lv >= g.userData.lv;
+    }
+  });
+  spawnAgents();
+}
 
 
 // ============ RAYCASTER ============
@@ -565,7 +577,9 @@ function openChat(agentName){
   // 🔥 載入歷史對話
   loadChatHistory(agentName);
   if(chatMessages.children.length===0){
-    addChatMessage('agent','你好！我是 '+agentName+'，歡迎來到莫氏 AI 村莊～');
+    const agentData = AGENTS_DATA.find(a => a.name === agentName);
+    const welcomeMsg = agentData && agentData.welcome ? agentData.welcome : ('你好！我是 '+agentName+'，這個行業入口歸我統治…想挑戰我嗎？');
+    addChatMessage('agent', welcomeMsg);
   }
 }
 
@@ -601,7 +615,7 @@ function drawBattleArena(){
     battleCtx.fillStyle="rgba(255,80,80,"+(0.5*(1-(nowT-state.hitFlashTime)/250))+")";
     battleCtx.fillRect(0,0,cw*0.44,ch);
   }
-  drawFighter(battleCtx,px,py,0.8,"#00f0ff",getPlayerName(),state.playerHP);
+  drawFighter(battleCtx,px,py,0.8,"#00f0ff","你",state.playerHP);
   // Enemy (right)
   const ex=cw*0.78, ey=ch*0.5;
   // 🔥 敵人被擊中閃光
@@ -676,18 +690,26 @@ function drawFighter(ctx,x,y,scale,color,name,hp){
   ctx.restore();
 }
 
+// 🔥 玩家lv = 總升級點數（已花費 + 未花費），最低為 1
+function getPlayerLevel(){
+  const base = {normalDmg:1, blockDmg:1, counterDmg:1, hp:11};
+  const p = state.playerStats;
+  const spent = (p.normalDmg-base.normalDmg) + (p.blockDmg-base.blockDmg) + (p.counterDmg-base.counterDmg) + (p.hp-base.hp);
+  return Math.max(1, spent + (p.skillPoints||0));
+}
+
 function startBattle(agentName){
   state.mode='battle';
   state.currentInteractAgent = agentName;
   // 🔥 從 AGENTS_DATA 讀取該 agent 獨特戰鬥數值
   const ad = AGENTS_DATA.find(a=>a.name===agentName) || AGENTS_DATA[0] || {};
   state.battleAtkInterval = ad.atkInterval ?? 1.0;
-  state.battleAtkSpeed = ad.atkSpeed ?? 0.3;
+  state.battleAtkSpeed = (ad.atkSpeed ?? 0.3) * 2;
   state.battleCounterRate = ad.counterRate ?? 0.25;
   state.battleNormalDmg = ad.normalDmg ?? 2;
   state.battleBlockDmg = ad.blockDmg ?? 1;
   state.battleCounterDmg = ad.counterDmg ?? 3;
-  state.battleHP = ad.hp ?? 10;
+  state.battleHP = (ad.hp ?? 10) * 2 * getPlayerLevel();
   state.battleTime = 10; // 🔥 固定10秒
   state.playerHP=state.playerStats.hp;state.enemyHP=state.battleHP;
   state.battleTimer=state.battleTime;state.battleActive=true;
@@ -700,7 +722,7 @@ function startBattle(agentName){
   battleOverlay.classList.add('active');
   battleResult.className='';
   battleResult.textContent='';
-  battlePlayerName.textContent=getPlayerName();
+  battlePlayerName.textContent='你';
   battleEnemyName.textContent=agentName;
   battlePlayerHP.style.width='100%';
   battleEnemyHP.style.width='100%';
@@ -803,7 +825,7 @@ function playerMove(move){
 }
 
 function updateBattleHP(){
-  const pctP = Math.max(0, (state.playerHP/state.battleHP)*100);
+  const pctP = Math.max(0, (state.playerHP/state.playerStats.hp)*100);
   const pctE = Math.max(0, (state.enemyHP/state.battleHP)*100);
   battlePlayerHP.style.width = pctP+'%';
   battleEnemyHP.style.width = pctE+'%';
@@ -857,6 +879,7 @@ function endBattle(result){
     battleOverlay.classList.remove('active');
     battleResult.className='';battleResult.textContent='';
     state.mode='game';
+    if(result==='win') refreshWorldVisibility(); // 🔥 升級後刷新地圖
     // 🔥 對話挑戰：無論勝敗都回答提問，只有戰後台詞不同
     if(state.pendingChatMsg){
       const playerWon = result==='win' || (result!=='lose' && state.playerHP>=state.enemyHP);
@@ -1099,16 +1122,18 @@ canvas3D.addEventListener('click',(e)=>{
         return;
       }
       if(obj.userData&&obj.userData.isBuilding){
-        buildingTooltip.innerHTML = '🏛 '+obj.userData.name+'<br>'+obj.userData.desc;
+        const _bNeed = obj.userData.lv || 1;
+        const _bUnlocked = getPlayerLevel() >= _bNeed;
+        buildingTooltip.innerHTML = _bUnlocked ? ('🏛 '+obj.userData.name+'<br>'+obj.userData.desc) : '???';
         const bd=BUILDINGS.find(b=>b.name===obj.userData.name);
-        if(bd&&bd.url){buildingTooltip.innerHTML+='<br><a href="'+bd.url+'" target="_blank" style="color:#ffd700;text-decoration:underline;font-size:12px;">🔗 開啟網站 →</a>';}
+        if(_bUnlocked && bd && bd.url){buildingTooltip.innerHTML+='<br><a href="'+bd.url+'" target="_blank" style="color:#ffd700;text-decoration:underline;font-size:12px;">🔗 開啟網站 →</a>';}
         buildingTooltip.style.left = e.clientX+'px';
         buildingTooltip.style.top = (e.clientY-80)+'px';
         buildingTooltip.classList.add('show');
         setTimeout(()=>buildingTooltip.classList.remove('show'),4000);
 
         // Arena special
-        if(obj.userData.name.includes('競技場')){
+        if(_bUnlocked && obj.userData.name.includes('競技場')){
           buildingTooltip.innerHTML = '🏆 排行榜<br>'+state.score.wins+'勝 '+state.score.losses+'敗';
         const _abd=BUILDINGS.find(b=>b.name===obj.userData.name);
         if(_abd&&_abd.url){buildingTooltip.innerHTML+='<br><a href="'+_abd.url+'" target="_blank" style="color:#ffd700;text-decoration:underline;font-size:12px;">🔗 開啟網站 →</a>';}
@@ -1138,7 +1163,7 @@ canvas3D.addEventListener('mousemove',(e)=>{
         return;
       }
       if(obj.userData&&obj.userData.isBuilding){
-        agentNameTag.textContent = obj.userData.name;
+        agentNameTag.textContent = (getPlayerLevel() >= (obj.userData.lv||1)) ? obj.userData.name : '???';
         agentNameTag.style.left = e.clientX+'px';
         agentNameTag.style.top = e.clientY+'px';
         agentNameTag.classList.add('show');
@@ -1186,6 +1211,7 @@ document.querySelectorAll('.upgrade-btn').forEach(btn=>{
       state.playerStats[stat]++;state.playerStats.skillPoints--;
       lsSet('player_stats',state.playerStats);
       showUpgradePanel();
+      if(window.updateCharacterPanel) window.updateCharacterPanel();
     }
   });
 });

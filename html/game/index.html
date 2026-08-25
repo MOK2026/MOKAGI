@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>莫氏集團 · 3D多人線上養成格鬥</title>
-<meta name="description" content="莫氏集團 - 3D多人線上養成格鬥遊戲。AI村民互動、格鬥競技！">
+<title>莫氏集團 · 勇者討伐莫氏大魔王</title>
+<meta name="description" content="莫氏集團 - 勇者討伐莫氏大魔王！逐一擊敗 13 位行業統治者，征服地球。">
 <script type="importmap">
 {"imports":{"three":"https://unpkg.com/three@0.170.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.170.0/examples/jsm/"}}
 </script>
 <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
-  <link rel="stylesheet" href="/game/style.css">
+  <link rel="stylesheet" href="/game/style.css?v=1786686758">
 </head>
 <body>
 
@@ -31,16 +31,16 @@
 <!-- 開始選單 -->
 <div id="start-menu">
   <div id="zone-indicator"></div>
-  <a class="menu-btn" id="btn-start" href="javascript:void(0)">⚔️ 開始遊戲</a>
-  <a class="menu-btn" id="btn-business" href="#">🏢 商業</a>
+  <a class="menu-btn" id="btn-start" href="javascript:void(0)">⚔️ 開始討伐</a>
+  <a class="menu-btn" id="btn-business" href="#">🏢 商業入口</a>
   <a class="menu-btn" id="btn-pay" href="#">💎 充值</a>
 </div>
 
 <!-- 遊戲 UI -->
 <div id="game-ui">
   <div id="top-bar">
-    <span class="title">🏘️ 莫氏 AI 村莊</span>
-    <span class="info" id="online-count">村民加載中...</span>
+    <span class="title">🏰 莫氏大魔王 · 地球征服戰</span>
+    <span class="info" id="online-count">勇者加載中...</span>
     <button id="btn-back-to-start" style="pointer-events:all">◄ 返回</button>
   </div>
 </div>
@@ -48,7 +48,7 @@
 <div id="agent-name-tag"></div>
 <div id="agent-info-tag"></div>
 <div id="building-tooltip"></div>
-<div id="score-board">🏆 格鬥競技場<br><span id="score-text">0 勝 0 敗</span><br><small style="color:#aaa;font-size:12px">點擊查看世界地圖</small></div>
+<div id="score-board">🏆 討伐戰績<br><span id="score-text">0 勝 0 敗</span><br><small style="color:#aaa;font-size:12px">點擊查看世界地圖</small></div>
 
 <!-- 世界地圖面板（3 分頁） -->
 <div id="world-map-panel">
@@ -68,8 +68,8 @@
       <div id="character-content">
         <div class="char-hero">
           <div class="char-avatar-big">🧑</div>
-          <div class="char-name-big" id="char-name-display">冒險者</div>
-          <div class="char-title" id="char-title-display">莫氏集團 · 見習成員</div>
+          <div class="char-name-big" id="char-name-display">勇者</div>
+          <div class="char-title" id="char-title-display">莫氏集團討伐戰 · 勇者</div>
         </div>
         <div class="char-stats-grid">
           <div class="char-stat"><span class="cs-label">⚔️ 攻擊</span><span class="cs-val" id="cs-atk">1</span></div>
@@ -144,7 +144,7 @@
   <div id="upgrade-points">可用點數：0</div>
   <div id="upgrade-buttons">
     <button class="upgrade-btn" data-stat="normalDmg">⚔️ 攻擊力 <span class="upgrade-val">2</span></button>
-    <button class="upgrade-btn" data-stat="blockDmg">🛡 格擋傷害 <span class="upgrade-val">1</span></button>
+    <button class="upgrade-btn" data-stat="blockDmg">🛡 破防傷害 <span class="upgrade-val">1</span></button>
     <button class="upgrade-btn" data-stat="counterDmg">⚡ 反擊傷害 <span class="upgrade-val">3</span></button>
     <button class="upgrade-btn" data-stat="hp">❤️ 血量 <span class="upgrade-val">10</span></button>
   </div>
@@ -154,9 +154,9 @@
 <!-- 故事介紹 -->
 <div id="story-overlay">
   <div id="story-box">
-    <h2>📜 莫氏 AI 村莊</h2>
+    <h2>📜 莫氏大魔王要統治地球</h2>
     <p id="story-text"></p>
-    <button id="story-start">⚔️ 進入村莊</button>
+    <button id="story-start">⚔️ 成為勇者，討伐魔王</button>
   </div>
 </div>
 
@@ -167,7 +167,7 @@
 </div>
 
 
-  <script src="/game/set.js"></script>
-  <script type="module" src="/game/game.js"></script>
+  <script src="/game/set.js?v=1786686758"></script>
+  <script type="module" src="/game/game.js?v=1786686758"></script>
 </body>
 </html>
