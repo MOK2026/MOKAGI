@@ -61,6 +61,67 @@
             overflow-y: auto;
             padding: 8px;
         }
+        .agent-group {
+            margin-bottom: 2px;
+        }
+        .agent-group-header {
+            padding: 6px 10px;
+            margin: 10px 0 6px;
+            font-size: 0.72rem;
+            font-weight: bold;
+            letter-spacing: 0.05em;
+            color: #4ec9b0;
+            background: #1e1e1e;
+            border-left: 3px solid #4ec9b0;
+            border-radius: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .agent-group-header:hover {
+            background: #252526;
+            border-left-color: #6ee7c8;
+        }
+        .agent-group:first-child .agent-group-header {
+            margin-top: 2px;
+        }
+        .agent-group-arrow {
+            font-size: 0.6rem;
+            color: #7ec8a8;
+            flex-shrink: 0;
+            width: 12px;
+            text-align: center;
+            transition: transform 0.15s ease;
+        }
+        .agent-group-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .agent-group-count {
+            flex-shrink: 0;
+            font-size: 0.6rem;
+            font-weight: normal;
+            color: #9aa0a6;
+            background: #3c3c3c;
+            border-radius: 8px;
+            padding: 1px 7px;
+            min-width: 16px;
+            text-align: center;
+        }
+        .agent-group.collapsed .agent-group-arrow {
+            transform: rotate(-90deg);
+        }
+        .agent-group.collapsed .agent-group-body {
+            display: none !important;
+        }
         .agent-item {
             padding: 8px 10px;
             margin-bottom: 6px;
@@ -92,12 +153,100 @@
             border-left: 3px solid #4ec9b0;
         }
         .agent-item.running {
-            background: #1a3a4a;
+            background: rgba(26, 58, 74, 0.96);
             border-left: 3px solid #4ec9b0;
+            position: relative;
+            box-shadow: inset 0 0 0 1px rgba(78, 201, 176, 0.18), 0 0 18px rgba(78, 201, 176, 0.16);
+            overflow: hidden;
+        }
+        .agent-item.running::before {
+            content: "";
+            position: absolute;
+            inset: -1px;
+            border-radius: 10px;
+            padding: 2px;
+            background: conic-gradient(from 0deg,
+                rgba(78, 201, 176, 0) 0deg,
+                rgba(90, 223, 255, 0.95) 35deg,
+                rgba(150, 255, 235, 0.9) 70deg,
+                rgba(90, 223, 255, 0.4) 120deg,
+                rgba(78, 201, 176, 0) 180deg,
+                rgba(149, 235, 255, 0.9) 235deg,
+                rgba(78, 201, 176, 0) 300deg,
+                rgba(78, 201, 176, 0) 360deg);
+            -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            -webkit-mask-composite: xor;
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask-composite: exclude;
+            pointer-events: none;
+        }
+        .agent-item.running::after {
+            content: "";
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            top: 1px;
+            left: 1px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 35%, #ecffff 0%, #6ef2ff 20%, #4ec9b0 52%, rgba(78, 201, 176, 0.2) 100%);
+            box-shadow: 0 0 12px rgba(110, 242, 255, 0.9), 0 0 20px rgba(78, 201, 176, 0.8);
+            animation: beadBorderWalk 4.8s linear infinite;
+            pointer-events: none;
         }
         .agent-item.has-new {
             background: #4a3a1a;
             border-left: 3px solid #e0a800;
+        }
+
+        /* === 水波特效（OXXO clip-path 技法）｜名片（agent 卡片）工作中 === */
+        .agent-item.running .agent-wave,
+        .agent-item.running .agent-wave::before,
+        .agent-item.running .agent-wave::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 8px;
+            pointer-events: none;
+            clip-path: ellipse(0 0 at 50% 50%);
+            will-change: clip-path, opacity;
+        }
+        .agent-item.running .agent-wave {
+            z-index: 0;
+            background: radial-gradient(circle at 50% 50%, rgba(110,242,255,0.5) 0%, rgba(78,201,176,0.14) 50%, rgba(78,201,176,0) 70%);
+            animation: agentWave1 3.5s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+        }
+        .agent-item.running .agent-wave::before {
+            background: radial-gradient(circle at 50% 50%, rgba(118,255,221,0.45) 0%, rgba(78,201,176,0.12) 50%, rgba(78,201,176,0) 70%);
+            animation: agentWave2 3.5s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+        }
+        .agent-item.running .agent-wave::after {
+            background: radial-gradient(circle at 50% 50%, rgba(110,242,255,0.4) 0%, rgba(78,201,176,0.10) 50%, rgba(78,201,176,0) 70%);
+            animation: agentWave3 3.5s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+        }
+        @keyframes agentWave1 {
+            0%   { clip-path: ellipse(0 0 at 50% 50%); opacity: 0.45; }
+            70%  { opacity: 0.12; }
+            100% { clip-path: ellipse(220% 220% at 50% 50%); opacity: 0; }
+        }
+        @keyframes agentWave2 {
+            0%, 12% { clip-path: ellipse(0 0 at 50% 50%); opacity: 0.45; }
+            82%     { opacity: 0.12; }
+            100%    { clip-path: ellipse(220% 220% at 50% 50%); opacity: 0; }
+        }
+        @keyframes agentWave3 {
+            0%, 24% { clip-path: ellipse(0 0 at 50% 50%); opacity: 0.45; }
+            94%     { opacity: 0.12; }
+            100%    { clip-path: ellipse(220% 220% at 50% 50%); opacity: 0; }
+        }
+        /* 讓卡片文字保持在波紋之上 */
+        .agent-item .agent-icon,
+        .agent-item .agent-name,
+        .agent-item .agent-post {
+            position: relative;
+            z-index: 1;
         }
 
         .agent-icon {
@@ -125,11 +274,42 @@
             bottom: 0;
         }
         .chat-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             padding: 10px 16px;
             background: #2d2d30;
             border-bottom: 1px solid #3e3e42;
             font-weight: bold;
             color: #4ec9b0;
+        }
+        .chat-header-left {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+        }
+        #agentHeaderDisplay {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #stopBtn {
+            flex-shrink: 0;
+            background: rgba(244, 135, 113, 0.16);
+            border: 1px solid rgba(244, 135, 113, 0.45);
+            color: #f48771;
+            border-radius: 18px;
+            padding: 4px 14px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        #stopBtn:hover {
+            background: rgba(244, 135, 113, 0.28);
         }
         .chat-messages {
             flex: 1;
@@ -274,6 +454,66 @@
         #openToolsPanel2:hover {
             background: #4ec9b033;
         }
+        /* ===== 筆記浮動面板（右下） ===== */
+        .notebook-panel-float {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 480px;
+            height: 520px;
+            min-width: 320px;
+            min-height: 280px;
+            background: #1e1e1e;
+            border: 2px solid #4ec9b0;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            z-index: 9999;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+            resize: both;
+            overflow: hidden;
+        }
+        .notebook-panel-float .notebook-title {
+            color: #4ec9b0;
+            font-size: 0.9rem;
+            font-weight: bold;
+        }
+        .notebook-panel-float .notebook-content {
+            flex: 1;
+            overflow: hidden;
+        }
+        #notebookBtn {
+            background: none;
+            border: none;
+            color: #4ec9b0;
+            font-size: 0.85rem;
+            cursor: pointer;
+            padding: 2px 8px;
+            border-radius: 12px;
+        }
+        #notebookBtn:hover {
+            background: #4ec9b033;
+        }
+        #closeNotebookPanel {
+            background: none;
+            border: none;
+            color: #f48771;
+            font-size: 1rem;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        #closeNotebookPanel:hover {
+            background: #f4877133;
+        }
+        @media (max-width: 768px) {
+            .notebook-panel-float {
+                width: 90vw !important;
+                height: 70vh !important;
+                bottom: 2vh !important;
+                right: 5vw !important;
+            }
+        }
         /* 手機端調整浮動面板 */
         @media (max-width: 768px) {
             .tools-panel-float {
@@ -308,14 +548,35 @@
             50% { box-shadow: 0 0 10px #4ec9b060; }
         }
         /* content-resize-handle：隱藏拖拽手柄 */
-        #content-resize-handle {
-            height:1px; background:rgb(0, 0, 0,0); cursor:ns-resize; flex-shrink:0;
+        /* editor-path-resize-handle */
+        #editor-path-resize-handle {
+            height:1px; background:rgba(0, 0, 0, 0); cursor:ns-resize; flex-shrink:0;
             animation: cornerGlowPulse 4.8s ease-in-out infinite;
         }
-        #content-resize-handle:hover {
-            height:5px; 
-                    background:#4ec9b020;
-                    box-shadow: 0 0 50px #4ec9b080;
+        #editor-path-resize-handle:hover {
+            height:5px;
+            background:#4ec9b020;
+            box-shadow: 0 0 50px #4ec9b080;
+        }
+
+        #content-resize-handle {
+            height:8px; background:transparent; cursor:ns-resize; flex-shrink:0;
+            position:relative;
+        }
+        #content-resize-handle::before {
+            content:''; position:absolute; left:0; right:0; top:50%;
+            height:1px; transform:translateY(-50%);
+            background:#4ec9b040; transition:all 0.2s;
+        }
+        #content-resize-handle:hover::before {
+            height:3px; background:#4ec9b0; box-shadow:0 0 50px #4ec9b080;
+        }
+        /* mode-toggle-bar：整列（🌐 預覽 / ✏️ 編輯）也可拖拽調整高度 */
+        #mode-toggle-bar {
+            cursor:ns-resize; user-select:none; -webkit-user-select:none;
+        }
+        #mode-toggle-bar button {
+            cursor:pointer;
         }
 
         /* 聊天消息樣式 */
@@ -338,6 +599,7 @@
     font-size: 0.7rem;
     color: #888;
     margin-top: 10px;
+    margin-bottom: 14px;
     padding-left: 10px;
     height: auto;   /* 改為 auto 以容納更多文字 */
 }
@@ -382,7 +644,30 @@
 
     .chat-input-area {
         height: auto;
-        padding-bottom: 0;
+        padding: 10px 10px 12px;
+        margin: 0 10px calc(10px + env(safe-area-inset-bottom));
+        background: rgba(30, 30, 34, 0.45);
+        backdrop-filter: blur(20px) saturate(160%);
+        -webkit-backdrop-filter: blur(20px) saturate(160%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 22px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    }
+    .chat-input-area textarea {
+        width: 100%;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(78, 201, 176, 0.35);
+        border-radius: 18px;
+        padding: 10px 14px;
+        color: #eaeaea;
+        resize: none;
+        font-size: 0.95rem;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+    .chat-input-area textarea:focus {
+        outline: none;
+        border-color: #4ec9b0;
+        box-shadow: 0 0 0 3px rgba(78, 201, 176, 0.18);
     }
 
     .agent-sidebar {
@@ -394,7 +679,11 @@
         transform: translateX(-100%);
         transition: transform 0.2s;
         width: 40% !important;
-        opacity: .8;
+        background: rgba(37, 37, 40, 0.78) !important;
+        backdrop-filter: blur(18px) saturate(160%);
+        -webkit-backdrop-filter: blur(18px) saturate(160%);
+        border-right: 1px solid rgba(255, 255, 255, 0.09);
+        opacity: 1;
     }
     .agent-sidebar.mobile-open {
         transform: translateX(0);
@@ -407,8 +696,12 @@
         z-index: 100;
         transform: translateX(100%);
         transition: transform 0.2s;
-        width: 80% !important;
-        opacity: .8;
+        width: 100% !important;
+        background: rgba(30, 30, 34, 0.78) !important;
+        backdrop-filter: blur(18px) saturate(160%);
+        -webkit-backdrop-filter: blur(18px) saturate(160%);
+        border-left: 1px solid rgba(255, 255, 255, 0.09);
+        opacity: 1;
     }
     .tools-panel.mobile-open {
         transform: translateX(0);
@@ -416,54 +709,206 @@
     .mobile-panel-btn {
         display: inline-block;
     }
+    /* 手機版：header 的緊急重啟也顯示（與桌面版統一在右上） */
+    #stopBtn { display: inline-flex; }
     #left-resize-handle, #right-resize-handle {
         display: none;
     }
     #scrollToBottomBtn {
         position: fixed;
-        bottom: 80px;
+        bottom: 92px;
         right: 16px;
-        width: 36px;
-        height: 36px;
-        font-size: 1rem;
+        width: 48px !important;
+        height: 48px !important;
+        font-size: 1.1rem !important;
+        background: rgba(255, 255, 255, 0.08) !important;
+        color: #eaeaea !important;
+        border: 1px solid rgba(255, 255, 255, 0.18) !important;
+        border-radius: 50% !important;
+        backdrop-filter: blur(18px) saturate(160%);
+        -webkit-backdrop-filter: blur(18px) saturate(160%);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+        opacity: 0.82 !important;
+    }
+    #scrollToBottomBtn:active {
+        background: rgba(255, 255, 255, 0.16) !important;
+        transform: scale(0.92);
     }
     /* 展開選單時隱藏滾動按鈕，避免重疊衝突 */
-    .btnBox.expanded #scrollToBottomBtn {
+    .btnBox.expanded #scrollToBottomBtn,
+    .btnBox.expanded ~ #scrollToBottomBtn {
         display: none !important;
     }
 
     /* ===== 手機版菜單（僅手機生效） ===== */
-    .mobile-menu-toggle {
-        display: block !important;
+    /* 手機版：輸入區下方按鍵 → 主層 5 鍵平均分布（每鍵約 20% 寬），只顯示 emoji */
+    .btnBox {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 6px;
+        justify-content: center;
+        align-items: center;
+        margin-top: 8px;
+        position: relative;
+        touch-action: auto !important;
     }
-    /* 默認隱藏除了 .mobile-menu-toggle 以外的所有按鈕 */
-    .btnBox button:not(.mobile-menu-toggle) {
+    .btnBox button {
+        display: none;
+        flex: 1 1 0;
+        min-width: 0;
+        height: 48px;
+        padding: 0;
+        margin: 0;
+        font-size: 1.25rem;
+        line-height: 1;
+        border-radius: 16px;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        color: #eaeaea;
+        transition: transform 0.15s ease, background 0.15s ease;
+    }
+    .btnBox button:active {
+        transform: scale(0.94);
+        background: rgba(255, 255, 255, 0.14);
+    }
+    /* 手機版：隱藏按鍵文字標籤，只保留 emoji 圖示 */
+    .btnBox button .btn-label {
         display: none;
     }
-    /* 展開狀態：顯示全部按鈕（垂直排列） */
-    .btnBox.expanded {
+    /* 主層默認顯示 5 鍵：選擇對話 + 對話歷史 + 發送 + 工作 + agent頭像 */
+    .btnBox button.mobile-menu-toggle,
+    .btnBox button#mobileOpenLeftBtn,
+    .btnBox button#jumpBtn,
+    .btnBox button#mobileOpenRightBtn,
+    .btnBox button#sendBtn,
+    .btnBox button#recordBtn {
+        display: inline-flex;
+    }
+    /* 主層排列（左→右）：選擇對話 → 對話歷史 → 發送 → 工作 → agent頭像 */
+    .btnBox button#mobileOpenLeftBtn   { order: 1; }
+    .btnBox button#jumpBtn             { order: 2; }
+    .btnBox button.mobile-menu-toggle  { order: 5; }
+    .btnBox button#loadCodeBtn         { order: 5; }
+    .btnBox button#attachFileBtn       { order: 6; }
+    .btnBox button#mobileOpenRightBtn  { order: 4; }
+    .btnBox button#clearChatBtn        { order: 8; }
+    .btnBox button#sendBtn             { order: 3; }
+    /* agent頭像 → 圓形玻璃徽章 */
+    .btnBox button.mobile-menu-toggle {
+        background: rgba(78, 201, 176, 0.18);
+        border: 1.5px solid rgba(78, 201, 176, 0.45);
+        font-size: 1.5rem;
+    }
+    /* 發送鍵 → 高亮主色 */
+    .btnBox button#sendBtn {
+        background: linear-gradient(135deg, #4ec9b0, #2aa88f);
+        border: none;
+        color: #0f1f1c;
+        box-shadow: 0 4px 14px rgba(78, 201, 176, 0.45);
+    }
+    /* ===== 水晶盤層：點 agent頭像 顯示的額外鍵（另一層水晶盤） ===== */
+    .crystal-plate {
+        position: absolute;
+        bottom: calc(100% + 14px);
+        left: -2px;
+        right: -2px;
+        display: none;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 0;
+        justify-content: space-evenly;
+        align-items: center;
+        padding: 12px 10px;
+        border-radius: 22px;
+        background: rgba(78, 201, 176, 0.07);
+        backdrop-filter: blur(26px) saturate(180%);
+        -webkit-backdrop-filter: blur(26px) saturate(180%);
+        border: 1px solid rgba(78, 201, 176, 0.28);
+        box-shadow: 0 14px 44px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+        z-index: 300;
+    }
+    .btnBox.expanded .crystal-plate {
         display: flex;
-        flex-direction: column;
-        gap: 8px;
-        align-items: stretch;
-        background: rgba(30,30,30,0.95);
-        padding: 12px;
-        border-radius: 12px;
-        position: fixed;
-        bottom: 80px;
-        right: 16px;
-        left: 16px;
-        z-index: 1000;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.8);
     }
-    .btnBox.expanded button:not(.mobile-menu-toggle) {
-        display: block;
-        width: 100%;
-        text-align: center;
+    .crystal-plate button {
+        display: inline-flex;
+        flex: 0 0 20%;
+        min-width: 0;
+        height: 48px;
+        padding: 0;
+        margin: 0;
+        font-size: 1.25rem;
+        line-height: 1;
+        border-radius: 16px;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        color: #eaeaea;
+        transition: transform 0.15s ease, background 0.15s ease;
     }
-    .btnBox.expanded .mobile-menu-toggle {
-        display: block !important;
-        align-self: flex-end; /* 讓 ⚙️ 在右上角 */
+    .crystal-plate button:active {
+        transform: scale(0.94);
+        background: rgba(255, 255, 255, 0.16);
+    }
+
+    /* === 手機版透明沉浸模式：對話框背景 & 標題背景透明 === */
+    body {
+        background: transparent !important;
+    }
+    .app-container {
+        background: rgba(18, 18, 22, 0.55) !important;
+        backdrop-filter: blur(20px) saturate(160%);
+        -webkit-backdrop-filter: blur(20px) saturate(160%);
+    }
+    .chat-main {
+        background: transparent !important;
+    }
+    .chat-header {
+        background: rgba(30, 30, 34, 0.5) !important;
+        backdrop-filter: blur(12px) saturate(150%);
+        -webkit-backdrop-filter: blur(12px) saturate(150%);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+        color: #4ec9b0;
+        text-shadow: 0 0 6px rgba(0,0,0,0.7);
+    }
+    .chat-messages {
+        background: transparent !important;
+    }
+    .chat-input-area {
+        background: rgba(30, 30, 34, 0.35) !important;
+        backdrop-filter: blur(22px) saturate(170%);
+        -webkit-backdrop-filter: blur(22px) saturate(170%);
+        border: 1px solid rgba(255, 255, 255, 0.09) !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.09);
+    }
+    /* 對話內容氣泡 → 完全不透明 */
+    .message-bubble {
+        background: #2d2d30 !important;
+        opacity: 1 !important;
+    }
+    .message.user .message-bubble {
+        background: #0f4c5c !important;
+        opacity: 1 !important;
+    }
+    /* 輸入框保持可讀（半透明毛玻璃） */
+    .chat-input-area textarea {
+        background: rgba(255, 255, 255, 0.06) !important;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border: 1px solid rgba(78, 201, 176, 0.35) !important;
+    }
+    /* 所有按鈕 → 完全不透明 */
+    .btnBox button {
+        opacity: 1 !important;
+    }
+    .btnBox.expanded {
+        background: transparent !important;
     }
 }
 
@@ -524,6 +969,14 @@
             font-size: 1rem;
             flex-shrink: 0;
         }
+        /* 桌面端：回到最新按鈕浮動於輸入區上方，不佔版面，避免切換顯示時改變 .btnBox 高度造成跳動 */
+        @media (min-width: 769px) {
+            #scrollToBottomBtn {
+                position: absolute;
+                right: 12px;
+                bottom: calc(100% + 12px);
+            }
+        }
 
         .message-bubble h1, .message-bubble h2, .message-bubble h3 {
             margin: 0.5em 0;
@@ -578,6 +1031,71 @@
             opacity: 1;
         }
 
+/* 附件縮圖預覽 */
+.attachments-area {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.attachment-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(78,201,176,0.35);
+    border-radius: 12px;
+    padding: 6px 8px;
+    max-width: 280px;
+}
+.attachment-thumb {
+    width: 56px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.15);
+    flex-shrink: 0;
+    background: #000;
+}
+.attachment-icon {
+    font-size: 1.4rem;
+    flex-shrink: 0;
+}
+.attachment-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}
+.attachment-name {
+    font-size: 0.78rem;
+    color: #eaeaea;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
+}
+.attachment-status {
+    font-size: 0.7rem;
+    color: #8a8a8a;
+    margin-top: 2px;
+}
+.remove-attach {
+    background: rgba(255,255,255,0.08);
+    border: none;
+    color: #f48771;
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.remove-attach:hover {
+    background: rgba(244,135,113,0.2);
+}
+
 /* 工作中指示器 - 3D 侍女工作場景 */
 .working-indicator {
     display: flex;
@@ -586,19 +1104,98 @@
     justify-content: center;
     gap: 6px;
     padding: 10px 16px;
-    background: #1e1e1e;
-    border: 1px solid #4ec9b0;
+    background: rgba(20, 27, 32, 0.92);
+    border: 1px solid rgba(78, 201, 176, 0.45);
     border-radius: 24px;
     margin-bottom: 8px;
     min-height: 100px;
     overflow: hidden;
     position: relative;
+    box-shadow: inset 0 0 0 1px rgba(110, 242, 255, 0.08), 0 0 12px rgba(78, 201, 176, 0.14);
+}
+.working-indicator::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: 25px;
+    padding: 2px;
+    background: conic-gradient(from 0deg,
+        rgba(78, 201, 176, 0) 0deg,
+        rgba(110, 242, 255, 0.96) 42deg,
+        rgba(118, 255, 221, 0.9) 85deg,
+        rgba(78, 201, 176, 0.38) 150deg,
+        rgba(78, 201, 176, 0) 220deg,
+        rgba(110, 242, 255, 0.92) 280deg,
+        rgba(78, 201, 176, 0) 360deg);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+}
+.working-indicator::after {
+    content: "";
+    position: absolute;
+    width: 11px;
+    height: 11px;
+    top: 1px;
+    left: 1px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #ffffff 0%, #9af4ff 20%, #66f0cf 48%, rgba(78, 201, 176, 0.18) 100%);
+    box-shadow: 0 0 12px rgba(110, 242, 255, 0.9), 0 0 20px rgba(78, 201, 176, 0.9);
+    animation: beadBorderWalk 5.6s linear infinite;
+    pointer-events: none;
 }
 .working-indicator .working-text {
     color: #4ec9b0;
     font-size: 0.85rem;
     font-weight: bold;
     z-index: 2;
+}
+
+@keyframes beadBorderWalk {
+    0% {
+        top: 1px;
+        left: 1px;
+        transform: scale(0.9);
+        opacity: 0.7;
+    }
+    23% {
+        top: 1px;
+        left: calc(100% - 12px);
+        transform: scale(1.1);
+        opacity: 1;
+    }
+    27% {
+        top: 1px;
+        left: calc(100% - 12px);
+        transform: scale(0.95);
+        opacity: 0.9;
+    }
+    50% {
+        top: calc(100% - 12px);
+        left: calc(100% - 12px);
+        transform: scale(1.2);
+        opacity: 1;
+    }
+    73% {
+        top: calc(100% - 12px);
+        left: 1px;
+        transform: scale(0.95);
+        opacity: 0.9;
+    }
+    77% {
+        top: calc(100% - 12px);
+        left: 1px;
+        transform: scale(1.15);
+        opacity: 1;
+    }
+    100% {
+        top: 1px;
+        left: 1px;
+        transform: scale(0.9);
+        opacity: 0.7;
+    }
 }
 
 /* === 3D 迷你工作場景 === */
@@ -734,6 +1331,50 @@
     50% { transform: translateY(-4px); opacity: 1; }
 }
 
+/* === 水波特效（OXXO clip-path 技法）｜工作中指示器 === */
+.work-wave,
+.work-wave::before,
+.work-wave::after {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 24px;
+    pointer-events: none;
+    clip-path: ellipse(0 0 at 50% 50%);
+    will-change: clip-path, opacity;
+}
+.work-wave {
+    z-index: 0;
+    background: radial-gradient(circle at 50% 50%, rgba(110,242,255,0.55) 0%, rgba(78,201,176,0.12) 55%, rgba(78,201,176,0) 72%);
+    animation: workWave1 4s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+}
+.work-wave::before {
+    content: "";
+    background: radial-gradient(circle at 50% 50%, rgba(118,255,221,0.5) 0%, rgba(78,201,176,0.10) 55%, rgba(78,201,176,0) 72%);
+    animation: workWave2 4s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+}
+.work-wave::after {
+    content: "";
+    background: radial-gradient(circle at 50% 50%, rgba(110,242,255,0.45) 0%, rgba(78,201,176,0.08) 55%, rgba(78,201,176,0) 72%);
+    animation: workWave3 4s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+}
+@keyframes workWave1 {
+    0%   { clip-path: ellipse(0 0 at 50% 50%); opacity: 0.5; }
+    70%  { opacity: 0.15; }
+    100% { clip-path: ellipse(160% 160% at 50% 50%); opacity: 0; }
+}
+@keyframes workWave2 {
+    0%, 12% { clip-path: ellipse(0 0 at 50% 50%); opacity: 0.5; }
+    82%     { opacity: 0.15; }
+    100%    { clip-path: ellipse(160% 160% at 50% 50%); opacity: 0; }
+}
+@keyframes workWave3 {
+    0%, 24% { clip-path: ellipse(0 0 at 50% 50%); opacity: 0.5; }
+    94%     { opacity: 0.15; }
+    100%    { clip-path: ellipse(160% 160% at 50% 50%); opacity: 0; }
+}
 
 /* 編輯器區域（覆蓋顯示） */
 #editor-area {
@@ -820,7 +1461,8 @@
     color: white;
 }
 @media (min-width: 769px) {
-.mobile-menu-toggle,#toggleToolsPanel{display: none;}
+.mobile-menu-toggle,#toggleToolsPanel,#mobileStopBtn{display: none;}
+.crystal-plate{display: contents;}
 
 /* 🌸 Agent 資訊按鈕 - 動畫 */
 .agent-info-btn {
@@ -1336,8 +1978,151 @@
     z-index: 2;
     transition: background 0.2s;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   樣式8：手勢隱藏 + 浮動鍵（沉浸式）by indexPage
+   向下滾動 → 輸入列自動收合，只留懸浮喚回圓鈕；向上滾動或點鈕 → 喚回
+   ══════════════════════════════════════════════════════════════ */
+#floatInputBtn { display: none; }
+@media (max-width: 768px) {
+    .chat-input-area {
+        max-height: 560px;
+        transition: max-height .2s ease, padding .2s ease, margin .2s ease,
+                    opacity .18s ease, transform .2s ease;
+    }
+    body.scrolling .chat-input-area {
+        max-height: 0 !important;
+        overflow: hidden;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        margin-bottom: 0 !important;
+        border-width: 0 !important;
+        opacity: 0;
+        transform: translateY(10px);
+        pointer-events: none;
+    }
+    #floatInputBtn {
+        position: fixed;
+        right: 14px;
+        bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #4ec9b0, #2aa88f);
+        border: none;
+        color: #0f1f1c;
+        font-size: 1.5rem;
+        box-shadow: 0 6px 20px rgba(0,0,0,.5), 0 0 0 1px rgba(78,201,176,.35);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 400;
+        touch-action: manipulation;
+    }
+    body.scrolling #floatInputBtn {
+        display: inline-flex;
+        animation: floatIn .25s ease;
+    }
+    @keyframes floatIn {
+        from { transform: translateY(16px) scale(.8); opacity: 0; }
+        to   { transform: translateY(0) scale(1); opacity: 1; }
+    }
+}
 .restart-dialog .restart-dismiss-btn:hover {
     background: rgba(255,60,60,0.5);
     color: #fff;
 }
 /* =========================================================== */
+
+
+/* ===== 錄音鍵（對話框）===== */
+.btnBox button#recordBtn.recording {
+    background: linear-gradient(135deg, #e05561, #c0363f) !important;
+    color: #fff !important;
+    animation: recordPulse 1.2s ease-in-out infinite;
+}
+@keyframes recordPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(224, 85, 97, 0.55); }
+    50% { box-shadow: 0 0 0 12px rgba(224, 85, 97, 0); }
+}
+
+/* =========================================================== */
+/* ===== 🔠 放大字體（水晶盤按鈕）===== */
+body.font-lg #chatMessages .message-bubble,
+body.font-lg #chatMessages .message-bubble p,
+body.font-lg #chatMessages .message-bubble li,
+body.font-lg #chatMessages .message-bubble div {
+    font-size: 1.2rem !important;
+    line-height: 1.65 !important;
+}
+body.font-lg #chatMessages .message-bubble pre,
+body.font-lg #chatMessages .message-bubble code,
+body.font-lg #chatMessages .message-bubble pre code {
+    font-size: 1.05rem !important;
+}
+body.font-lg #chatMessages .think-content,
+body.font-lg #chatMessages #think-content {
+    font-size: 1.05rem !important;
+}
+body.font-lg #chatMessages .message-meta {
+    font-size: 0.85rem !important;
+}
+body.font-lg #chatMessages .message-bubble h1,
+body.font-lg #chatMessages .message-bubble h2,
+body.font-lg #chatMessages .message-bubble h3 {
+    font-size: 1.4em !important;
+}
+
+body.font-xl #chatMessages .message-bubble,
+body.font-xl #chatMessages .message-bubble p,
+body.font-xl #chatMessages .message-bubble li,
+body.font-xl #chatMessages .message-bubble div {
+    font-size: 1.4rem !important;
+    line-height: 1.7 !important;
+}
+body.font-xl #chatMessages .message-bubble pre,
+body.font-xl #chatMessages .message-bubble code,
+body.font-xl #chatMessages .message-bubble pre code {
+    font-size: 1.2rem !important;
+}
+body.font-xl #chatMessages .think-content,
+body.font-xl #chatMessages #think-content {
+    font-size: 1.2rem !important;
+}
+body.font-xl #chatMessages .message-meta {
+    font-size: 0.95rem !important;
+}
+body.font-xl #chatMessages .message-bubble h1,
+body.font-xl #chatMessages .message-bubble h2,
+body.font-xl #chatMessages .message-bubble h3 {
+    font-size: 1.6em !important;
+}
+
+/* ===== 放大字體：Agent 回覆（round-reply-text / 流式 reply-content）===== */
+body.font-lg #chatMessages .round-reply-text,
+body.font-lg #chatMessages .round-reply-text p,
+body.font-lg #chatMessages .round-reply-text li,
+body.font-lg #chatMessages .round-reply-text div,
+body.font-lg #chatMessages #reply-content {
+    font-size: 1.2rem !important;
+    line-height: 1.65 !important;
+}
+body.font-lg #chatMessages .round-reply-text pre,
+body.font-lg #chatMessages .round-reply-text code,
+body.font-lg #chatMessages .round-reply-text pre code {
+    font-size: 1.05rem !important;
+}
+body.font-xl #chatMessages .round-reply-text,
+body.font-xl #chatMessages .round-reply-text p,
+body.font-xl #chatMessages .round-reply-text li,
+body.font-xl #chatMessages .round-reply-text div,
+body.font-xl #chatMessages #reply-content {
+    font-size: 1.4rem !important;
+    line-height: 1.7 !important;
+}
+body.font-xl #chatMessages .round-reply-text pre,
+body.font-xl #chatMessages .round-reply-text code,
+body.font-xl #chatMessages .round-reply-text pre code {
+    font-size: 1.2rem !important;
+}
