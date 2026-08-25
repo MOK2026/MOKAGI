@@ -134,7 +134,7 @@ PLUGIN_INFO = {
 
 
 
-    "update": "202608110022_出街版"
+    "update": "202608260224_我覺得可以版"
 }
 
 import logging

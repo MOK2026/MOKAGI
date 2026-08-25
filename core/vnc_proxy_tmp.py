@@ -104,7 +104,7 @@ class VNCProxyMiddleware:
 
 
     def _handle_rotate(self, environ, start_response):
-        """切換 Xvfb 桌面方向：橫版 1280x800 <-> 直版 800x1280（只改 framebuffer 尺寸，不旋轉內容，畫面保持直立）"""
+        """切換 Xvfb 桌面方向：橫版 1280x800 <-> 直版 800x1280（需 x11vnc -xrandr 支援）"""
         import json, os, subprocess
         state_file = '/tmp/novnc_rotate_state'
         state = 'landscape'
@@ -113,15 +113,8 @@ class VNCProxyMiddleware:
                 state = open(state_file).read().strip() or 'landscape'
         except Exception:
             pass
-        # ?mode=portrait|landscape 明確指定目標方向（冪等）；未指定則維持 toggle
-        from urllib.parse import parse_qs, urlparse
-        want = parse_qs(urlparse(environ.get("QUERY_STRING", "")).query).get("mode", [""])[0]
-        if want == "portrait":
-            state = "landscape"   # 觸發下方 landscape 分支 → 轉直式
-        elif want == "landscape":
-            state = "portrait"    # 觸發下方 else 分支 → 轉橫式
         if state == 'landscape':
-            cmd = ['xrandr', '-display', ':1', '--fb', '800x1280', '--output', 'default', '--rotate', 'normal']
+            cmd = ['xrandr', '-display', ':1', '--fb', '800x1280', '--output', 'default', '--rotate', 'right']
             new_state = 'portrait'
         else:
             cmd = ['xrandr', '-display', ':1', '--fb', '1280x800', '--output', 'default', '--rotate', 'normal']
@@ -148,8 +141,6 @@ class VNCProxyMiddleware:
     def __call__(self, environ, start_response):
         path = environ.get('PATH_INFO', '')
         upgrade = environ.get('HTTP_UPGRADE', '').lower()
-        if path == '/novnc-rotate':
-            return self._handle_rotate(environ, start_response)
         if path == '/novnc-ws' and upgrade == 'websocket':
             client_sock = environ.get('werkzeug.socket')
             if client_sock is None:

@@ -1,5 +1,5 @@
 """
-202608110022_出街版
+202608260224_我覺得可以版
 mokagi.py - 統一 AI 對話核心模塊
 
 設計目標：
@@ -24,6 +24,8 @@ mokagi.py - 統一 AI 對話核心模塊
 """
 
 import asyncio
+import inspect
+import threading
 import hashlib
 from hashlib import md5
 import html
@@ -129,6 +131,15 @@ toolsBtn = 1
 
 test = False  # 調試開關，控制是否輸出詳細調試信息
 _pending_llm_confirm = {}  # {context_id: {"messages": [...], "params": {...}, "timestamp": float}}
+_PENDING_CONFIRM_TTL = 3600.0  # 待確認 LLM 呼叫的過期時間（秒），避免長期常駐記憶體持續增長
+
+def _cleanup_pending_confirm():
+    """清理過期的待確認 LLM 呼叫（惰性清理：儲存/讀取時觸發）。"""
+    now = time.time()
+    expired = [cid for cid, ctx in _pending_llm_confirm.items()
+               if now - ctx.get("timestamp", 0) > _PENDING_CONFIRM_TTL]
+    for cid in expired:
+        _pending_llm_confirm.pop(cid, None)
 
 TASK_COMPLETE_MARKER = "TASK_COMPLETE: true"
 TASK_COMPLETE_ALT = "任務完成"
@@ -160,13 +171,10 @@ if TOOLS_DIR not in sys.path:
 
 
 # ========== Agent 配置緩存（隔離不同 Agent）==========
-
-_config_cache_lock = None
+# 註：實際配置載入統一走 config.get_agent_config()；此鎖僅供向後兼容，用線程鎖避免跨 loop 崩潰
+_config_cache_lock = threading.Lock()
 
 def get_config_lock():
-    global _config_cache_lock
-    if _config_cache_lock is None:
-        _config_cache_lock = asyncio.Lock()
     return _config_cache_lock
 
 
@@ -523,25 +531,32 @@ _pending_task = {}
 # 延遲 5 秒避免與啟動競爭 CPU
 try:
     import threading
-    def _init_code_index_async():
-        try:
-            import time
-            time.sleep(5)  # 延遲 5 秒
-            # 延遲導入，避免循環依賴
-            from tools.code_index import rebuild_index
-            result = rebuild_index()
-            if result.startswith("✅"):
-                logging.info(f"[code_index] {result}")
-            else:
-                logging.warning(f"[code_index] {result}")
-        except ImportError:
-            logging.info("[code_index] code_index.py 未安裝，跳過程式碼索引")
-        except Exception as e:
-            logging.error(f"[code_index] 初始化失敗: {e}")
-    
-    # 後臺執行，不阻塞啟動
-    threading.Thread(target=_init_code_index_async, daemon=True).start()
-    logging.info("[code_index] 後臺索引已啟動（延遲 5 秒重建）")
+    _disable_code_index = str(os.environ.get("MOK_DISABLE_CODE_INDEX", "")).strip().lower() in {"1", "true", "yes", "on"}
+    _web_only_mode = str(os.environ.get("MOK_WEB_ONLY", "")).strip().lower() in {"1", "true", "yes", "on"}
+    _rebuild_code_index = str(os.environ.get("MOK_REBUILD_CODE_INDEX", "0")).strip().lower() in {"1", "true", "yes", "on"}
+
+    if _disable_code_index or _web_only_mode or not _rebuild_code_index:
+        logging.info("[code_index] 已停用（MOK_DISABLE_CODE_INDEX 或 MOK_WEB_ONLY 生效）")
+    else:
+        def _init_code_index_async():
+            try:
+                import time
+                time.sleep(5)  # 延遲 5 秒
+                # 延遲導入，避免循環依賴
+                from tools.code_index import rebuild_index
+                result = rebuild_index()
+                if result.startswith("✅"):
+                    logging.info(f"[code_index] {result}")
+                else:
+                    logging.warning(f"[code_index] {result}")
+            except ImportError:
+                logging.info("[code_index] code_index.py 未安裝，跳過程式碼索引")
+            except Exception as e:
+                logging.error(f"[code_index] 初始化失敗: {e}")
+
+        # 後臺執行，不阻塞啟動
+        threading.Thread(target=_init_code_index_async, daemon=True).start()
+        logging.info("[code_index] 後臺索引已啟動（延遲 5 秒重建）")
 except Exception as e:
     logging.warning(f"[code_index] 啟動失敗: {e}")
 # ===== 結束 =====
@@ -952,21 +967,29 @@ def log_token_usage(
 
 
 
-# 全局 OpenAI 客戶端（單例）
-_openai_client = None
+# 全局 OpenAI 客戶端（按 event loop 隔離，避免多線程多 loop 互相覆蓋導致跨 loop 呼叫崩潰）
+_openai_clients = {}          # {loop_id: client}
+_openai_clients_lock = threading.Lock()
 
 def _get_openai_client(api_key: str, base_url: str):
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = openai.AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            default_headers={
-                "HTTP-Referer": "https://github.com/MOK2026/MOKAGI",
-                "X-Title": "MOK AGI"
-            }
-        )
-    return _openai_client
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    lid = id(loop)
+    with _openai_clients_lock:
+        client = _openai_clients.get(lid)
+        if client is None or (loop is not None and loop.is_closed()):
+            client = openai.AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/MOK2026/MOKAGI",
+                    "X-Title": "MOK AGI"
+                }
+            )
+            _openai_clients[lid] = client
+    return client
 
 
 
@@ -1057,6 +1080,8 @@ async def call_llm(
         # 生成唯一 context_id
         import uuid
         context_id = f"test_{uuid.uuid4().hex[:8]}"
+        # 儲存前先清理過期條目，避免記憶體無限增長
+        _cleanup_pending_confirm()
         # 儲存完整 messages 和調用參數
         _pending_llm_confirm[context_id] = {
             "messages": messages,
@@ -1542,6 +1567,60 @@ def find_tool_handler(tool_name: str):
     return None
 
 
+async def call_tool_handler(handler, *args, **kwargs):
+    """調用工具 handler；同步工具移到背景執行緒，避免阻塞串流服務。"""
+    # code_index 雖宣告為 async，但 Chroma/SentenceTransformer 查詢是同步阻塞操作。
+    if getattr(handler, "__module__", "") in ("code_index", "tools.code_index"):
+        try:
+            tool_args = args[0] if args else {}
+            user_id = args[1] if len(args) > 1 else ""
+            agent_config = kwargs.get("agent_config") or {}
+            worker_code = (
+                "import asyncio, importlib, json, sys; "
+                "mod=importlib.import_module(sys.argv[1]); "
+                "fn=getattr(mod, sys.argv[2]); "
+                "result=asyncio.run(fn(json.loads(sys.argv[3]), sys.argv[4], agent_config=json.loads(sys.argv[5]))); "
+                "print(json.dumps(result, ensure_ascii=False))"
+            )
+            worker_env = os.environ.copy()
+            tools_dir = os.path.dirname(getattr(handler, "__file__", ""))
+            if tools_dir:
+                worker_env["PYTHONPATH"] = os.pathsep.join(
+                    [tools_dir, worker_env.get("PYTHONPATH", "")]
+                )
+
+            def run_code_index_worker():
+                return subprocess.run(
+                    [sys.executable, "-c", worker_code, handler.__module__, handler.__name__,
+                     json.dumps(tool_args, ensure_ascii=False), str(user_id),
+                     json.dumps(agent_config, ensure_ascii=False)],
+                    cwd=os.getcwd(), capture_output=True, text=True, timeout=120,
+                    env=worker_env
+                )
+            completed = await asyncio.to_thread(run_code_index_worker)
+            if completed.returncode != 0:
+                detail = (completed.stderr or completed.stdout or "子進程無輸出").strip()[-2000:]
+                return f"❌ code_index 子進程失敗（exit={completed.returncode}）：{detail}"
+            return json.loads(completed.stdout.strip() or '"❌ code_index 沒有回傳結果"')
+        except asyncio.TimeoutError:
+            return "❌ code_index 執行逾時（120 秒），請稍後重試或縮小搜尋範圍。"
+        except subprocess.TimeoutExpired:
+            return "❌ code_index 執行逾時（120 秒），請稍後重試或縮小搜尋範圍。"
+        except Exception as exc:
+            return f"❌ code_index 執行失敗：{type(exc).__name__}: {exc}"
+    if inspect.iscoroutinefunction(handler):
+        return await handler(*args, **kwargs)
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(handler, *args, **kwargs),
+            timeout=120
+        )
+    except asyncio.TimeoutError:
+        return "❌ 工具執行逾時（120 秒），已停止等待；請縮小搜尋範圍後重試。"
+    except Exception as exc:
+        return f"❌ 工具執行失敗：{type(exc).__name__}: {exc}"
+
+
 
 async def naturalize_tool_result(
     user_text: str,
@@ -1571,7 +1650,8 @@ async def naturalize_tool_result(
             naturalize_func = getattr(target_mod, func_name, None)
             if naturalize_func:
                 try:
-                    result = await naturalize_func(
+                    result = await call_tool_handler(
+                        naturalize_func,
                         user_text=user_text,
                         raw_result=raw_result,
                         ollama_api=agent_config.get("MOK_MODEL_url", "http://localhost:11434/v1"),
@@ -1582,7 +1662,7 @@ async def naturalize_tool_result(
                     return result
                 except Exception as e:
                     logging.warning(f"自然化函數調用失敗: {e}")
-                    return await recovery.naturalize_tool_result_fallback(user_text, tool_name, raw_result, agent_config=agent_config,include_soul=False)
+                    return await recovery.naturalize_tool_result_fallback(user_text, tool_name, raw_result, agent_config=agent_config)
     # 備選：簡單的 JSON 轉文本
     try:
         data = json.loads(raw_result)
@@ -1625,6 +1705,45 @@ async def handle_direct_command(user_text: str, user_id: str, agent_config: Opti
     return result
 
 
+
+
+# ===== 人話化：將 admin 確認/執行結果轉為當前 agent 角色口吻（任何侍女通用） =====
+async def _humanize_admin_message(raw_text: str, agent_config: dict, purpose: str = "confirm") -> str:
+    """把 admin 的機械訊息轉成當前 agent 角色的人話。LLM 失敗時回傳空字串，由調用方 fallback 到原文字。"""
+    try:
+        agent_name = agent_config.get("MOK_AGENT_NAME", "助手")
+        owner = agent_config.get("MOK_ADMIN_NAME", "主人")
+        if purpose == "confirm":
+            sys_prompt = (
+                f"你是{agent_name}，正在向{owner}匯報一個需要授權的操作。\n"
+                "請用你自己的角色口吻（人話、自然親切、符合角色性格），把下面的操作內容轉述給主人，"
+                "說清楚這是什麼操作、為何需要確認，並請主人回覆確認。\n"
+                "【硬性要求】最後必須原樣附上確認指令那一行（以 /admin confirm 開頭），一字不改。\n"
+                "不要使用 Markdown 程式碼塊，不要添加額外解釋。"
+            )
+        else:
+            sys_prompt = (
+                f"你是{agent_name}，正在向{owner}匯報剛才高風險操作的執行結果。\n"
+                "請用你自己的角色口吻（人話、自然親切、符合角色性格），簡潔地把執行結果轉述給主人，"
+                "讓主人清楚事情辦好了或失敗了。\n"
+                "不要使用 Markdown 程式碼塊，不要添加額外解釋。"
+            )
+        result = await call_llm(
+            prompt=f"【原始訊息】\n{raw_text}\n\n請用人話轉述。",
+            system_prompt=sys_prompt,
+            agent_config=agent_config,
+            include_soul=True,
+            stream=False,
+        )
+        if isinstance(result, dict):
+            result = result.get("content", "") or ""
+        if isinstance(result, str):
+            result = result.strip()
+            if len(result) > 3:
+                return result
+    except Exception:
+        pass
+    return ""
 
 
 def extract_tool_and_text(response_text: str):
@@ -1799,7 +1918,7 @@ tool_handler.load_tools()
 def _get_pending_task_file(agent_name):
     return os.path.expanduser(f"~/.{MOKAGI_home}/agent/{agent_name}/_job.json")
 
-def save_pending_task(user_id, messages, goal, max_iterations, iteration, agent_name, continue_code=None):
+def save_pending_task(user_id, messages, goal, max_iterations, iteration, agent_name, continue_code=None, status="running", waiting_for=None, pending_input=None):
     unique_key = _get_unique_user_id(user_id, agent_name)
     if continue_code is None:
         continue_code = hashlib.md5(f"{user_id}_{time.time()}_{goal}".encode()).hexdigest()[:12]
@@ -1808,7 +1927,10 @@ def save_pending_task(user_id, messages, goal, max_iterations, iteration, agent_
         "messages": messages,
         "max_iterations": max_iterations,
         "iteration": iteration,
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "status": status,
+        "waiting_for": waiting_for,
+        "pending_input": pending_input,
     }
     if unique_key not in _pending_task:
         _pending_task[unique_key] = {}
@@ -1828,6 +1950,8 @@ def save_pending_task(user_id, messages, goal, max_iterations, iteration, agent_
     all_data[unique_key][continue_code] = task
     with open(task_file, 'w', encoding='utf-8') as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
+    if status == "waiting_for_user":
+        return f"📌 已暫停任務，等待你的補充。\n繼續碼：`{continue_code}`\n請直接補充內容，或輸入：`/continue {continue_code} 你的補充`"
     return f"📌 已保存任務進度，繼續碼：`{continue_code}`\n繼續執行：`/continue {continue_code}`"
 
 def load_pending_task(user_id, continue_code, agent_name):
@@ -1847,6 +1971,31 @@ def load_pending_task(user_id, continue_code, agent_name):
         _pending_task[unique_key][continue_code] = task
         return task
     return None
+
+
+def mark_task_waiting_for_user(user_id, agent_name, continue_code, waiting_for, details=None):
+    """把 task 設成 waiting_for_user，方便 browser / captcha / 路徑修正等場景。"""
+    task = load_pending_task(user_id, continue_code, agent_name)
+    if task is None:
+        return False
+    task["status"] = "waiting_for_user"
+    task["waiting_for"] = waiting_for
+    task["pending_input"] = details
+    task["timestamp"] = time.time()
+    save_pending_task(
+        user_id,
+        task.get("messages", []),
+        task.get("goal", "未知任務"),
+        task.get("max_iterations", 10),
+        task.get("iteration", 0),
+        agent_name,
+        continue_code=continue_code,
+        status="waiting_for_user",
+        waiting_for=waiting_for,
+        pending_input=details,
+    )
+    return True
+
 
 def delete_pending_task(user_id, continue_code, agent_name):
     unique_key = _get_unique_user_id(user_id, agent_name)
@@ -2029,19 +2178,38 @@ def log_experience(
     try:
         # 使用輕量 LLM 生成摘要
         import asyncio
+        # 🔧 修復 Event loop is closed：保存原事件循環，避免污染主線程 loop
+        try:
+            old_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                old_loop = asyncio.get_event_loop()
+            except Exception:
+                old_loop = None
+        # 🔧 OpenAI client 已按 event loop 隔離（見 _get_openai_client），無需手動重置單例
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        prompt = f"用繁體中文總結這個任務的經驗（含成功/失敗原因），不超過30字：\n目標：{goal}\n結果：{outcome}"
-        result = loop.run_until_complete(call_llm(
-            prompt=prompt,
-            user_id=user_id,
-            stream=False,
-            temperature=0.3,
-            agent_config=agent_config,
-            include_soul=False,
-            num_predict=80
-        ))
-        loop.close()
+        try:
+            prompt = f"用繁體中文總結這個任務的經驗（含成功/失敗原因），不超過30字：\n目標：{goal}\n結果：{outcome}"
+            result = loop.run_until_complete(call_llm(
+                prompt=prompt,
+                user_id=user_id,
+                stream=False,
+                temperature=0.3,
+                agent_config=agent_config,
+                include_soul=False,
+                num_predict=80
+            ))
+        finally:
+            loop.close()
+            # 🔧 恢復原事件循環，避免主線程 get_event_loop() 指向已關閉的 loop
+            if old_loop is not None:
+                asyncio.set_event_loop(old_loop)
+        # 🔧 清理臨時 loop 對應的 client，避免綁定已關閉循環的 client 殘留
+        try:
+            _openai_clients.pop(id(loop), None)
+        except Exception:
+            pass
         if isinstance(result, dict):
             result = result.get("content", "")
         lines = result.strip().split('\n') if result else []
@@ -2093,7 +2261,7 @@ def recall_experience(
             JOIN experience_fts f ON e.id = f.rowid
             WHERE e.user_key = ? AND e.agent_name = ? AND experience_fts MATCH ?
         '''
-        params = [unique_key, agent_name, query]
+        _safe = re.sub(r"[^\w\u4e00-\u9fff\s]", " ", query or "", flags=re.UNICODE); query = " ".join("\"" + t + "\"" for t in _safe.split() if t) if _safe.split() else ""; params = [unique_key, agent_name, query]
         if outcome_filter:
             sql += ' AND e.outcome = ?'
             params.append(outcome_filter)
@@ -2340,6 +2508,13 @@ async def process_message(
 
     # ===== 新增：防止 done 事件重複發送的標誌 =====
     _done_sent = False
+    # ===== 新增：輪次結構持久化（累積每輪思考/工具/回覆） =====
+    accumulated_rounds = []
+
+    def _cur_round():
+        if not accumulated_rounds:
+            accumulated_rounds.append({"think": "", "tool_calls": [], "tool_results": [], "reply": "", "iteration": 1})
+        return accumulated_rounds[-1]
 
     async def _send(event: dict):
         nonlocal pending_think, full_reply_collected, _done_sent
@@ -2350,6 +2525,8 @@ async def process_message(
                 # 已發送過 done，忽略後續
                 return
             _done_sent = True
+            if accumulated_rounds:
+                event["rounds"] = accumulated_rounds
         
         # ===== 新增：自動識別並添加 subtype =====
         if event.get("type") == "reply" and "subtype" not in event:
@@ -2373,10 +2550,18 @@ async def process_message(
                 event["subtype"] = "normal"
         # ============================================
         
-        if event.get("type") == "think":
+        if event.get("type") == "iteration_start":
+            accumulated_rounds.append({"think": "", "tool_calls": [], "tool_results": [], "reply": "", "iteration": event.get("iteration", len(accumulated_rounds) + 1)})
+        elif event.get("type") == "think":
             pending_think += event.get('content', '')
+            _cur_round()["think"] += event.get('content', '')
+        elif event.get("type") == "tool_calls":
+            _cur_round()["tool_calls"] = event.get('calls', [])
+        elif event.get("type") == "tool_result":
+            _cur_round()["tool_results"].append({"name": event.get("tool_name", "未知工具"), "content": event.get("content", "")})
         elif event.get("type") == "reply":
-            full_reply_collected += event.get('content', '')
+            if event.get("subtype", "normal") not in ("pending_list", "tool_process", "semantic_search", "experience"):
+                _cur_round()["reply"] += event.get('content', '')
         elif event.get("type") == "done":
             # 所有回覆收集完成後，一次性寫入日誌
             # ===== 由同一個 LLM 的輸出決定標題 =====
@@ -2406,7 +2591,8 @@ async def process_message(
                     await original_callback(truncated_event)
                 else:
                     if truncated_event.get("type") == "reply":
-                        full_reply_collected += truncated_event.get("content", "")
+                        if event.get("subtype", "normal") not in ("pending_list", "tool_process", "semantic_search", "experience"):
+                            full_reply_collected += truncated_event.get("content", "")
                 return  # 已處理，直接返回
         # ================================================
 
@@ -2415,7 +2601,8 @@ async def process_message(
             await original_callback(event)
         else:
             if event.get("type") == "reply":
-                full_reply_collected += event.get("content", "")
+                if event.get("subtype", "normal") not in ("pending_list", "tool_process", "semantic_search", "experience"):
+                    full_reply_collected += event.get("content", "")
 
 
 
@@ -2479,6 +2666,7 @@ async def process_message(
             parts = text.strip().split()
             if len(parts) == 2:
                 context_id = parts[1]
+                _cleanup_pending_confirm()
                 if context_id in _pending_llm_confirm:
                     ctx = _pending_llm_confirm.pop(context_id)
                     try:
@@ -2535,6 +2723,7 @@ async def process_message(
             parts = text.strip().split()
             if len(parts) == 2:
                 context_id = parts[1]
+                _cleanup_pending_confirm()
                 if context_id in _pending_llm_confirm:
                     _pending_llm_confirm.pop(context_id)
                     await _send({"type": "reply", "content": f"🚫 已取消 LLM 調用 (ID: {context_id})"})
@@ -2575,10 +2764,17 @@ async def process_message(
                 parts = direct_result.split("\n---CONFIRM_SPLIT---\n", 1)
                 if len(parts) == 2:
                     warning_part = parts[0][len("CONFIRM_SPLIT:"):]
-                    confirm_part = parts[1]
-                    await _send({"type": "reply", "content": warning_part + get_model_tag(model_name)})
-                    await _send({"type": "reply", "content": confirm_part})
-                    final_reply_text = warning_part + "\n" + confirm_part
+                    confirm_part = parts[1].strip()
+                    human_text = await _humanize_admin_message(
+                        warning_part + "\n" + confirm_part, agent_config, purpose="confirm"
+                    )
+                    if human_text:
+                        await _send({"type": "reply", "content": human_text + get_model_tag(model_name)})
+                        final_reply_text = human_text
+                    else:
+                        await _send({"type": "reply", "content": warning_part + get_model_tag(model_name)})
+                        await _send({"type": "reply", "content": confirm_part})
+                        final_reply_text = warning_part + "\n" + confirm_part
                 else:
                     await _send({"type": "reply", "content": direct_result + get_model_tag(model_name)})
                     final_reply_text = direct_result
@@ -2610,9 +2806,13 @@ async def process_message(
                     except Exception as e:
                         confirm_result = f"❌ 獲取確認結果時出錯：{str(e)}"
 
-                # 發送確認結果給用戶
+                # 發送確認結果給用戶（人話化：成功時用當前角色口吻轉述）
                 if confirm_result:
-                    await _send({"type": "reply", "content": confirm_result})
+                    if "✅" in confirm_result:
+                        human_result = await _humanize_admin_message(confirm_result, agent_config, purpose="result")
+                        await _send({"type": "reply", "content": human_result if human_result else confirm_result})
+                    else:
+                        await _send({"type": "reply", "content": confirm_result})
 
                 # 檢查是否有掛起的任務需要恢復
                 pending_list = await _get_all_pending_tasks()
@@ -2663,15 +2863,48 @@ async def process_message(
         刪除mokagi的
         
         '''
-        # 檢查是否為繼續任務命令
+        # 檢查是否為已暫停任務的直接補充內容，或 /continue 命令
         ''' 工作流精髓 記錄最終目標並重上次失敗新 loop '''
+        pending_resume_code = None
+        if not text.strip().startswith("/"):
+            unique_key = _get_unique_user_id(user_id, agent_name)
+            if unique_key in _pending_task:
+                for code, task in _pending_task[unique_key].items():
+                    if task.get("status") == "waiting_for_user":
+                        pending_resume_code = code
+                        break
+            if pending_resume_code is None:
+                task_file = _get_pending_task_file(agent_name)
+                if os.path.exists(task_file):
+                    try:
+                        with open(task_file, 'r', encoding='utf-8') as f:
+                            all_data = json.load(f)
+                        tasks = all_data.get(unique_key, {})
+                        for code, task in tasks.items():
+                            if task.get("status") == "waiting_for_user":
+                                pending_resume_code = code
+                                break
+                    except Exception:
+                        pending_resume_code = None
+
+        if pending_resume_code:
+            try:
+                from job import run_task
+                resume_text = f"/continue {pending_resume_code} {text.strip()}"
+                result = await run_task(user_id, agent_name, pending_resume_code, resume_text, stream_callback=_send)
+                await _send({"type": "reply", "content": result})
+                await _send({"type": "done", "conv_id": None})
+                return
+            except ImportError as e:
+                await _send({"type": "reply", "content": f"⚠️ 任務管理系統未就緒，請檢查 job.py 是否存在。\n錯誤: {e}"})
+                await _send({"type": "done", "conv_id": None})
+                return
+
         continue_code = extract_continue_command(text)
         if continue_code:
-            # 直接導入 job 工具（因為 job.py 在 tools/ 目錄下，已在 sys.path 中）
             try:
                 from job import run_task
                 result = await run_task(user_id, agent_name, continue_code, text, stream_callback=_send)
-                # 將結果發送給前端
                 await _send({"type": "reply", "content": result})
                 await _send({"type": "done", "conv_id": None})
                 return
@@ -2769,6 +3002,11 @@ async def process_message(
             prompt = f"\n{owner}:{text}\n{agent_name}:"
         # 保留工具定義，讓 LLM 自行決定是否調用記憶/經驗等工具
         tool_defs = build_tool_definitions()
+        # 🔧 依 agent 配置過濾禁用工具（防止客服 LLM 執行高危系統命令）
+        _disable_tools = (agent_config.get("MOK_DISABLE_TOOLS") or "").strip()
+        if _disable_tools:
+            _disabled = {t.strip() for t in _disable_tools.split(",") if t.strip()}
+            tool_defs = [t for t in tool_defs if t.get("function", {}).get("name") not in _disabled]
         # 系統提示：基本角色定義，由 context_files 控制載入哪些靈魂文件
         agent_body = get_system_context(agent_name, owner, owner_time, context_files=context_files)
         # 🔧 工具循環用的無 soul 版本（純工具推理，不加載 soul 文件）
@@ -2814,6 +3052,8 @@ async def process_message(
             if messages and messages[0]["role"] == "system":
                 messages[0]["content"] = agent_body_no_soul
             for iteration in range(max_iterations):
+                # 🔧 發送輪次開始標記，讓前端可以分組渲染
+                await _send({"type": "iteration_start", "iteration": iteration + 1, "total": max_iterations})
                 # 調用流式 API（但我們不在此處流式輸出，而是收集後處理）
                 # 為了流式輸出自然語言，我們仍然使用 stream=True，但要收集 tool_calls。
                 # 這裡使用我們之前增強的 call_llm 流式（需要支持 tool_calls 事件）
@@ -2851,6 +3091,7 @@ async def process_message(
                         await _send({"type": "reply", "content": item["content"]})
                     elif item["type"] == "tool_calls":
                         tool_calls = item["calls"]
+                        await _send({"type": "tool_calls", "calls": tool_calls})
 
                 # 記錄原始回覆
                 session_logger.append_raw(f"### LLM 迭代 {iteration+1} 原始回覆\n```\n{full_reply}\n```\n")
@@ -2937,9 +3178,10 @@ async def process_message(
                     tool_args = tc["arguments"]
                     handler = find_tool_handler(tool_name)
                     if handler:
-                        raw_result = await handler(tool_args, user_id, agent_config=agent_config)
+                        raw_result = await call_tool_handler(handler, tool_args, user_id, agent_config=agent_config)
                         natural_result = await naturalize_tool_result(text, tool_name, raw_result, agent_config=agent_config)
-                        await _send({"type": "reply", "content": natural_result})
+                        # 🔧 工具結果改用專用類型，讓前端可以分組渲染
+                        await _send({"type": "tool_result", "tool_name": tool_name, "content": natural_result, "iteration": iteration + 1})
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc["id"],
@@ -3010,6 +3252,8 @@ async def process_message(
             if messages and messages[0]["role"] == "system":
                 messages[0]["content"] = agent_body_no_soul
             for iteration in range(max_iterations):
+                # 🔧 發送輪次開始標記，讓前端可以分組渲染
+                await _send({"type": "iteration_start", "iteration": iteration + 1, "total": max_iterations})
                 # 將 messages 轉為純文本 Prompt
                 prompt_text = format_messages_for_ollama(messages)
                 
@@ -3101,14 +3345,22 @@ async def process_message(
                 
                 # ----- 執行工具 -----
                 need_confirm = False
+                if tool_info:
+                    _tc_list = []
+                    for _tc in tool_info:
+                        if isinstance(_tc, dict):
+                            _tc_list.append({"id": _tc.get("id", f"ollama_{iteration}"), "name": _tc.get("name", ""), "arguments": _tc.get("arguments", {})})
+                    if _tc_list:
+                        await _send({"type": "tool_calls", "calls": _tc_list})
                 for tc in tool_info:  # tool_info 是單個工具，但為擴展仍用 for
                     tool_name = tc.get("name") if isinstance(tc, dict) else tool_info.get("name")
                     tool_args = tc.get("arguments") if isinstance(tc, dict) else tool_info.get("arguments", {})
                     handler = find_tool_handler(tool_name)
                     if handler:
-                        raw_result = await handler(tool_args, user_id, agent_config=agent_config)
+                        raw_result = await call_tool_handler(handler, tool_args, user_id, agent_config=agent_config)
                         natural_result = await naturalize_tool_result(text, tool_name, raw_result, agent_config=agent_config)
-                        await _send({"type": "reply", "content": natural_result})
+                        # 🔧 工具結果改用專用類型，讓前端可以分組渲染
+                        await _send({"type": "tool_result", "tool_name": tool_name, "content": natural_result, "iteration": iteration + 1})
                         messages.append({
                             "role": "tool",
                             "content": natural_result,
@@ -3140,6 +3392,11 @@ async def process_message(
         if not final_reply_text:
             final_reply_text = "（無回覆）"
 
+        # 🔧 修復：若本輪未以 reply 事件流式輸出最終回覆（例如 CONFIRM_SPLIT / 純工具調用），
+        # 需補發 final_reply_text 作為 reply 事件，否則前端刷新後 content 為空、只顯示思考過程。
+        if not full_reply_collected.strip():
+            await _send({"type": "reply", "content": final_reply_text})
+
         conv_id = None
         try:
             conv_id = await add_to_history(
@@ -3152,7 +3409,7 @@ async def process_message(
             logging.error(f"保存歷史失敗: {e}", exc_info=True)
             conv_id = None
         finally:
-            await _send({"type": "done", "conv_id": conv_id})
+            await _send({"type": "done", "conv_id": conv_id, "final_reply": final_reply_text})
 
 
 
@@ -3285,7 +3542,7 @@ async def safe_autofix_retry(
         last_exception = None
         for attempt in range(1, max_retries_before_autofix + 1):
             try:
-                return await action_func(*action_args, **(action_kwargs or {}))
+                return await call_tool_handler(action_func, *action_args, **(action_kwargs or {}))
             except Exception as e:
                 last_exception = e
                 logging.warning(f"[safe_autofix_retry] 第 {attempt} 次嘗試失敗: {e}")

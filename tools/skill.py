@@ -109,11 +109,12 @@ def _create_skill(filename, content):
     path = os.path.join(SKILL_DIR, safe_name)
     if os.path.exists(path):
         return json.dumps({"error": "技能已存在: " + safe_name})
-    token = hashlib.md5((safe_name + str(time.time())).encode()).hexdigest()[:8]
-    tmp = "/tmp/skill_create_" + token + ".json"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"filename": safe_name, "content": content, "path": path}, f, ensure_ascii=False)
-    return "CONFIRM_SPLIT:建立技能 " + safe_name + " (" + str(len(content)) + " 字符)\n---CONFIRM_SPLIT---\n/admin confirm " + token
+    # 🔧 修正 2026-08-24：直接寫入技能文件
+    # 原 CONFIRM_SPLIT 確認機制是死代碼：token 寫入 /tmp/skill_create_*.json 後無任何處理者，
+    # 導致 /admin confirm <token> 永遠無法執行，技能建立卡死。技能文件為低風險 .md 文檔，直接建立。
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return json.dumps({"success": True, "message": "✅ 技能已建立: " + safe_name, "path": path, "size": len(content)}, ensure_ascii=False)
 
 def _delete_skill(filename):
     if not filename:
@@ -124,15 +125,12 @@ def _delete_skill(filename):
     path = os.path.join(SKILL_DIR, safe_name)
     if not os.path.isfile(path):
         return json.dumps({"error": "技能不存在: " + safe_name})
-    token = hashlib.md5((safe_name + str(time.time())).encode()).hexdigest()[:8]
-    tmp = "/tmp/skill_delete_" + token + ".json"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"filename": safe_name, "path": path}, f, ensure_ascii=False)
-    size = os.path.getsize(path)
-    return "CONFIRM_SPLIT:刪除技能 " + safe_name + " (" + str(size) + " bytes) - 不可復原\n---CONFIRM_SPLIT---\n/admin confirm " + token
+    # 🔧 修正 2026-08-24：直接刪除（原 CONFIRM_SPLIT 確認機制是死代碼，同上）
+    os.remove(path)
+    return json.dumps({"success": True, "message": "✅ 技能已刪除: " + safe_name}, ensure_ascii=False)
 
 async def handle_skill(args, mode="command", user_id=None, agent_name=None, **kwargs):
-    if mode == "function":
+    if isinstance(args, dict):
         action = args.get("action", "list")
         filename = args.get("filename", "")
         query = args.get("query", "")

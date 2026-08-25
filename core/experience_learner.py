@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 from contextlib import closing
@@ -72,6 +73,12 @@ def recall_experience(
     limit: int = 5
 ) -> List[Dict]:
     """回憶相關經驗"""
+    # FTS5 安全處理：避免語法錯誤（如 fts5: syntax error near "."）
+    _safe = re.sub(r'[^\w\u4e00-\u9fff\s]', ' ', goal or '', flags=re.UNICODE)
+    _tokens = [t for t in _safe.split() if t]
+    goal = ' '.join(f'"{t}"' for t in _tokens) if _tokens else ''
+    if not goal:
+        return []
     _init_experience_db()
     try:
         with closing(sqlite3.connect(EXPERIENCE_DB_PATH)) as conn:

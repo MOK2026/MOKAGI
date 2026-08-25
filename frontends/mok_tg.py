@@ -2,7 +2,7 @@
 mok_tg.py
 Telegram 適配器 - 支持流式輸出（實時顯示思考過程）
 核心對話能力由 mokagi 提供。
-202608110022_出街版
+202608260224_我覺得可以版
 """
 
 import asyncio
@@ -227,6 +227,70 @@ async def send_welcome(app):
         except Exception as e:
             logging.warning(f"無法發送歡迎消息給 {ADMIN_CHAT_ID}: {e}")
 
+# ================== 圖片處理 ==================
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """處理 Telegram 圖片訊息：下載圖片 → vision 分析 → 回覆描述"""
+    chat_id = str(update.message.chat_id)
+
+    # 權限檢查
+    if ALLOWED_USERS and str(chat_id) not in map(str, ALLOWED_USERS):
+        await update.message.reply_text(UNAUTHORIZED_MSG)
+        return
+
+    caption = update.message.caption or ""
+    status_msg = await update.message.reply_text("📸 收到圖片，正在分析中…")
+
+    try:
+        # 下載圖片（photo[-1] = 最高解析度）
+        photo_file = await update.message.photo[-1].get_file()
+
+        # 保存目錄：~/.mok/agent/{agent}/uploads/
+        import time as _time
+        upload_dir = os.path.join(MOKAGI_home, "agent", MOK_AGENT_NAME, "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        filename = f"tg_{_time.strftime('%Y%m%d_%H%M%S')}_{update.message.message_id}.jpg"
+        file_path = os.path.join(upload_dir, filename)
+        await photo_file.download_to_drive(file_path)
+
+        # 用 vision 工具分析圖片
+        from mokagi import tool_handler
+        cmd = f"/vision {file_path}"
+        if caption:
+            cmd += f" {caption}"
+        result = await tool_handler.process_message(
+            user_text=cmd,
+            chat_id=chat_id,
+            ollama_api=mokagi.OLLAMA_API,
+            model_name=mokagi.MOK_MODEL_NAME,
+            cmd_map=tool_handler.get_cmd_map(),
+            tools=tool_handler.get_tools(),
+            agent_config=mokagi._agent_config
+        )
+
+        # 回覆結果
+        if result:
+            if result.startswith("CONFIRM_SPLIT:"):
+                parts = result.split("---CONFIRM_SPLIT---", 1)
+                await update.message.reply_text(parts[0].strip())
+                if len(parts) > 1:
+                    await update.message.reply_text(parts[1].strip())
+            else:
+                for part in split_text(result, max_length=4096):
+                    try:
+                        await update.message.reply_text(part, parse_mode='HTML')
+                    except Exception:
+                        await update.message.reply_text(part)
+        else:
+            await update.message.reply_text("❌ 圖片分析失敗（無結果）")
+    except Exception as e:
+        await update.message.reply_text(f"❌ 圖片處理失敗：{e}")
+    finally:
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+
 # ================== 消息處理（流式） ==================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
@@ -351,6 +415,7 @@ def main():
     app.add_handler(CommandHandler("tools", tools_command))
     
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     
 
 

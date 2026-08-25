@@ -42,7 +42,7 @@ PLUGIN_INFO = {
             "required": ["action", "query"]
         }
     },
-    "update": "202608110022_出街版"
+    "update": "202608260224_我覺得可以版"
 }
 
 import logging, json
@@ -85,8 +85,15 @@ async def handle_experience(args, chat_id: str = None, agent_config: Optional[Di
             n_results = 3
             query = rest
 
+    # FTS5 安全處理：避免語法錯誤（如 fts5: syntax error near "."）
+    import re as _re
+    _safe = _re.sub(r'[^\w\u4e00-\u9fff\s]', ' ', query or '', flags=_re.UNICODE)
+    _tokens = [t for t in _safe.split() if t]
+    safe_query = ' '.join(f'"{t}"' for t in _tokens) if _tokens else ''
+    if not safe_query:
+        return "沒有找到相關的經驗記錄。"
     # 呼叫 mokagi 的 recall_experience 函數
-    result = mokagi.recall_experience(chat_id, query, agent_name, n_results=n_results)
+    result = mokagi.recall_experience(chat_id, safe_query, agent_name, n_results=n_results)
     if not result:
         return "沒有找到相關的經驗記錄。"
     return result

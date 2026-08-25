@@ -145,7 +145,7 @@ def handover_job(source_agent: str, target_agent: str, job_name: str) -> Tuple[b
     
     all_agents = list_all_agents()
     if target_agent not in all_agents:
-        return False, f"❌ 目標 Agent `{target_agent}` 不存在。可用 Agent: {", ".join(all_agents)}"
+        return False, f"❌ 目標 Agent `{target_agent}` 不存在。可用 Agent: {', '.join(all_agents)}"
     
     dst_root = get_jobs_root(target_agent)
     dst_root.mkdir(parents=True, exist_ok=True)
@@ -469,8 +469,30 @@ async def run_task(user_id: str, agent_name: str, continue_code: str, full_text:
     # ===== 🛡️ 新增：檢查任務是否屬於當前 Agent =====
     md_path = get_job_md_path(agent_name, continue_code)
     if not md_path.exists():
-        # 嘗試在當前 Agent 的目錄中查找，若不存在則拒絕
-        return f"❌ 任務「{continue_code}」不屬於當前 Agent「{agent_name}」，請切換到正確的 Agent 再執行。"
+        # 🆕 相容 _job.json 掛起任務：找不到 job.md 時回退查詢掛起任務檔
+        try:
+            import mokagi
+            pending = mokagi.load_pending_task(user_id, continue_code, agent_name)
+            if pending:
+                md_path.parent.mkdir(parents=True, exist_ok=True)
+                goal = pending.get("goal", "未知任務")
+                ts = pending.get("timestamp", "")
+                md_path.write_text(
+                    render_job_md({
+                        "狀態": pending.get("status", "running"),
+                        "進度": f"{int(pending.get('iteration', 0) or 0) * 10}%",
+                        "主人原話": goal,
+                        "上次執行摘要": f"從掛起任務恢復（時間戳 {ts}）。",
+                        "下一次目標": goal,
+                        "主人補充": "無",
+                    }, continue_code),
+                    encoding="utf-8"
+                )
+            else:
+                # 嘗試在當前 Agent 的目錄中查找，若不存在則拒絕
+                return f"❌ 任務「{continue_code}」不屬於當前 Agent「{agent_name}」，請切換到正確的 Agent 再執行。"
+        except Exception:
+            return f"❌ 任務「{continue_code}」不屬於當前 Agent「{agent_name}」，請切換到正確的 Agent 再執行。"
     # ===== 結束 =====
 
     md_path = get_job_md_path(agent_name, continue_code)

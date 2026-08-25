@@ -15,10 +15,12 @@
 #
 # 支援的多模態模型:
 #   - gemini-3.5-flash / gemini-2.0-flash（Google，原生支援圖片）
+#   - deepseek-v4-flash-vision-exp（DeepSeek 圖像理解模型，OpenAI 兼容）
 #   - 任何 OpenAI 兼容的 vision 模型
 #
 # 更新記錄:
 #   202607170315 - 初版，支援圖片分析 + 影片關鍵幀分析
+#   2026082223 - 新增 deepseek-v4-flash-vision-exp 圖像理解模型支援
 # ------------------------------------------------------------------------------------ #
 
 import os
@@ -48,10 +50,11 @@ VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m
 # ---------- 多模態模型配置 ----------
 # 優先使用支援 vision 的模型
 VISION_MODEL_PREFERENCE = [
+    "deepseek-v4-flash-vision-exp",  # DeepSeek 圖像理解模型（無嚴格內容審核，優先）
     "gemini-3.5-flash",     # Google，原生支援
     "gemini-2.0-flash",     # Google
-    "deepseek-v4-flash",    # DeepSeek（可能支援）
-    "minimax-m3:cloud",     # MiniMax（可能支援）
+    "minimax-m3:cloud",     # MiniMax（Ollama 本地，支援 vision）
+    "deepseek-v4-flash",    # DeepSeek（文字模型，僅兜底）
 ]
 
 PLUGIN_INFO = {
@@ -101,7 +104,7 @@ PLUGIN_INFO = {
                 },
                 "model": {
                     "type": "string",
-                    "description": "指定使用的模型（可選）。支援 vision 的模型如 gemini-3.5-flash。若不指定則自動選擇。"
+                    "description": "指定使用的模型（可選）。支援 vision 的模型如 deepseek-v4-flash-vision-exp、gemini-3.5-flash。若不指定則自動選擇。"
                 },
                 "max_keyframes": {
                     "type": "integer",
@@ -187,7 +190,6 @@ def _get_vision_model_config(agent_config: dict, preferred_model: str = None) ->
     models_available = {}
     for key, value in agent_config.items():
         if key.startswith("MOK_MODEL_NAME") and not key.endswith(('0', '11', '12')):
-            # 排除本地 Ollama 模型（通常不支援 vision）
             idx = key.replace("MOK_MODEL_NAME", "")
             url_key = f"MOK_MODEL_url{idx}"
             token_key = f"MOK_MODEL_token{idx}"
@@ -197,9 +199,18 @@ def _get_vision_model_config(agent_config: dict, preferred_model: str = None) ->
                     "token": agent_config.get(token_key, ""),
                     "index": idx
                 }
-    
-    # 按優先序找支援 vision 的模型
-    search_order = [preferred_model] if preferred_model else VISION_MODEL_PREFERENCE
+
+    # 1. 用戶指定的 preferred_model（若有且可用）
+    if preferred_model and preferred_model in models_available:
+        cfg = models_available[preferred_model]
+        return {
+            "model": preferred_model,
+            "api_url": cfg["url"],
+            "api_token": cfg["token"],
+        }
+
+    # 2. 按優先序找原生支援 vision 的模型（gemini 等）
+    search_order = VISION_MODEL_PREFERENCE
     for model_name in search_order:
         if model_name in models_available:
             cfg = models_available[model_name]
@@ -208,8 +219,21 @@ def _get_vision_model_config(agent_config: dict, preferred_model: str = None) ->
                 "api_url": cfg["url"],
                 "api_token": cfg["token"],
             }
-    
-    # fallback：使用當前活躍模型
+
+    # 3. 從可用模型中挑選「已知支援 vision」的模型（名稱含關鍵字）
+    vision_keywords = ("minimax", "vl", "vision", "llava", "gemini",
+                       "gpt-4o", "gpt-4-vision", "qwen2.5vl", "qwen2-vl", "deepseek",
+                       "claude", "glm-4v", "moondream", "minicpm", "internvl")
+    for model_name, cfg in models_available.items():
+        name_lower = model_name.lower()
+        if any(kw in name_lower for kw in vision_keywords):
+            return {
+                "model": model_name,
+                "api_url": cfg["url"],
+                "api_token": cfg["token"],
+            }
+
+    # 4. fallback：使用當前活躍模型（可能不支援 vision，由呼叫端處理錯誤）
     current_model = agent_config.get("MOK_MODEL_NAME", "")
     current_url = agent_config.get("MOK_MODEL_url", "http://localhost:11434/v1")
     current_token = agent_config.get("MOK_MODEL_token", "")
@@ -262,6 +286,11 @@ async def _call_vision_model(
     api_token = model_config["api_token"]
     model_name = model_config["model"]
     
+    # Ollama 本地端點修正：/api/generate → /v1（OpenAI 兼容）
+    if ":11434" in api_url or "/api/generate" in api_url:
+        proto = api_url.split("://")[0]
+        host = api_url.split("://")[1].split("/")[0]
+        api_url = f"{proto}://{host}/v1"
     # 確保 URL 以 /v1 結尾（OpenAI 兼容格式）
     if not api_url.rstrip('/').endswith('/v1'):
         if '/v1beta/' in api_url:
@@ -321,8 +350,25 @@ async def handle_vision(args, chat_id="web", agent_config=None):
     1. 命令行: "/vision /tmp/photo.jpg" 或 "/vision /tmp/photo.jpg 這張圖有什麼？"
     2. JSON: {"file_path": "/tmp/photo.jpg", "question": "..."} 或 dict 物件
     """
-    if agent_config is None:
+    if agent_config is None or not agent_config:
+        # 調用方漏傳 agent_config 時，自動從配置文件載入模型資訊（防止 vision 用空配置請求）
         agent_config = {}
+        try:
+            _mok_home = os.environ.get('MOKAGI_HOME', 'mok')
+            _agent_name = os.environ.get('MOK_AGENT_NAME') or '衍'
+            _cfg_path = os.path.expanduser(f'~/.{_mok_home}/agent/{_agent_name}/.{_agent_name}')
+            if os.path.isfile(_cfg_path):
+                _cfg = {}
+                with open(_cfg_path, encoding='utf-8') as _f:
+                    for _line in _f:
+                        _line = _line.strip()
+                        if _line and not _line.startswith('#') and '=' in _line:
+                            _k, _v = _line.split('=', 1)
+                            _cfg[_k.strip()] = _v.strip()
+                if _cfg:
+                    agent_config = _cfg
+        except Exception:
+            pass
     
     # --- 解析參數 ---
     file_path = None
@@ -408,6 +454,57 @@ async def handle_vision(args, chat_id="web", agent_config=None):
             # 圖片分析
             img_b64, mime_type = _get_image_base64(file_path)
             result = await _call_vision_model(img_b64, mime_type, question, model_config)
+
+            # ---- 內容審核拒答偵測：結果為空或含拒答關鍵字時，自動輪換其他模型重試 ----
+            REFUSAL_KEYWORDS = (
+                "無法協助", "不能", "拒絕", "不協助", "不支援", "不允許", "無法回答", "無法處理",
+                "我無法", "無法提供", "無法對這類", "無法為", "無法描述", "無法判斷",
+                "內容敏感", "敏感內容", "個人影像", "不恰當", "抱歉", "對不起",
+                "i cannot", "i can\'t", "cannot", "can\'t", "refuse", "refused",
+                "not able", "not allowed", "against", "policy", "inappropriate",
+                "unsafe", "sensitive", "not appropriate", "sorry", "unable to",
+                "won\'t", "wont", "content filter", "do not comply", "does not comply",
+                "cannot provide", "i am unable", "unable to provide", "cannot analyze", "unable to analyze",
+            )
+            _res_text = result if isinstance(result, str) else ""
+            _res_low = _res_text.strip().lower()
+            _refused = (not _res_low) or any(kw in _res_low for kw in REFUSAL_KEYWORDS)
+            if _refused:
+                _tried = {model_config.get("model", "")}
+                _cands = [model_config.get("model", "")] + [
+                    m for m in VISION_MODEL_PREFERENCE if m != model_config.get("model", "")
+                ]
+                for _m in _cands:
+                    if not _m or _m in _tried:
+                        continue
+                    _alt = _get_vision_model_config(agent_config, _m)
+                    if not _alt or _alt.get("model") in _tried:
+                        continue
+                    _tried.add(_alt.get("model"))
+                    _r = await _call_vision_model(img_b64, mime_type, question, _alt)
+                    if isinstance(_r, str) and _r.lstrip().startswith('{"success": false'):
+                        continue
+                    _rl = (_r if isinstance(_r, str) else "").strip().lower()
+                    if _rl and not any(kw in _rl for kw in REFUSAL_KEYWORDS):
+                        result, model_config = _r, _alt
+                        break
+                    if _rl:
+                        result, model_config = _r, _alt
+            # ---- 拒答偵測結束 ----
+            
+            # 若模型調用返回錯誤 JSON，直接透傳（不誤包成 success:true）
+            if isinstance(result, str) and result.lstrip().startswith('{"success": false'):
+                try:
+                    _err = json.loads(result)
+                    return json.dumps({
+                        'success': False,
+                        'error': _err.get('error', 'Vision API 調用失敗'),
+                        'model': model_config.get('model', ''),
+                        'type': 'image',
+                        'file': file_path
+                    }, ensure_ascii=False)
+                except Exception:
+                    pass
             
             return json.dumps({
                 "success": True,

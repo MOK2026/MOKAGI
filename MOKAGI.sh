@@ -9,7 +9,7 @@
 
 
 set -o pipefail
-update_date="202608110022_出街版"
+update_date="202608260224_我覺得可以版"
 MOKAGIName="mok"
 PROJECT_DIR="${HOME}/.${MOKAGIName}"
 AGENT_ROOT="${PROJECT_DIR}/agent"
@@ -298,6 +298,11 @@ pm2 start "${PROJECT_DIR}/core/launcher.py" \
     --interpreter python3 \
     --cwd "${PROJECT_DIR}" \
     --log-date-format "YYYY-MM-DD HH:MM:SS"
+
+# launcher 統一管理 mok_web 與所有 Agent；只有獨立維修台由另一個 PM2 進程管理。
+pm2 delete mok_web 2>/dev/null || true
+pm2 delete mok_repair 2>/dev/null || true
+pm2 start "${PROJECT_DIR}/ecosystem.config.js" --only mok_repair
 pm2 save
 
 # -----------------------------------------------
@@ -324,3 +329,61 @@ echo -e "    首次使用請先選擇左側 Agent，即可開始對話。"
 echo ""
 echo -e " 檢查模型隧道： ss -tlnp | grep -E '11434|11435'"
 echo -e "==========================================${NC}"
+# -----------------------------------------------
+# [10.5/11] 安裝 VNC 虛擬桌面（自動）— MOKAGI 整合版
+# -----------------------------------------------
+echo -e "${GREEN}=========================================="
+echo -e " [10.5/11] 安裝 VNC 虛擬桌面 (Xvfb + x11vnc + noVNC)"
+echo -e "==========================================${NC}"
+
+# 1) 安裝桌面套件
+echo -e "${YELLOW}→ 安裝桌面套件 (xvfb x11vnc fluxbox websockify firefox xterm)...${NC}"
+sudo apt-get install -y xvfb x11vnc fluxbox websockify firefox xterm >/dev/null 2>&1 \
+    && echo -e "   ✅ 桌面套件安裝完成" \
+    || echo -e "   ⚠️ 部分套件安裝失敗（start_desktop.sh 稍後自動補裝）"
+
+# 2) 確保 start_desktop.sh 存在（冪等啟動/自動恢復腳本）
+if [ ! -f "${PROJECT_DIR}/start_desktop.sh" ]; then
+    echo -e "${YELLOW}→ 建立 start_desktop.sh...${NC}"
+    if [ -f "${PROJECT_DIR}/html/webTools/novnc/start_desktop.sh" ]; then
+        cp "${PROJECT_DIR}/html/webTools/novnc/start_desktop.sh" "${PROJECT_DIR}/start_desktop.sh"
+    else
+        cat > "${PROJECT_DIR}/start_desktop.sh" << 'VNCSTART'
+#!/usr/bin/env bash
+# MOKAGI 主機桌面 啟動腳本 (冪等, 可由 cron 每分鐘觸發)
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+if ! pgrep -f "Xvfb :1" >/dev/null 2>&1; then
+    Xvfb :1 -screen 0 1280x800x24 -ac >/dev/null 2>&1 &
+    sleep 1
+fi
+if ! pgrep -f fluxbox >/dev/null 2>&1; then
+    DISPLAY=:1 fluxbox >/dev/null 2>&1 &
+    sleep 0.5
+fi
+if ! pgrep -f "x11vnc.*5900" >/dev/null 2>&1; then
+    x11vnc -display :1 -forever -shared -rfbport 5900 -localhost -nopw -quiet >/dev/null 2>&1 &
+    sleep 1
+fi
+if ! pgrep -f "websockify.*6080" >/dev/null 2>&1; then
+    websockify 127.0.0.1:6080 127.0.0.1:5900 >/dev/null 2>&1 &
+    sleep 0.5
+fi
+VNCSTART
+    fi
+    chmod +x "${PROJECT_DIR}/start_desktop.sh"
+fi
+
+# 3) 設定 crontab：開機自啟 + 每分鐘自動恢復
+echo -e "${YELLOW}→ 設定開機自啟與每分鐘自動恢復 (crontab)...${NC}"
+CRON_DESKTOP="${PROJECT_DIR}/start_desktop.sh"
+( crontab -l 2>/dev/null | grep -v "start_desktop.sh"; \
+  echo "@reboot ${CRON_DESKTOP}"; \
+  echo "* * * * * ${CRON_DESKTOP}" ) | crontab - \
+    && echo -e "   ✅ crontab 已設定（開機自動啟動 + 斷線每分鐘自動恢復）" \
+    || echo -e "   ⚠️ crontab 設定失敗（不影響本次啟動）"
+
+# 4) 立即啟動桌面
+echo -e "${YELLOW}→ 啟動 VNC 桌面...${NC}"
+bash "${PROJECT_DIR}/start_desktop.sh"
+sleep 2
+echo -e "${GREEN}✅ VNC 桌面已啟動：Xvfb:1 → x11vnc:5900 → websockify:6080${NC}"

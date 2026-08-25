@@ -26,6 +26,13 @@ EXCLUDE_FILES = {".env"}
 processes = []          # 存儲子進程對象，每個進程有 type 屬性
 stop_event = threading.Event()
 
+
+def _env_flag_true(name: str, default: str = "0") -> bool:
+    val = os.environ.get(name, default)
+    if val is None:
+        return False
+    return str(val).strip().lower() in {"1", "true", "yes", "on"}
+
 def log_with_prefix(prefix, line):
     line = line.rstrip('\n')
     print(f"{prefix} {line}", flush=True)
@@ -104,27 +111,29 @@ def start_web(port=5000):
         log_with_prefix("[Web]", f"錯誤: {web_script} 不存在")
         return None
 
+    # 讓 Web 進程脫離 launcher 的 process group，避免父進程收到 SIGTERM / signal_handler
+    # 後連帶終止實際的 Flask 服務，造成前端 SSE/HTTP 斷線、連續重啟與 502/524。
     proc = subprocess.Popen(
-        [sys.executable, str(web_script)],   # 移除 "--port", str(port)
-        #[sys.executable, str(web_script), "--port", str(port)],
+        [sys.executable, str(web_script)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        env=env, cwd=str(PROJECT_DIR), text=True, bufsize=1
+        env=env, cwd=str(PROJECT_DIR), text=True, bufsize=1,
+        start_new_session=True
     )
-    proc.type = 'web'          # 標記為 Web 進程
+    proc.type = 'web'
     return proc
 
 def signal_handler(sig, frame):
     print("\n收到退出信號，關閉所有子進程...", flush=True)
     stop_event.set()
     for p in processes:
-        if p and p.poll() is None:
+        if p and p.poll() is None and getattr(p, 'type', None) != 'web':
             try:
                 p.terminate()
             except:
                 pass
     time.sleep(1)
     for p in processes:
-        if p and p.poll() is None:
+        if p and p.poll() is None and getattr(p, 'type', None) != 'web':
             try:
                 p.kill()
             except:
@@ -136,6 +145,10 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
     print("MOK AGI 統一啟動器 (source 方式加載配置)", flush=True)
     print(f"項目目錄: {PROJECT_DIR}", flush=True)
+
+    web_only_mode = _env_flag_true("MOK_WEB_ONLY", "0")
+    if web_only_mode:
+        print("MOK_WEB_ONLY=1：啟用 Web Only 模式（跳過所有 Bot 啟動）", flush=True)
 
     config_files = []
     if AGENT_ROOT.exists():
@@ -152,18 +165,21 @@ def main():
     output_queue = queue.Queue()
 
     # 啟動所有機器人
-    for agent_name, cfg_path in config_files:
-        print(f"正在啟動機器人: {agent_name}", flush=True)
-        proc = start_bot(agent_name, cfg_path)
-        if proc:
-            processes.append(proc)
-            threading.Thread(target=stream_reader, args=(proc.stdout, f"[Bot:{agent_name}]", output_queue), daemon=True).start()
-            if proc.stderr:
-                threading.Thread(target=stream_reader, args=(proc.stderr, f"[Bot:{agent_name}][ERR]", output_queue), daemon=True).start()
-        else:
-            print(f"啟動機器人 {agent_name} 失敗（已跳過）", flush=True)
+    if not web_only_mode:
+        for agent_name, cfg_path in config_files:
+            print(f"正在啟動機器人: {agent_name}", flush=True)
+            proc = start_bot(agent_name, cfg_path)
+            if proc:
+                processes.append(proc)
+                threading.Thread(target=stream_reader, args=(proc.stdout, f"[Bot:{agent_name}]", output_queue), daemon=True).start()
+                if proc.stderr:
+                    threading.Thread(target=stream_reader, args=(proc.stderr, f"[Bot:{agent_name}][ERR]", output_queue), daemon=True).start()
+            else:
+                print(f"啟動機器人 {agent_name} 失敗（已跳過）", flush=True)
+    else:
+        print("已跳過 Bot 啟動。", flush=True)
 
-    # 啟動 Web 界面
+    # Web 與所有 Agent 由同一個 launcher 管理；PM2 只管理 launcher 本身。
     print("正在啟動網頁界面...", flush=True)
     web_proc = start_web(5000)
     if web_proc:
@@ -196,11 +212,22 @@ def main():
         if exited:
             for p in exited:
                 if p.type == 'web':
-                    # Web 進程退出，視為嚴重錯誤，重啟全部
-                    print("Web 服務意外退出，5秒後自動重啟所有服務...", flush=True)
+                    # 只重啟 Web，不中斷其他 Agent；避免單一 Web 問題拖垮全部服務。
+                    exit_code = p.returncode
+                    if exit_code is not None and exit_code < 0:
+                        exit_reason = f"signal {-exit_code}"
+                    else:
+                        exit_reason = f"exit code {exit_code}"
+                    print(f"Web 服務意外退出（PID {p.pid}，{exit_reason}），5秒後只重啟 Web...", flush=True)
+                    processes.remove(p)
                     time.sleep(5)
-                    signal_handler(None, None)
-                    return  # signal_handler 會退出，這裡不再繼續
+                    replacement = start_web(5000)
+                    if replacement:
+                        processes.append(replacement)
+                        threading.Thread(target=stream_reader, args=(replacement.stdout, "[Web]", output_queue), daemon=True).start()
+                        if replacement.stderr:
+                            threading.Thread(target=stream_reader, args=(replacement.stderr, "[Web][ERR]", output_queue), daemon=True).start()
+                    continue
                 else:  # bot 進程退出
                     # 機器人退出，從列表中移除，不觸發全局重啟
                     print(f"機器人進程（PID {p.pid}）已退出，將不再重啟。", flush=True)

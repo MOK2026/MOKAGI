@@ -19,7 +19,7 @@ PLUGIN_INFO = {
         ("/查", "/search"),
         ("/找", "/search"),
     ],
-    "update": "202608110022_出街版",
+    "update": "202608260224_我覺得可以版",
     "naturalize": True,
     "naturalize_func": "naturalize_search_result",
 

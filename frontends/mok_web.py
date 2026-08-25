@@ -2,7 +2,7 @@
 mok_web.py
 網頁前端適配器（基於 mokagi）
 提供文件瀏覽器、系統監控、聊天界面，所有 AI 對話能力調用 mokagi 模塊。
-202608110022_出街版
+202608260224_我覺得可以版
 """
 
 import os, sys
@@ -12,7 +12,9 @@ import asyncio
 import threading
 import time
 import subprocess
-from flask import Flask, render_template, request, send_from_directory, Response, jsonify, stream_with_context
+import faulthandler
+faulthandler.enable()  # 段錯誤時輸出 Python 棧到 stderr，便於診斷 SIGSEGV
+from flask import Flask, render_template, request, send_from_directory, send_file, Response, jsonify, stream_with_context
 from flask_socketio import SocketIO, join_room
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -79,7 +81,7 @@ def ensure_docker_running():
         print(f"⚠️ 無法加入 docker 群組: {e}")
 
 # 強制啟用 Docker 沙箱（立即執行）
-os.environ['MOK_USE_DOCKER_SANDBOX'] = '1'
+os.environ['MOK_USE_DOCKER_SANDBOX'] = '0'
 
 # ===== 啟動速度優化：Docker 檢測移至背景執行 =====
 # 不阻塞 Flask 啟動，避免 apt install 耗時數十秒
@@ -125,7 +127,66 @@ static_dir = os.path.join(BASE_DIR, "static")
 
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir, static_url_path='/static')
 app.config['SECRET_KEY'] = 'secret_dev_key'
+ASSET_BUSTER = str(int(time.time()))
+WEB_BUILD_ID = 'mok-web-sse-fix-20260822-02'
+
+# ===== 方案二：檔案時間戳自動版本 ⭐️ =====
+# 用檔案修改時間當版本號，改一次檔案、版本就自動變，不用再手動改 ?v=
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # 靜態檔不強緩存，靠 ETag/Last-Modified 每次驗證
+app.config['TEMPLATES_AUTO_RELOAD'] = True  # 修改 HTML 模板立即生效，不需重啟
+
+@app.context_processor
+def inject_asset_version():
+    '''模板用：{{ asset_url('api.js') }} 會自動輸出 /static/api.js?v=<檔案mtime>'''
+    def asset_url(filename):
+        fpath = os.path.join(static_dir, filename)
+        if os.path.exists(fpath):
+            mtime = int(os.path.getmtime(fpath))
+            return f'/static/{filename}?v={mtime}&b={ASSET_BUSTER}'
+        return f'/static/{filename}?b={ASSET_BUSTER}'
+    return dict(asset_url=asset_url)
+
+@app.context_processor
+def inject_mokagi_price():
+    """統一計費注入：所有模板可用 {{ MOKAGI_PRICE }}（唯一價格源：core/mok_price.py）"""
+    try:
+        import sys
+        core_dir = os.path.join(os.path.expanduser(f"~/.{MOKAGI_home}"), "core")
+        if core_dir not in sys.path:
+            sys.path.insert(0, core_dir)
+        from mok_price import to_dict
+        return dict(MOKAGI_PRICE=to_dict())
+    except Exception:
+        return dict(MOKAGI_PRICE={"currency": "HKD", "price_per_million": 68, "price_per_token": 0.000068, "setup_fee": 5000, "github": "https://github.com/MOK2026/MOKAGI", "display": {"per_million": "HK$68 / 百萬 token", "setup_fee": "HK$5,000"}})
+
+
+@app.route('/api/build_info', methods=['GET'])
+def api_build_info():
+    main_js = os.path.join(static_dir, 'main.js')
+    main_mtime = int(os.path.getmtime(main_js)) if os.path.exists(main_js) else 0
+    return jsonify({
+        'ok': True,
+        'build_id': WEB_BUILD_ID,
+        'asset_buster': ASSET_BUSTER,
+        'main_js_mtime': main_mtime,
+        'pid': os.getpid(),
+        'cwd': os.getcwd(),
+    })
+
+@app.after_request
+def static_auto_version(resp):
+    '''靜態資源與 HTML 頁面一律設 Cache-Control: no-cache，靠 ETag/Last-Modified 讓瀏覽器每次重新驗證：
+    檔案 mtime 沒變 → 304 快取；變了 → 自動拿新版，實現「每次打開都更新」'''
+    ct = resp.content_type or ''
+    if ct.startswith(('text/javascript', 'application/javascript', 'text/css', 'text/html')):
+        resp.headers['Cache-Control'] = 'no-cache'   # 每次重新驗證（檔案沒變仍走 304，省流量）
+    return resp
+
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", ping_timeout=120, ping_interval=25)
+
+@app.get('/api/health')
+def api_health():
+    return jsonify({"status": "ok", "service": "mok_web"})
 
 # ===== VNC WebSocket Proxy：將 /novnc-ws 代理到 websockify (127.0.0.1:6080) =====
 try:
@@ -143,6 +204,29 @@ import uuid as _uuid
 import queue as _queue
 _sse_queues = {}  # {session_id: queue.Queue}
 _sse_lock = threading.Lock()
+_sse_cleanup_timers = {}  # {session_id: threading.Timer}
+
+def _schedule_sse_cleanup(session_id, delay_sec=180):
+    """延遲清理 SSE session，給前端斷線後續流留出時間。"""
+    with _sse_lock:
+        old_timer = _sse_cleanup_timers.pop(session_id, None)
+    if old_timer:
+        try:
+            old_timer.cancel()
+        except Exception:
+            pass
+
+    def _cleanup():
+        with _sse_lock:
+            _sse_queues.pop(session_id, None)
+            _sse_cleanup_timers.pop(session_id, None)
+        print(f"[SSE cleanup] session={session_id} removed")
+
+    timer = threading.Timer(delay_sec, _cleanup)
+    timer.daemon = True
+    with _sse_lock:
+        _sse_cleanup_timers[session_id] = timer
+    timer.start()
 
 # ---------- 文件瀏覽相關（動態白名單）----------
 WATCH_PATH = "/home/ubuntu/"
@@ -173,7 +257,18 @@ class FileChangeHandler(FileSystemEventHandler):
         if rel_path.startswith(self.ALLOWED_PREFIXES) and not rel_path.endswith('.tmp'):
             self.socketio.emit('file_change', {'path': rel_path})
 
-def get_file_tree(path):
+SKIP_DIRS = {
+    'node_modules', '.git', '__pycache__', '.venv', 'venv', 'env',
+    'dist', 'build', '.cache', '.pytest_cache', '.mypy_cache',
+    'backups', 'trash', '.trash', 'playwright-browsers', 'whisper_models',
+    'mpt', 'browser_profile', 'browser_profile2', '.ollama', 'snap', 'go',
+}
+MAX_TREE_DEPTH = 6
+MAX_TREE_ITEMS = 800
+
+def get_file_tree(path, depth=0):
+    if depth > MAX_TREE_DEPTH:
+        return []
     tree = []
     try:
         current_path = os.path.normpath(path)
@@ -197,14 +292,26 @@ def get_file_tree(path):
     items.sort(key=sort_key)
     # ------------------------------------------------
 
+    filtered = []
     for item in items:
         if 'web_viewer' in item:
             continue
         full_path = os.path.join(current_path, item)
         is_dir = os.path.isdir(full_path)
+        # 跳過運行時/無用大目錄，避免掃描數萬檔案造成 /api/tree 超時（524）
+        if is_dir and item in SKIP_DIRS:
+            continue
+        filtered.append(item)
+        # 限制每層項目數，防止單一目錄過大拖垮響應
+        if len(filtered) >= MAX_TREE_ITEMS:
+            break
+
+    for item in filtered:
+        full_path = os.path.join(current_path, item)
+        is_dir = os.path.isdir(full_path)
         node = {'name': item, 'path': os.path.relpath(full_path, WATCH_PATH), 'is_dir': is_dir}
         if is_dir:
-            node['children'] = get_file_tree(full_path)
+            node['children'] = get_file_tree(full_path, depth + 1)
         tree.append(node)
     return tree
 
@@ -230,6 +337,9 @@ def init_db():
         if 'conv_id' not in columns:
             conn.execute('ALTER TABLE chat_history ADD COLUMN conv_id INTEGER')
             print("✅ chat_history 表已新增 conv_id 欄位")
+        if 'rounds' not in columns:
+            conn.execute('ALTER TABLE chat_history ADD COLUMN rounds TEXT')
+            print("✅ chat_history 表已新增 rounds 欄位")
         # ========== 新增 token_usage 表 ==========
         conn.execute('''
             CREATE TABLE IF NOT EXISTS token_usage (
@@ -255,10 +365,21 @@ def init_db():
 
 init_db()
 
+def _save_rounds_to_db(msg_id, rounds):
+    """把輪次結構（思考/工具/回覆）以 JSON 持久化到 chat_history.rounds 欄位"""
+    try:
+        with closing(sqlite3.connect(DB_PATH)) as conn:
+            conn.execute('UPDATE chat_history SET rounds = ? WHERE id = ?', (json.dumps(rounds, ensure_ascii=False), msg_id))
+            conn.commit()
+    except Exception as _e:
+        print(f"[chat_history] save rounds failed: {_e}")
+
 # ---------- 多 Agent 支持（配置文件切換）----------
 ENV_DIR = os.path.expanduser(f"~/.{MOKAGI_home}/agent")
 DOT_MING_PATH = os.path.expanduser(f"~/.{MOKAGI_home}/agent/客服/.客服")
 CURRENT_ENV_PATH = DOT_MING_PATH
+# 當前選中 Agent 的 ADMIN_CHAT_ID（請求級 fallback，避免污染全域 _agent_config / os.environ）
+_current_admin_chat_id = None
 
 def parse_dot_ming():
     """解析 .default 文件，返回配置字典和模型列表（與 mokagi 配置同步）"""
@@ -347,7 +468,7 @@ def get_env_files():
     return files
 
 def reload_config(env_path):
-    global DOT_MING_PATH, OLLAMA_OPTIONS, AVAILABLE_MODELS, CURRENT_MODEL_INDEX, CURRENT_ENV_PATH
+    global DOT_MING_PATH, OLLAMA_OPTIONS, AVAILABLE_MODELS, CURRENT_MODEL_INDEX, CURRENT_ENV_PATH, _current_admin_chat_id
     DOT_MING_PATH = env_path
     CURRENT_ENV_PATH = env_path
     options, models = parse_dot_ming()
@@ -412,10 +533,8 @@ def reload_config(env_path):
                     break
     except Exception:
         pass
-    if admin_chat_id:
-        _agent_config["ADMIN_CHAT_ID"] = admin_chat_id
-        # 同時設置環境變量，以備某些工具直接讀取環境變量
-        os.environ["ADMIN_CHAT_ID"] = admin_chat_id
+    # 🔧 不再改寫全域 _agent_config / os.environ，改存到請求級 fallback 變量，避免多 Agent 並行污染
+    _current_admin_chat_id = admin_chat_id
 
 # ---------- 以下為原始 `import sqlite3` 之後的內容（此處省略，保持不變）----------
 # 請確保替換時只複製上述部分，保留後續所有 SocketIO 和路由程式碼
@@ -475,21 +594,26 @@ def reload_config(env_path):
 
 
 # ---------- HTTP SSE 串流端點（主要傳輸層，繞過 Socket.IO 502） ----------
-@app.route('/api/chat', methods=['POST'])
-def api_chat_sse():
-    data = request.get_json(force=True)
+def _start_sse_chat_session(data):
     user_msg = data.get('message', '').strip()
     agent_name = data.get('agent', '')
-    user_id = data.get("user_id") or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+    user_id = data.get("user_id") or _current_admin_chat_id or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
     context_files = data.get("context_files", None)
     if not user_msg:
-        return jsonify({"error": "empty message"}), 400
+        raise ValueError("empty message")
+
     _running_agents.add(agent_name)
     session_id = str(_uuid.uuid4())[:8]
     q = _queue.Queue()
     with _sse_lock:
+        old_timer = _sse_cleanup_timers.pop(session_id, None)
+        if old_timer:
+            try:
+                old_timer.cancel()
+            except Exception:
+                pass
         _sse_queues[session_id] = q
-    print(f"[SSE /api/chat] session={session_id} agent={agent_name} msg={user_msg[:50]}...")
+    print(f"[SSE start] session={session_id} agent={agent_name} msg={user_msg[:50]}...")
 
     def _sse_bg_worker():
         accumulated_think = ""
@@ -511,7 +635,15 @@ def api_chat_sse():
                 print(f"[SSE stream_emit] q.put failed: {_e}")
             if event["type"] == "think":
                 accumulated_think += event["content"]
+                if assistant_msg_id is None:
+                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time()))
+                        assistant_msg_id = cursor.lastrowid
+                        conn.commit()
+                update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
             elif event["type"] == "reply":
+                if event.get("subtype", "normal") in ("pending_list", "tool_process", "semantic_search", "experience"):
+                    return
                 accumulated_reply += event["content"]
                 if assistant_msg_id is None:
                     with closing(sqlite3.connect(DB_PATH)) as conn:
@@ -521,15 +653,23 @@ def api_chat_sse():
                 update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
             elif event["type"] == "done":
                 _running_agents.discard(agent_name)
-                if assistant_msg_id is not None:
-                    update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
-                    conv_id = event.get("conv_id")
-                    if conv_id:
-                        with closing(sqlite3.connect(DB_PATH)) as conn:
-                            conn.execute("UPDATE chat_history SET conv_id = ? WHERE id = ?", (conv_id, assistant_msg_id))
-                            conn.commit()
-                    if conv_id:
-                        _update_user_message_conv_id(agent_name, conv_id, user_msg_id, user_id)
+                if event.get("final_reply"):
+                    accumulated_reply = event["final_reply"]
+                if assistant_msg_id is None:
+                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", accumulated_reply, accumulated_think, time.time()))
+                        assistant_msg_id = cursor.lastrowid
+                        conn.commit()
+                update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
+                if event.get("rounds"):
+                    _save_rounds_to_db(assistant_msg_id, event["rounds"])
+                conv_id = event.get("conv_id")
+                if conv_id:
+                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                        conn.execute("UPDATE chat_history SET conv_id = ? WHERE id = ?", (conv_id, assistant_msg_id))
+                        conn.commit()
+                if conv_id:
+                    _update_user_message_conv_id(agent_name, conv_id, user_msg_id, user_id)
 
         try:
             with closing(sqlite3.connect(DB_PATH)) as conn:
@@ -571,19 +711,39 @@ def api_chat_sse():
             _running_agents.discard(agent_name)
 
     threading.Thread(target=_sse_bg_worker, daemon=True).start()
+    return {"session_id": session_id, "agent_name": agent_name, "queue": q}
+
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat_sse():
+    data = request.get_json(force=True)
+    try:
+        _started = _start_sse_chat_session(data)
+    except ValueError as _e:
+        return jsonify({"error": str(_e)}), 400
+    session_id = _started["session_id"]
+    agent_name = _started["agent_name"]
+    q = _started["queue"]
+
+    print(f"[SSE /api/chat] session={session_id} agent={agent_name} opened")
 
     def generate():
+        stream_done = False
         try:
+            # 先送出一個 prelude，確保代理層能立即拿到首字節，避免 524 等待超時。
+            yield ": stream-open\n\n"
+            yield f"data: {json.dumps({'type': 'stream_meta', 'agent': agent_name, 'sse_session_id': session_id}, ensure_ascii=False)}\n\n"
             heartbeat_count = 0
             while True:
                 try:
-                    event = q.get(timeout=15)
+                    event = q.get(timeout=5)
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     if event.get('type') == 'done':
+                        stream_done = True
                         break
                 except _queue.Empty:
                     heartbeat_count += 1
-                    if heartbeat_count > 40:
+                    if heartbeat_count > 120:
                         yield f"data: {json.dumps({'type': 'error', 'content': 'timeout', 'agent': agent_name}, ensure_ascii=False)}\n\n"
                         break
                     # 🔧 發送 SSE 心跳註解（keep-alive），防止 Cloudflare/Nginx 超時斷線
@@ -591,18 +751,41 @@ def api_chat_sse():
         except GeneratorExit:
             pass
         finally:
-            with _sse_lock:
-                _sse_queues.pop(session_id, None)
+            # 不立刻刪 queue，給 QUIC/代理斷線後的續流端點留時間接手。
+            if stream_done:
+                _schedule_sse_cleanup(session_id, delay_sec=20)
+            else:
+                _schedule_sse_cleanup(session_id, delay_sec=180)
             _running_agents.discard(agent_name)
-            print(f"[SSE /api/chat] session={session_id} ended")
+            print(f"[SSE /api/chat] session={session_id} ended done={stream_done}")
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache, no-store, must-revalidate, no-transform',
         'X-Accel-Buffering': 'no',
+        'Alt-Svc': 'clear',
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Expose-Headers': '*',
         'Content-Type': 'text/event-stream; charset=utf-8'
+    })
+
+
+@app.route('/api/chat/start', methods=['POST'])
+def api_chat_start():
+    """公網穩定模式：短 POST 啟動任務，客戶端再走 GET SSE 接收。"""
+    data = request.get_json(force=True)
+    try:
+        _started = _start_sse_chat_session(data)
+    except ValueError as _e:
+        return jsonify({"error": str(_e)}), 400
+
+    session_id = _started["session_id"]
+    agent_name = _started["agent_name"]
+    return jsonify({
+        "ok": True,
+        "agent": agent_name,
+        "sse_session_id": session_id,
+        "stream_url": f"/api/chat/stream/{session_id}"
     })
 
 
@@ -618,25 +801,36 @@ def api_chat_stream_sse(session_id):
 
     def generate_sse():
         heartbeat_count = 0
+        stream_done = False
         try:
+            # 同步送出 prelude，讓中間代理儘快確認串流已開始。
+            yield ": stream-open\n\n"
+            yield f"data: {json.dumps({'type': 'stream_meta', 'sse_session_id': session_id}, ensure_ascii=False)}\n\n"
             while True:
                 try:
-                    event = q.get(timeout=15)
+                    event = q.get(timeout=5)
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     if event.get('type') == 'done':
+                        stream_done = True
                         break
                 except _queue.Empty:
                     heartbeat_count += 1
-                    if heartbeat_count > 40:  # 10 分鐘超時
+                    if heartbeat_count > 120:  # 10 分鐘超時（5 秒心跳）
                         yield f"data: {json.dumps({'type': 'error', 'content': 'timeout'}, ensure_ascii=False)}\n\n"
                         break
                     yield ": heartbeat\n\n"
         except GeneratorExit:
             pass
+        finally:
+            if stream_done:
+                _schedule_sse_cleanup(session_id, delay_sec=20)
+            else:
+                _schedule_sse_cleanup(session_id, delay_sec=180)
 
     return Response(stream_with_context(generate_sse()), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache, no-store, must-revalidate, no-transform',
         'X-Accel-Buffering': 'no',
+        'Alt-Svc': 'clear',
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Expose-Headers': '*',
@@ -666,7 +860,7 @@ def handle_chat_message(data):
     # 🔧 標記此 agent 工作中（頁面刷新時可恢復狀態）
     _running_agents.add(agent_name)
 
-    user_id = data.get("user_id") or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+    user_id = data.get("user_id") or _current_admin_chat_id or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
     context_files = data.get("context_files", None)  # 🔧 前端控制 soul 文件載入
 
     # 🔧 客服模式：自動預先抓取頁面內容（不依賴 LLM 自己調用 web_fetch）
@@ -756,8 +950,6 @@ def handle_chat_message(data):
                 try:
                     if sid:
                         socketio.emit("chat_stream", event_with_sse, room=sid, namespace="/")
-                    user_room = f'user_{user_id}'
-                    socketio.emit("chat_stream", event_with_sse, room=user_room, namespace="/")
                 except Exception as _emit_err:
                     print(f"[stream_emit] SSE session 通知失敗: {_emit_err}")
                 return  # 已發送帶 session_id 的版本，跳過後續普通發送
@@ -766,16 +958,21 @@ def handle_chat_message(data):
             try:
                 if sid:
                     socketio.emit("chat_stream", event, room=sid, namespace="/")
-                # 🔧 同時發送到 user_id 房間（防止重連後 sid 變更導致客戶端收不到）
-                user_room = f'user_{user_id}'
-                socketio.emit("chat_stream", event, room=user_room, namespace="/")
             except Exception as _emit_err:
                 print(f"[stream_emit] socketio.emit 失敗: {_emit_err}")
 
             if event["type"] == "think":
                 accumulated_think += event["content"]
+                if assistant_msg_id is None:
+                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time()))
+                        assistant_msg_id = cursor.lastrowid
+                        conn.commit()
+                update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
 
             elif event["type"] == "reply":
+                if event.get("subtype", "normal") in ("pending_list", "tool_process", "semantic_search", "experience"):
+                    return
                 accumulated_reply += event["content"]
                 if assistant_msg_id is None:
                     with closing(sqlite3.connect(DB_PATH)) as conn:
@@ -790,18 +987,29 @@ def handle_chat_message(data):
 
             elif event["type"] == "done":
                 _running_agents.discard(agent_name)
-                if assistant_msg_id is not None:
-                    update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
-                    conv_id = event.get("conv_id")
-                    if conv_id:
-                        with closing(sqlite3.connect(DB_PATH)) as conn:
-                            conn.execute(
-                                "UPDATE chat_history SET conv_id = ? WHERE id = ?",
-                                (conv_id, assistant_msg_id)
-                            )
-                            conn.commit()
-                    if conv_id:
-                        _update_user_message_conv_id(agent_name, conv_id, user_msg_id, user_id)
+                if event.get("final_reply"):
+                    accumulated_reply = event["final_reply"]
+                if assistant_msg_id is None:
+                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                        cursor = conn.execute(
+                            "INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)",
+                            (agent_name, "assistant", accumulated_reply, accumulated_think, time.time())
+                        )
+                        assistant_msg_id = cursor.lastrowid
+                        conn.commit()
+                update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
+                if event.get("rounds"):
+                    _save_rounds_to_db(assistant_msg_id, event["rounds"])
+                conv_id = event.get("conv_id")
+                if conv_id:
+                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                        conn.execute(
+                            "UPDATE chat_history SET conv_id = ? WHERE id = ?",
+                            (conv_id, assistant_msg_id)
+                        )
+                        conn.commit()
+                if conv_id:
+                    _update_user_message_conv_id(agent_name, conv_id, user_msg_id, user_id)
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -840,12 +1048,11 @@ def handle_chat_message(data):
                 )
                 if result == "__ERROR_REPORTED__":
                     _running_agents.discard(agent_name)
-                    user_room = f'user_{user_id}'
                     err_event1 = {"type": "reply", "content": "❌ 自動修復失敗，請稍後重試。", "agent": agent_name}
                     err_event2 = {"type": "done", "agent": agent_name}
-                    for room in [sid, user_room]:
-                        socketio.emit("chat_stream", err_event1, room=room, namespace="/")
-                        socketio.emit("chat_stream", err_event2, room=room, namespace="/")
+                    if sid:
+                        socketio.emit("chat_stream", err_event1, room=sid, namespace="/")
+                        socketio.emit("chat_stream", err_event2, room=sid, namespace="/")
                 else:
                     # 🔧 安全清理：確保 process_message 完成後清理狀態
                     _running_agents.discard(agent_name)
@@ -853,12 +1060,11 @@ def handle_chat_message(data):
             loop.run_until_complete(_bg_coro())
         except Exception as e:
             _running_agents.discard(agent_name)
-            user_room = f'user_{user_id}'
             err_event1 = {"type": "reply", "content": f"❌ 嚴重錯誤: {str(e)}", "agent": agent_name}
             err_event2 = {"type": "done", "agent": agent_name}
-            for room in [sid, user_room]:
-                socketio.emit("chat_stream", err_event1, room=room, namespace="/")
-                socketio.emit("chat_stream", err_event2, room=room, namespace="/")
+            if sid:
+                socketio.emit("chat_stream", err_event1, room=sid, namespace="/")
+                socketio.emit("chat_stream", err_event2, room=sid, namespace="/")
             # 🔧 SSE 備援：也將錯誤事件放入 SSE 隊列
             try:
                 _sse_q.put(err_event1.copy())
@@ -1008,11 +1214,29 @@ def handle_stop():
 
 
 
+def _game_asset_version(folder):
+    '''回傳目錄內所有 js/css/html 檔案的最新 mtime 作為版本號'''
+    ver = 0
+    for root, dirs, files in os.walk(folder):
+        for f in files:
+            if f.endswith(('.js', '.css', '.html')):
+                try:
+                    ver = max(ver, int(os.path.getmtime(os.path.join(root, f))))
+                except OSError:
+                    pass
+    return ver or int(time.time())
+
 @app.route('/game/<path:filename>')
+@app.route('/game2/<path:filename>')
 def game_files(filename):
-    return send_from_directory(
-        os.path.join(BASE_DIR, 'game'), filename
-    )
+    folder = 'game2' if request.path.startswith('/game2/') else 'game'
+    full = os.path.join(BASE_DIR, folder, filename)
+    if filename.endswith('.html') and os.path.exists(full):
+        html = open(full, encoding='utf-8').read()
+        ver = _game_asset_version(os.path.join(BASE_DIR, folder))
+        html = re.sub(r'\?v=\d+', '?v=' + str(ver), html)
+        return html
+    return send_from_directory(os.path.join(BASE_DIR, folder), filename)
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -1033,7 +1257,174 @@ def tokenstats():
 def novnc():
     return render_template('webTools/novnc/index.html')
 
+@app.route('/backup')
+def backup_page():
+    return render_template('webTools/backup.html')
 
+@app.route('/api/backup/items')
+def api_backup_items():
+    # 列出 ~/.mok 頂層項目，供備份時勾選要排除的內容
+    mok_dir = os.path.expanduser('~/.mok')
+    ALWAYS_EXCLUDE = {'backups', '__pycache__', '.git', 'node_modules', 'playwright-browsers', '.chroma_data', '.speech2text_models', '.pending_cron_confirm', 'mpt', 'browser_profile', 'browser_profile2', 'trash', 'whisper_models', 'CPU_上傳.bat', 'CPU_備份.bat'}
+    items = []
+    try:
+        entries = sorted(os.listdir(mok_dir))
+    except OSError as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    for name in entries:
+        if name in ALWAYS_EXCLUDE:
+            continue
+        if '.bak' in name or name in ('CPU_上傳.bat', 'CPU_備份.bat'):
+            continue
+        fp = os.path.join(mok_dir, name)
+        if not os.path.exists(fp):
+            continue
+        is_dir = os.path.isdir(fp)
+        size_bytes = _backup_dir_size(fp) if is_dir else os.path.getsize(fp)
+        items.append({'name': name, 'is_dir': is_dir, 'size': _backup_human_size(size_bytes), 'size_bytes': size_bytes})
+    return jsonify({'items': items})
+
+def _backup_dir_size(path):
+    total = 0
+    for root, dirs, files in os.walk(path):
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                total += os.path.getsize(fp)
+            except OSError:
+                pass
+    return total
+
+def _backup_human_size(n):
+    if n < 1024:
+        return f'{n} B'
+    if n < 1024 * 1024:
+        return f'{n / 1024:.1f} KB'
+    if n < 1024 * 1024 * 1024:
+        return f'{n / (1024 * 1024):.1f} MB'
+    return f'{n / (1024 * 1024 * 1024):.2f} GB'
+
+def _admin_tz_offset():
+    """統一使用 MOK_ADMIN_TIME_ZONE (+8)"""
+    off = 8
+    try:
+        env_path = os.path.expanduser('~/.mok/env.env')
+        with open(env_path, encoding='utf-8', errors='replace') as f:
+            for ln in f:
+                ln = ln.strip()
+                if ln.startswith('MOK_ADMIN_TIME_ZONE='):
+                    v = ln.split('=', 1)[1].strip()
+                    if v:
+                        off = int(v)
+                    break
+    except Exception:
+        pass
+    return off
+
+
+@app.route('/api/backup/create', methods=['POST'])
+def api_backup_create():
+    import tarfile, datetime, re
+    mok_dir = os.path.expanduser('~/.mok')
+    backup_dir = os.path.join(mok_dir, 'backups')
+    os.makedirs(backup_dir, exist_ok=True)
+    data = request.get_json(silent=True) or {}
+    user_exclude = set(data.get('exclude', []) or [])
+    # 支援自訂檔名（可選），否則統一用 MOK_ADMIN_TIME_ZONE (+8) 時間
+    custom_name = str(data.get('name', '') or '').strip()
+    _tz = datetime.timezone(datetime.timedelta(hours=_admin_tz_offset()))
+    timestamp = datetime.datetime.now(_tz).strftime('%Y%m%d_%H%M%S')
+    if custom_name:
+        custom_name = re.sub(r'[^\w.\-]', '_', custom_name)
+        if not custom_name.endswith('.tar.gz'):
+            custom_name += '.tar.gz'
+        filename = custom_name
+    else:
+        filename = f'mok_backup_{timestamp}.tar.gz'
+    filepath = os.path.join(backup_dir, filename)
+    try:
+        nested_exclude = {'__pycache__', '.git', 'node_modules', 'logs', 'playwright-browsers', '.chroma_data', '.speech2text_models', 'whisper_models'}
+        top_exclude = user_exclude | {'backups', '__pycache__', '.git', 'node_modules', 'playwright-browsers', '.chroma_data', '.speech2text_models', '.pending_cron_confirm', 'mpt', 'browser_profile', 'browser_profile2', 'trash', 'whisper_models', 'CPU_上傳.bat', 'CPU_備份.bat'}
+        with tarfile.open(filepath, 'w:gz') as tar:
+            for entry in sorted(os.listdir(mok_dir)):
+                if entry in top_exclude:
+                    continue
+                full = os.path.join(mok_dir, entry)
+                if not os.path.exists(full):
+                    continue
+                if os.path.isdir(full):
+                    for root, dirs, files in os.walk(full):
+                        dirs[:] = [d for d in dirs if d not in nested_exclude]
+                        for f in files:
+                            if '.bak' in f or f in ('CPU_上傳.bat', 'CPU_備份.bat'):
+                                continue
+                            fp = os.path.join(root, f)
+                            arcname = os.path.relpath(fp, mok_dir)
+                            try:
+                                tar.add(fp, arcname=arcname)
+                            except OSError:
+                                pass
+                else:
+                    if '.bak' in entry or entry in ('CPU_上傳.bat', 'CPU_備份.bat'):
+                        continue
+                    try:
+                        tar.add(full, arcname=entry)
+                    except OSError:
+                        pass
+        size_bytes = os.path.getsize(filepath)
+        if size_bytes < 1024:
+            size_str = f'{size_bytes} B'
+        elif size_bytes < 1024*1024:
+            size_str = f'{size_bytes/1024:.1f} KB'
+        else:
+            size_str = f'{size_bytes/(1024*1024):.1f} MB'
+        return jsonify({'success': True, 'message': f'備份完成: {filename}', 'filename': filename, 'size': size_str})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/backup/list')
+def api_backup_list():
+    import datetime
+    backup_dir = os.path.expanduser('~/.mok/backups')
+    if not os.path.exists(backup_dir):
+        return jsonify({'backups': []})
+    backups = []
+    for f in sorted(os.listdir(backup_dir), reverse=True):
+        if f.endswith('.tar.gz'):
+            fp = os.path.join(backup_dir, f)
+            stat = os.stat(fp)
+            size_bytes = stat.st_size
+            if size_bytes < 1024:
+                size_str = f'{size_bytes} B'
+            elif size_bytes < 1024*1024:
+                size_str = f'{size_bytes/1024:.1f} KB'
+            else:
+                size_str = f'{size_bytes/(1024*1024):.1f} MB'
+            backups.append({
+                'name': f,
+                'size': size_str,
+                'time': datetime.datetime.fromtimestamp(stat.st_mtime, datetime.timezone(datetime.timedelta(hours=_admin_tz_offset()))).strftime('%Y-%m-%d %H:%M:%S')
+            })
+    return jsonify({'backups': backups})
+
+@app.route('/api/backup/download/<path:filename>')
+def api_backup_download(filename):
+    backup_dir = os.path.expanduser('~/.mok/backups')
+    safe_name = os.path.basename(filename)
+    return send_from_directory(backup_dir, safe_name, as_attachment=True, download_name=safe_name)
+
+@app.route('/api/backup/delete/<path:filename>', methods=['DELETE'])
+def api_backup_delete(filename):
+    backup_dir = os.path.expanduser('~/.mok/backups')
+    safe_name = os.path.basename(filename)
+    filepath = os.path.join(backup_dir, safe_name)
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'File not found'}), 404
+    try:
+        os.remove(filepath)
+        return jsonify({'success': True, 'message': f'已刪除 {safe_name}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/tree')
 def api_tree():
@@ -1055,6 +1446,81 @@ def get_file_content(sub_path):
         return {"content": content}
     except Exception as e:
         return {"error": str(e)}, 500
+
+# ---------- 主機 AI 維修台（僅供本機 SSH 隧道使用）----------
+REPAIR_ROOT = os.path.realpath(os.path.expanduser(f"~/.{MOKAGI_home}"))
+REPAIR_COMMAND_BLOCKLIST = re.compile(r"[;&|`$<>]|(?:^|\s)(?:rm|mv|cp|dd|mkfs|shutdown|reboot|kill|pkill|sudo|chmod|chown)\b", re.I)
+
+def _repair_path(relative_path):
+    relative_path = (relative_path or '').replace('\\', '/').lstrip('/')
+    full_path = os.path.realpath(os.path.join(REPAIR_ROOT, relative_path))
+    if full_path != REPAIR_ROOT and not full_path.startswith(REPAIR_ROOT + os.sep):
+        raise ValueError('路徑必須位於 .mok 目錄內')
+    return full_path
+
+@app.route('/repair')
+def repair_page():
+    return send_file(os.path.join(BASE_DIR, '建檔案', '主機維修台.html'))
+
+@app.route('/api/repair/tree')
+def repair_tree():
+    def walk(path, depth=0):
+        if depth > 8:
+            return []
+        result = []
+        try:
+            entries = sorted(os.scandir(path), key=lambda item: (not item.is_dir(follow_symlinks=False), item.name.lower()))
+            for entry in entries:
+                if entry.name in {'.git', '__pycache__'}:
+                    continue
+                rel = os.path.relpath(entry.path, REPAIR_ROOT).replace(os.sep, '/')
+                item = {'name': entry.name, 'path': rel, 'is_dir': entry.is_dir(follow_symlinks=False)}
+                if item['is_dir']:
+                    item['children'] = walk(entry.path, depth + 1)
+                result.append(item)
+        except (OSError, PermissionError):
+            pass
+        return result
+    return jsonify({'root': '.mok', 'tree': walk(REPAIR_ROOT)})
+
+@app.route('/api/repair/file', methods=['GET', 'PUT'])
+def repair_file():
+    try:
+        data = request.get_json(silent=True) or {} if request.method == 'PUT' else request.args
+        path = data.get('path', '')
+        full_path = _repair_path(path)
+        if request.method == 'GET':
+            if not os.path.isfile(full_path):
+                return jsonify({'error': '找不到檔案'}), 404
+            if os.path.getsize(full_path) > 2 * 1024 * 1024:
+                return jsonify({'error': '檔案超過 2MB，請使用命令查看'}), 413
+            with open(full_path, 'r', encoding='utf-8', errors='replace') as handle:
+                return jsonify({'path': path, 'content': handle.read()})
+        content = data.get('content', '')
+        if not os.path.isfile(full_path):
+            return jsonify({'error': '只能修改已存在的檔案'}), 404
+        if len(content.encode('utf-8')) > 2 * 1024 * 1024:
+            return jsonify({'error': '檔案超過 2MB'}), 413
+        with open(full_path, 'w', encoding='utf-8') as handle:
+            handle.write(content)
+        return jsonify({'ok': True, 'path': path})
+    except (ValueError, OSError) as exc:
+        return jsonify({'error': str(exc)}), 400
+
+@app.route('/api/repair/exec', methods=['POST'])
+def repair_exec():
+    command = (request.get_json(silent=True) or {}).get('command', '').strip()
+    if not command:
+        return jsonify({'error': '缺少 command'}), 400
+    if len(command) > 500 or REPAIR_COMMAND_BLOCKLIST.search(command):
+        return jsonify({'error': '命令被安全規則拒絕'}), 403
+    try:
+        result = subprocess.run(command, shell=True, cwd=REPAIR_ROOT, capture_output=True, text=True, timeout=20)
+        return jsonify({'command': command, 'returncode': result.returncode, 'stdout': result.stdout[-12000:], 'stderr': result.stderr[-12000:]})
+    except subprocess.TimeoutExpired as exc:
+        return jsonify({'command': command, 'returncode': 124, 'stdout': (exc.stdout or '')[-12000:], 'stderr': '命令超過 20 秒，已停止'}), 408
+    except OSError as exc:
+        return jsonify({'error': str(exc)}), 500
 
 
 
@@ -1121,6 +1587,139 @@ def create_folder():
 
 
 
+# ===== 暫存圖片上傳：貼上截圖後先落盤，AI 用 vision 分析完再刪除 =====
+TMP_IMAGE_DIR = os.path.join(os.path.expanduser(f"~/.{MOKAGI_home}"), "_tmp", "images")
+
+@app.route('/api/upload_image', methods=['POST'])
+def upload_image():
+    """暫存貼上的截圖/圖片，回傳磁碟路徑給前端，讓 AI 用 vision 工具分析後刪除"""
+    try:
+        data = request.get_json(silent=True) or {}
+        file_data = data.get('data', '')
+        filename = data.get('filename', '')
+        mime_type = data.get('mime_type', 'image/png')
+        if not file_data:
+            return jsonify({"success": False, "error": "Missing data"}), 400
+
+        ext_map = {
+            'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg',
+            'image/gif': '.gif', 'image/webp': '.webp', 'image/bmp': '.bmp',
+        }
+        ext = ext_map.get((mime_type or '').split(';')[0].lower(), '.png')
+
+        # 安全檔名：只保留中英文、數字、底線、連字號、點
+        safe_name = re.sub(r'[^\w.\-\u4e00-\u9fff]', '_', filename or '')
+        if not safe_name:
+            safe_name = f"image_{int(time.time() * 1000)}"
+        if not safe_name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')):
+            safe_name += ext
+
+        os.makedirs(TMP_IMAGE_DIR, exist_ok=True)
+
+        # 自動清理：刪除超過 60 分鐘的暫存圖，避免累積
+        try:
+            _now = time.time()
+            for _old in os.listdir(TMP_IMAGE_DIR):
+                _old_path = os.path.join(TMP_IMAGE_DIR, _old)
+                if os.path.isfile(_old_path) and _now - os.path.getmtime(_old_path) > 3600:
+                    os.remove(_old_path)
+        except Exception:
+            pass
+
+        full_path = os.path.join(TMP_IMAGE_DIR, safe_name)
+        if os.path.exists(full_path):
+            _stem, _e = os.path.splitext(safe_name)
+            full_path = os.path.join(TMP_IMAGE_DIR, f"{_stem}_{int(time.time() * 1000)}{_e}")
+
+        raw = base64.b64decode(file_data)
+        with open(full_path, 'wb') as f:
+            f.write(raw)
+
+        return jsonify({"success": True, "path": full_path, "filename": os.path.basename(full_path)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+TMP_AUDIO_DIR = os.path.join(os.path.expanduser(f"~/.{MOKAGI_home}"), "_tmp", "audio")
+
+TMP_TEXT_DIR = os.path.join(os.path.expanduser(f"~/.{MOKAGI_home}"), "_tmp", "text")
+
+@app.route('/api/upload_text', methods=['POST'])
+def upload_text():
+    """暫存大量文字，讓對話只傳文件路徑；暫存文件與其他附件同樣自動清理。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        content = data.get('content', '')
+        if not isinstance(content, str) or not content:
+            return jsonify({"success": False, "error": "Missing content"}), 400
+
+        os.makedirs(TMP_TEXT_DIR, exist_ok=True)
+        now = time.time()
+        for old_name in os.listdir(TMP_TEXT_DIR):
+            old_path = os.path.join(TMP_TEXT_DIR, old_name)
+            if os.path.isfile(old_path) and now - os.path.getmtime(old_path) > 3600:
+                try:
+                    os.remove(old_path)
+                except OSError:
+                    pass
+
+        filename = f"chat_{int(now * 1000)}_{_uuid.uuid4().hex[:8]}.txt"
+        full_path = os.path.join(TMP_TEXT_DIR, filename)
+        with open(full_path, 'w', encoding='utf-8') as handle:
+            handle.write(content)
+        return jsonify({"success": True, "path": full_path, "filename": filename})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route('/api/upload_audio', methods=['POST'])
+def upload_audio():
+    """暫存錄音/音頻，回傳磁碟路徑給前端，讓 AI 用 stt 工具轉錄後刪除"""
+    try:
+        data = request.get_json(silent=True) or {}
+        file_data = data.get('data', '')
+        filename = data.get('filename', '')
+        mime_type = data.get('mime_type', 'audio/webm')
+        if not file_data:
+            return jsonify({"success": False, "error": "Missing data"}), 400
+
+        ext_map = {
+            'audio/webm': '.webm', 'audio/ogg': '.ogg', 'audio/mp4': '.m4a',
+            'audio/mpeg': '.mp3', 'audio/wav': '.wav', 'audio/x-wav': '.wav',
+            'audio/mp3': '.mp3', 'audio/aac': '.aac', 'audio/opus': '.opus',
+        }
+        mime_key = (mime_type or '').split(';')[0].lower()
+        ext = ext_map.get(mime_key, '.webm')
+
+        safe_name = re.sub(r'[^\w.\-\u4e00-\u9fff]', '_', filename or '')
+        if not safe_name:
+            safe_name = f"audio_{int(time.time() * 1000)}"
+        if not safe_name.lower().endswith(('.webm', '.ogg', '.m4a', '.mp3', '.wav', '.aac', '.opus', '.mp4')):
+            safe_name += ext
+
+        os.makedirs(TMP_AUDIO_DIR, exist_ok=True)
+
+        try:
+            _now = time.time()
+            for _old in os.listdir(TMP_AUDIO_DIR):
+                _old_path = os.path.join(TMP_AUDIO_DIR, _old)
+                if os.path.isfile(_old_path) and _now - os.path.getmtime(_old_path) > 3600:
+                    os.remove(_old_path)
+        except Exception:
+            pass
+
+        full_path = os.path.join(TMP_AUDIO_DIR, safe_name)
+        if os.path.exists(full_path):
+            _stem, _e = os.path.splitext(safe_name)
+            full_path = os.path.join(TMP_AUDIO_DIR, f"{_stem}_{int(time.time() * 1000)}{_e}")
+
+        raw = base64.b64decode(file_data)
+        with open(full_path, 'wb') as f:
+            f.write(raw)
+
+        return jsonify({"success": True, "path": full_path, "filename": os.path.basename(full_path)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/raw/<path:sub_path>')
 def send_raw_file(sub_path):
     if not sub_path.startswith(ALLOWED_PATHS):
@@ -1140,6 +1739,7 @@ def get_env_files_api():
         post = ''
         desc = ''
         tags = ''
+        group = ''
         config_path = os.path.join(ENV_DIR, agent_name, f)
         try:
             with open(config_path, 'r', encoding='utf-8') as cf:
@@ -1165,6 +1765,8 @@ def get_env_files_api():
                         if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
                             val = val[1:-1]
                         tags = val
+                    if line.startswith('MOK_AGENT_group='):
+                        group = line.split('=', 1)[1].strip()
         except:
             pass
 
@@ -1183,7 +1785,7 @@ def get_env_files_api():
             print(f"獲取 agent {agent_name} 最後活躍時間失敗: {e}")
         # ----- 結束 -----
 
-        agents.append({"name": agent_name, "file": f, "icon": icon, "post": post, "desc": desc, "tags": tags, "last_active": last_active, "is_running": agent_name in _running_agents})
+        agents.append({"name": agent_name, "file": f, "icon": icon, "post": post, "desc": desc, "tags": tags, "group": group, "last_active": last_active, "is_running": agent_name in _running_agents})
 
     # ----- 按 last_active 降序排序（最新排最前）-----
     agents.sort(key=lambda x: x.get('last_active', 0), reverse=True)
@@ -1193,6 +1795,37 @@ def get_env_files_api():
 
 
 
+
+
+# 一鍵清空所有 agent 的 _job.json 內容
+@app.route('/api/clear_all_jobs', methods=['POST'])
+def clear_all_jobs():
+    """清空 ENV_DIR 下所有 agent 的 _job.json（寫入空物件 {}）"""
+    cleared = []
+    errors = []
+    try:
+        items = os.listdir(ENV_DIR)
+    except Exception as e:
+        return jsonify({"success": False, "error": "無法讀取 agent 目錄: " + str(e)}), 500
+    for item in items:
+        agent_dir = os.path.join(ENV_DIR, item)
+        if not os.path.isdir(agent_dir):
+            continue
+        job_path = os.path.join(agent_dir, '_job.json')
+        if not os.path.exists(job_path):
+            continue
+        try:
+            with open(job_path, 'w', encoding='utf-8') as f:
+                f.write('{}')
+            cleared.append(item)
+        except Exception as e:
+            errors.append(item + ": " + str(e))
+    return jsonify({
+        "success": True,
+        "cleared_count": len(cleared),
+        "cleared": cleared,
+        "errors": errors
+    })
 
 
 # 建新 agent 的 API，會在 ENV_DIR 下創建對應的 .文件 和 文件夾
@@ -1230,13 +1863,29 @@ def create_agent():
     # 創建 soul 子目錄
     soul_dir = os.path.join(agent_dir, 'soul')
     os.makedirs(soul_dir, exist_ok=True)
-    # 處理角色模板（從 agency-agents GitHub 下載）
+    # 處理角色模板（Agency Agents 遠端 .md / 女媧人物範例本地 SKILL.md）
     role_url = data.get('role_url', '').strip()
     agent_md_created = False
     if role_url:
         try:
-            with urllib.request.urlopen(role_url) as _resp:
-                _role_content = _resp.read().decode('utf-8')
+            _is_local = role_url.startswith('/') or role_url.startswith('file://')
+            if _is_local:
+                # 本地角色模板（女媧人物範例）→ 直接讀取檔案，並複製附屬資料（references 等）
+                import shutil
+                _local_path = role_url.replace('file://', '')
+                _nuwa_root = os.path.expanduser(f"~/.{MOKAGI_home}/skill/nuwa/nuwa-examples")
+                if not _local_path.startswith(_nuwa_root):
+                    raise ValueError(f"不允許讀取此路徑: {_local_path}")
+                with open(_local_path, 'r', encoding='utf-8') as _lf:
+                    _role_content = _lf.read()
+                _ex_dir = os.path.dirname(_local_path)
+                _ex_name = os.path.basename(_ex_dir)
+                _soul_target = os.path.join(soul_dir, _ex_name)
+                if os.path.isdir(_ex_dir) and not os.path.exists(_soul_target):
+                    shutil.copytree(_ex_dir, _soul_target)
+            else:
+                with urllib.request.urlopen(role_url) as _resp:
+                    _role_content = _resp.read().decode('utf-8')
             _agent_md_path = os.path.join(soul_dir, 'agent.md')
             with open(_agent_md_path, 'w', encoding='utf-8') as _f:
                 _f.write(_role_content)
@@ -1514,6 +2163,20 @@ def system_meminfo():
 
 
 # 查詢token API
+
+# ===== 統一計費 API（唯一價格源：core/mok_price.py）=====
+@app.route('/api/price')
+def api_price():
+    """返回 MOKAGI 統一收費標準（前端 JS 從此讀取，修改 mok_price.py 即全局生效）"""
+    try:
+        import sys
+        core_dir = os.path.join(os.path.expanduser(f"~/.{MOKAGI_home}"), "core")
+        if core_dir not in sys.path:
+            sys.path.insert(0, core_dir)
+        from mok_price import to_dict
+        return jsonify(to_dict())
+    except Exception as e:
+        return jsonify({"currency": "HKD", "price_per_million": 68, "price_per_token": 0.000068, "setup_fee": 5000, "github": "https://github.com/MOK2026/MOKAGI", "display": {"per_million": "HK$68 / 百萬 token", "setup_fee": "HK$5,000"}})
 @app.route('/api/token_stats')
 def token_stats():
     agent = request.args.get('agent')
@@ -1599,20 +2262,29 @@ def get_chat_history():
 
         # 按 id 降序取最新數據（新消息在前）
         rows = conn.execute(
-            '''SELECT id, conv_id, role, content, think_content, timestamp
+            '''SELECT id, conv_id, role, content, think_content, rounds, timestamp
                FROM chat_history WHERE agent = ?
                ORDER BY id DESC LIMIT ? OFFSET ?''',
             (agent, limit, offset)
         ).fetchall()
 
-        messages = [{
-            "id": row["id"],
-            "conv_id": row["conv_id"],
-            "role": row["role"],
-            "content": row["content"],
-            "thinkContent": row["think_content"],
-            "timestamp": row["timestamp"]
-        } for row in rows]
+        messages = []
+        for row in rows:
+            _rounds = None
+            if row["rounds"]:
+                try:
+                    _rounds = json.loads(row["rounds"])
+                except Exception:
+                    _rounds = None
+            messages.append({
+                "id": row["id"],
+                "conv_id": row["conv_id"],
+                "role": row["role"],
+                "content": row["content"],
+                "thinkContent": row["think_content"],
+                "rounds": _rounds,
+                "timestamp": row["timestamp"]
+            })
 
         has_more = (offset + limit) < total
 
@@ -1709,7 +2381,7 @@ def api_search():
         agent_name = os.path.basename(CURRENT_ENV_PATH).lstrip('.')
 
     # 取得使用者識別碼（預設使用 ADMIN_CHAT_ID）
-    chat_id = _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+    chat_id = _current_admin_chat_id or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
 
     # 非同步呼叫 memory 的語義搜索
     import asyncio
@@ -2113,7 +2785,7 @@ def get_pending_tasks():
     if not agent:
         return {"error": "Missing agent parameter"}, 400
 
-    user_id = _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+    user_id = _current_admin_chat_id or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
     
     # 直接讀取 _job.json
     import json
@@ -2141,11 +2813,68 @@ import gzip, io
 
 STATIC_CACHE_SECONDS = 86400  # 24小時靜態資源快取
 
+# ===== 方案二：檔案時間戳自動版本（每次打開都更新）=====
+# 原理：HTML 由 Flask 動態渲染（render_template），每次請求頁面時，
+#       自動把本地 CSS/JS 引用的版本號替換成該檔案的修改時間（mtime）。
+#       改一次檔案 → 版本號自動變 → 瀏覽器重新下載最新檔案；
+#       檔案沒改 → 版本號不變 → 瀏覽器繼續用快取。兼顧「最新」與「效能」。
+_ASSET_VERSION_RE = re.compile(
+    r"(?P<attr>(?:href|src)\s*=\s*[\"\'])(?P<url>(?!https?:|//|data:|#|javascript:)[^\"\']*?\.(?:css|js))(?P<query>\?[^\"\']*)?(?P<end>[\"\'])",
+    re.IGNORECASE
+)
+
+def _resolve_local_asset(url):
+    """將 HTML 中的資源 URL 解析為本地檔案絕對路徑；非本地資源回傳 None"""
+    clean = url.split("?")[0]
+    if clean.startswith("/static/"):
+        return os.path.join(static_dir, clean[len("/static/"):])
+    if clean.startswith("/"):
+        return os.path.join(BASE_DIR, clean.lstrip("/"))
+    # 相對路徑：相對於當前請求頁面的目錄
+    req_dir = os.path.dirname(request.path)
+    if req_dir == "/":
+        return os.path.join(BASE_DIR, clean)
+    return os.path.join(BASE_DIR, req_dir.lstrip("/"), clean)
+
+def _inject_asset_versions(html):
+    """掃描 HTML，為本地 css/js 引用注入 ?v=<檔案 mtime>"""
+    def repl(m):
+        url, query = m.group("url"), (m.group("query") or "")
+        fs_path = _resolve_local_asset(url)
+        if fs_path and os.path.isfile(fs_path):
+            try:
+                ver = time.strftime("%Y%m%d%H%M%S", time.localtime(os.path.getmtime(fs_path)))
+            except OSError:
+                return m.group(0)
+            # 移除舊的版本參數（v / _v / version / t），避免疊加
+            query = re.sub(r"[?&](?:v|_v|version|t)=[^&]*", "", query)
+            sep = "&" if query else "?"
+            query += f"{sep}v={ver}"
+        return m.group("attr") + url + query + m.group("end")
+    return _ASSET_VERSION_RE.sub(repl, html)
+
+@app.after_request
+def inject_asset_version(response):
+    """方案二：HTML 回應自動注入檔案時間戳版本號（註冊在 add_static_cache 之前，確保先注入後 gzip）"""
+    if response.content_type and "text/html" in response.content_type and not request.path.startswith("/api/"):
+        try:
+            data = response.get_data(as_text=True)
+            new_data = _inject_asset_versions(data)
+            if new_data != data:
+                response.set_data(new_data)
+        except Exception as e:
+            print(f"[asset-version] 注入失敗: {e}")
+    return response
+
+
 
 @app.after_request
 def add_static_cache(response):
     """為靜態資源加入快取標頭 + gzip 壓縮"""
     path = request.path
+    # 跳過 API，避免檔案編輯器讀取被 24 小時快取（導致存檔後切換檔案仍顯示舊內容）
+    if path.startswith("/api/"):
+        return response
     # 跳過靜態資源，避免 passthrough 錯誤
     if path.startswith("/static/"):
         return response
@@ -2347,6 +3076,136 @@ def search_all_conversations():
 
     return {"query": q, "total": len(results), "results": results}
 
+
+# ========== 📑 書籤 API ==========
+BOOKMARK_FILE = os.path.expanduser(f"~/.{MOKAGI_home}/html/webTools/書籤/書籤.json")
+
+def _load_bookmarks():
+    if not os.path.exists(BOOKMARK_FILE):
+        return []
+    try:
+        with open(BOOKMARK_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return []
+
+def _save_bookmarks(bookmarks):
+    try:
+        os.makedirs(os.path.dirname(BOOKMARK_FILE), exist_ok=True)
+        with open(BOOKMARK_FILE, "w", encoding="utf-8") as f:
+            json.dump(bookmarks, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print(f"[bookmark] 儲存失敗: {e}")
+        return False
+
+@app.route("/api/bookmark/add", methods=["POST"])
+def bookmark_add():
+    """加入書籤"""
+    data = request.get_json(silent=True) or {}
+    conv_id = str(data.get("conv_id", "")).strip()
+    if not conv_id or conv_id == "?":
+        return {"success": False, "error": "缺少 conv_id"}, 400
+
+    bookmarks = _load_bookmarks()
+    # 檢查是否已存在相同 conv_id
+    for bm in bookmarks:
+        if str(bm.get("conv_id", "")) == conv_id:
+            return {"success": True, "message": "已存在"}
+
+    bookmarks.append({
+        "conv_id": conv_id,
+        "snippet": data.get("snippet", "")[:200],
+        "agent": data.get("agent", ""),
+        "role": data.get("role", ""),
+        "timestamp": data.get("timestamp", time.time())
+    })
+    if not _save_bookmarks(bookmarks):
+        return {"success": False, "error": "書籤儲存失敗（請檢查檔案權限或磁碟空間）"}, 500
+    return {"success": True, "message": "已加入書籤"}
+
+@app.route("/api/bookmark/list", methods=["GET"])
+def bookmark_list():
+    """列出所有書籤（按時間倒序）"""
+    bookmarks = _load_bookmarks()
+    bookmarks.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    return {"success": True, "bookmarks": bookmarks}
+
+@app.route("/api/bookmark/delete", methods=["POST"])
+def bookmark_delete():
+    """刪除書籤"""
+    data = request.get_json(silent=True) or {}
+    idx = data.get("index", -1)
+    bookmarks = _load_bookmarks()
+    if isinstance(idx, int) and 0 <= idx < len(bookmarks):
+        bookmarks.pop(idx)
+        _save_bookmarks(bookmarks)
+        return {"success": True, "message": "已刪除"}
+    return {"success": False, "error": "索引無效"}, 400
+
+@app.route("/api/bookmark/conversation", methods=["GET"])
+def bookmark_conversation():
+    """根據 conv_id 取得完整對話"""
+    conv_id = request.args.get("conv_id", "").strip()
+    if not conv_id:
+        return {"error": "缺少 conv_id"}, 400
+
+    messages = []
+    # 搜尋 chat_history
+    try:
+        with closing(sqlite3.connect(DB_PATH)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT role, content, think_content, timestamp FROM chat_history WHERE CAST(conv_id AS TEXT) = ? ORDER BY timestamp ASC",
+                (conv_id,)
+            ).fetchall()
+            for row in rows:
+                messages.append({
+                    "role": row["role"],
+                    "content": row["content"],
+                    "think_content": row["think_content"],
+                    "timestamp": row["timestamp"]
+                })
+    except Exception as e:
+        print(f"[bookmark] chat_history 查詢失敗: {e}")
+
+    # 也搜 conversation_history
+    try:
+        HISTORY_DB = os.path.expanduser(f"~/.{MOKAGI_home}/.memory/conversation_history.db")
+        with closing(sqlite3.connect(HISTORY_DB)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT role, content, timestamp FROM conversation_history WHERE CAST(id AS TEXT) = ? ORDER BY timestamp ASC",
+                (conv_id,)
+            ).fetchall()
+            for row in rows:
+                messages.append({
+                    "role": row["role"],
+                    "content": row["content"],
+                    "think_content": "",
+                    "timestamp": row["timestamp"]
+                })
+    except Exception as e:
+        print(f"[bookmark] conversation_history 查詢失敗: {e}")
+
+    # 去重並按時間排序
+    seen = set()
+    unique_msgs = []
+    for m in messages:
+        key = (m["role"], m.get("content",""), m.get("timestamp"))
+        if key not in seen:
+            seen.add(key)
+            unique_msgs.append(m)
+    unique_msgs.sort(key=lambda x: x.get("timestamp", 0))
+
+    return {"success": True, "messages": unique_msgs, "conv_id": conv_id}
+
+@app.route("/bookmark.html")
+def serve_bookmark_page():
+    bookmark_path = os.path.expanduser(f"~/.{MOKAGI_home}/html/webTools/書籤/書籤.html")
+    if os.path.exists(bookmark_path):
+        return send_file(bookmark_path)
+    return "<h1>書籤頁面不存在</h1>", 404
 
 
 # ---------- 啟動 ----------

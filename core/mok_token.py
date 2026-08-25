@@ -115,3 +115,39 @@ def truncate_by_token(text: str, max_tokens: int = MOK_max_tokens) -> str:
         cutoff = int(max_tokens * 4)  # 粗略估算，確保不超過
         return text[:cutoff] + "\n\n... (輸出過長，已截斷以節省 Token)"
     return text
+
+
+# ═══════════════════════════════════════════════════════════
+# 統一計費（唯一價格源：mok_price.py）
+# ⚠️  修改收費標準只需編輯 mok_price.py，本文件無需改動
+# ═══════════════════════════════════════════════════════════
+def get_price() -> dict:
+    """取得 MOKAGI 統一收費標準（HK$68 / 百萬 token 等）"""
+    try:
+        from mok_price import to_dict
+        return to_dict()
+    except Exception:
+        return {
+            "currency": "HKD",
+            "price_per_million": 68,
+            "price_per_token": 0.000068,
+            "setup_fee": 5000,
+        }
+
+
+def price_per_token() -> float:
+    """每 token 單價（HKD），由 mok_price.py 統一管理"""
+    try:
+        from mok_price import price_per_token as _ppt
+        return _ppt()
+    except Exception:
+        return 0.000068
+
+
+def cost_of_tokens(tokens: float) -> float:
+    """計算指定 token 數的費用（HKD）"""
+    try:
+        from mok_price import cost_for_tokens
+        return cost_for_tokens(tokens)
+    except Exception:
+        return tokens * 0.000068

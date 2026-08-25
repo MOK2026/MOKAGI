@@ -42,7 +42,7 @@ PLUGIN_INFO = {
         "description": (
             "執行系統管理操作。支援以下動作：htop, cpu, mode, logs, read_file, set_model, ollama_rm, pip, exec。\n\n"
             "【重要】高風險操作（ollama_rm, pip install, exec）需要二次確認。系統會返回以 CONFIRM_SPLIT: 開頭的警告消息，"
-            "LLM 必須原樣展示給用戶，並提示用戶發送 `/admin confirm <token>` 來確認執行。\n\n"
+            "LLM 必須將完整確認訊息（含操作內容與確認碼用途說明）原樣展示給用戶，不得刪減，並提示用戶發送 `/admin confirm <token>` 來確認執行。\n\n"
             "【返回格式】\n"
             "- 成功：返回人類可讀的字符串（或 JSON 包含 action 等字段）。\n"
             "- 需要確認時：返回格式「CONFIRM_SPLIT:警告內容\\n---CONFIRM_SPLIT---\\n/admin confirm <token>」。\n"
@@ -148,7 +148,7 @@ PLUGIN_INFO = {
                 "- `ls -la`\n"
                 "- `curl https://api.example.com`\n"
                 "- `df -h`\n\n"
-                "返回：系統會先返回確認碼（格式 `CONFIRM_SPLIT:...`），LLM 必須原樣展示給用戶，"
+                "返回：系統會先返回確認碼（格式 `CONFIRM_SPLIT:...`），LLM 必須將完整確認訊息（含操作內容與確認碼用途說明）原樣展示給用戶，"
                 "等待用戶發送 `/admin confirm <token>` 後才會真正執行。\n\n"
                 "成功執行後返回命令的 stdout（前3000字符），失敗返回 stderr。\n"
                 "若命令風險等級為 `safe` 或 `low` 且環境變量 `MOK_AUTO_APPROVE_ADMIN=1`，則可能直接執行無需確認。"
@@ -453,7 +453,7 @@ PLUGIN_INFO = {
             }
         }
     ],
-    "update": "202608110022_出街版"
+    "update": "202608260224_我覺得可以版"
 }
 import os,re, logging, html, time, hashlib, subprocess, json, httpx
 import shlex
@@ -540,7 +540,76 @@ def get_config_file_path(agent_name: str = None, agent_config: dict = None) -> s
 # MOK_AUTO_APPROVE_ADMIN=1
 
 # ------------------------------------------------------------------------------------ #
-pending_confirmations = {}
+PENDING_CONFIRM_DIR = os.path.join(MOKAGI_HOME, ".pending_admin_confirm")
+PENDING_CONFIRM_TTL = 300  # 5 分鐘有效
+
+def _pending_token_path(token: str) -> str:
+    return os.path.join(PENDING_CONFIRM_DIR, f"{token}.json")
+
+def _load_pending_confirmations() -> dict:
+    """掃描磁碟，載入所有未過期的待確認命令（跨進程/重啟持久化）。"""
+    result = {}
+    try:
+        if not os.path.isdir(PENDING_CONFIRM_DIR):
+            return result
+        now = time.time()
+        for fn in os.listdir(PENDING_CONFIRM_DIR):
+            if not fn.endswith(".json"):
+                continue
+            p = os.path.join(PENDING_CONFIRM_DIR, fn)
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    item = json.load(f)
+                if isinstance(item, dict) and now - item.get("timestamp", 0) <= PENDING_CONFIRM_TTL:
+                    result[fn[:-5]] = item
+                else:
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    except Exception as e:
+        logging.warning(f"載入待確認命令失敗: {e}")
+    return result
+
+def _save_pending_confirmations() -> None:
+    """將記憶體中的待確認命令寫入磁碟（每 token 一個檔案，原子寫入）。"""
+    try:
+        os.makedirs(PENDING_CONFIRM_DIR, exist_ok=True)
+        for token, item in pending_confirmations.items():
+            p = _pending_token_path(token)
+            tmp = p + ".tmp"
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(item, f, ensure_ascii=False)
+                os.replace(tmp, p)
+            except Exception:
+                pass
+    except Exception as e:
+        logging.warning(f"保存待確認命令失敗: {e}")
+
+def _remove_pending_file(token: str) -> None:
+    """刪除單一 token 的磁碟檔案（確認/超時後使用，避免重複執行）。"""
+    try:
+        p = _pending_token_path(token)
+        if os.path.exists(p):
+            os.remove(p)
+    except Exception:
+        pass
+
+def _store_pending(token: str, cmd_type: str, args: str, chat_id: str, description: str = "") -> None:
+    """儲存待確認命令到記憶體與磁碟。"""
+    pending_confirmations[token] = {
+        "cmd": cmd_type,
+        "args": args,
+        "chat_id": str(chat_id),
+        "timestamp": time.time(),
+        "description": description,
+    }
+    _save_pending_confirmations()
+
+pending_confirmations = _load_pending_confirmations()
 def generate_token(chat_id: str, cmd: str, args: str) -> str:
     """生成一次性確認 token"""
     raw = f"{chat_id}_{cmd}_{args}_{time.time()}_{os.urandom(4).hex()}"
@@ -555,18 +624,33 @@ async def confirm_command(chat_id: str, token: str, agent_config: dict = None) -
     auto_approve_cfg = agent_config.get("MOK_AUTO_APPROVE_ADMIN")
     if auto_approve_env == "0" or auto_approve_cfg == "0" or auto_approve_cfg == 0:
         return False, "❌ 權限不足。"
-    # 原有確認邏輯
+    # 原有確認邏輯（先合併磁碟持久化資料，避免重啟/多進程導致 token 遺失）
+    try:
+        disk_data = _load_pending_confirmations()
+        for k, v in disk_data.items():
+            pending_confirmations.setdefault(k, v)
+    except Exception:
+        pass
     if token not in pending_confirmations:
+        # 先嘗試 cron 確認碼（cron 使用獨立字典，避免與 admin 衝突）
+        try:
+            from tools.cron_tool import confirm_cron_command, has_pending_cron_token
+            if has_pending_cron_token(token):
+                return await confirm_cron_command(chat_id, token, agent_config)
+        except Exception:
+            pass
         return False, "❌ 確認碼無效或已過期。請重新發送原命令。"
     info = pending_confirmations[token]
     if str(info["chat_id"]) != str(chat_id):
         return False, "❌ 確認碼與用戶不匹配。"
-    if time.time() - info["timestamp"] > 300:
+    if time.time() - info["timestamp"] > PENDING_CONFIRM_TTL:
         del pending_confirmations[token]
+        _remove_pending_file(token)
         return False, "❌ 確認碼已超時（5分鐘）。請重新發送原命令。"
     cmd_type = info["cmd"]
     args = info["args"]
     del pending_confirmations[token]
+    _remove_pending_file(token)
     if cmd_type == "ollama_rm":
         success, result = execute_ollama_rm(args)
     elif cmd_type == "pip_install":
@@ -601,13 +685,7 @@ def is_admin(chat_id: str, agent_config: dict = None) -> bool:
     return str(chat_id) == admin_chat_id
 def request_confirmation(chat_id: str, cmd_type: str, args: str, description: str = "") -> str:
     token = generate_token(chat_id, cmd_type, args)
-    pending_confirmations[token] = {
-        "cmd": cmd_type,
-        "args": args,
-        "chat_id": chat_id,
-        "timestamp": time.time(),
-        "description": description
-    }
+    _store_pending(token, cmd_type, args, chat_id, description)
     return token
 # 評估命令風險等級
 def assess_command_risk(command: str, agent_config: dict = None) -> str:
@@ -745,7 +823,7 @@ def execute_docker_sandboxed(command: str, timeout: int = 300) -> tuple:
     # 1. 自動移除命令開頭的 sudo（容器內預設就是 root，不需要 sudo）
     command = re.sub(r'^sudo\s+', '', command.strip())
     
-    image_name = "alpine:latest"
+    image_name = "ubuntu:latest"
 
     # 定義一個內部函數來執行 docker run
     def run_container(cmd):
@@ -1421,6 +1499,8 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
             agent_dir = os.path.realpath(os.path.expanduser(f"~/{mok_home}/agent/{agent_name}"))
             # 允許讀取的目錄：自己的 agent 目錄
             allowed_dirs = [agent_dir]
+            # 凜の可讀擴充：允許讀取 _tmp 臨時目錄
+            allowed_dirs.append(os.path.realpath(os.path.expanduser(f"~/{mok_home}/_tmp")))
             is_allowed = False
             for d in allowed_dirs:
                 if real_path.startswith(d + "/") or real_path == d:
@@ -1656,14 +1736,9 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
                 "suggested_fix": "請確保模型未被使用後重試，或使用其他模型。"
             }, ensure_ascii=False)
         token = generate_token(chat_id, "ollama_rm", model_name)
-        pending_confirmations[token] = {
-            "cmd": "ollama_rm",
-            "args": model_name,
-            "chat_id": chat_id,
-            "timestamp": time.time()
-        }
-        warning = f"⚠️ 危險操作 ⚠️\n[刪除模型：{model_name}]"
-        return f"CONFIRM_SPLIT:{warning}\n請在5分鐘內發送確認碼以執行：\n---CONFIRM_SPLIT---\n/admin confirm {token}"
+        _store_pending(token, "ollama_rm", model_name, chat_id)
+        warning = f"🔐 此確認碼用於授權執行下方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n⚠️ 危險操作 ⚠️\n📋 操作內容：[刪除模型：{model_name}]\n⏰ 請在5分鐘內發送確認碼以執行："
+        return f"CONFIRM_SPLIT:{warning}\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     if args.startswith("pip"):
         rest = args[len("pip"):].strip()
@@ -1684,14 +1759,9 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
             return result if success else f"❌ 執行失敗: {result}"
         else:
             token = generate_token(chat_id, "pip_install", rest)
-            pending_confirmations[token] = {
-                "cmd": "pip_install",
-                "args": rest,
-                "chat_id": chat_id,
-                "timestamp": time.time()
-            }
-            warning = f"⚠️ 危險操作 ⚠️\n[pip 安裝：{rest}]\n風險等級：{risk}"
-            return f"CONFIRM_SPLIT:{warning}\n請在5分鐘內發送確認碼以執行：\n---CONFIRM_SPLIT---\n/admin confirm {token}"
+            _store_pending(token, "pip_install", rest, chat_id)
+            warning = f"🔐 此確認碼用於授權執行下方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n⚠️ 危險操作 ⚠️\n📋 操作內容：[pip 安裝：{rest}]\n風險等級：{risk}\n⏰ 請在5分鐘內發送確認碼以執行："
+            return f"CONFIRM_SPLIT:{warning}\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     if args.startswith("exec"):
         rest = args[len("exec"):].strip()
@@ -1706,7 +1776,7 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
         # 其餘邏輯保持不變...
         
         # 決定執行方式
-        use_docker = os.environ.get("MOK_USE_DOCKER_SANDBOX") == "1"
+        use_docker = False
         
         if risk == 'safe':
             if use_docker:
@@ -1726,14 +1796,9 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
                 success, result = execute_shell_command(rest)
             return result if success else f"❌ 執行失敗: {result}"
         token = generate_token(chat_id, "shell_exec", rest)
-        pending_confirmations[token] = {
-            "cmd": "shell_exec",
-            "args": rest,
-            "chat_id": chat_id,
-            "timestamp": time.time()
-        }
-        warning = f"⚠️ 危險操作 ⚠️\n[執行命令：{html.escape(rest)}]\n風險等級：{risk}"
-        return f"CONFIRM_SPLIT:{warning}\n請在5分鐘內發送確認碼以執行：\n---CONFIRM_SPLIT---\n/admin confirm {token}"
+        _store_pending(token, "shell_exec", rest, chat_id)
+        warning = f"🔐 此確認碼用於授權執行下方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n⚠️ 危險操作 ⚠️\n📋 操作內容：[執行命令：{html.escape(rest)}]\n風險等級：{risk}\n⏰ 請在5分鐘內發送確認碼以執行："
+        return f"CONFIRM_SPLIT:{warning}\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     return json.dumps({
         "success": False,

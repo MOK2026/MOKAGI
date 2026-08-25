@@ -21,6 +21,7 @@ import sys
 import re
 import json
 import asyncio
+import threading
 import logging
 from typing import Dict, Optional
 
@@ -30,12 +31,9 @@ os.environ["MOKAGI_HOME"] = MOKAGI_home   # 確保所有子進程繼承
 
 # ================== Agent 配置緩存 ==================
 _agent_config_cache = {}          # {agent_name: config_dict}
-_config_cache_lock = None
+_config_cache_lock = threading.Lock()
 
 def get_config_lock():
-    global _config_cache_lock
-    if _config_cache_lock is None:
-        _config_cache_lock = asyncio.Lock()
     return _config_cache_lock
 
 # ================== 配置加載函數 ==================
@@ -133,7 +131,7 @@ def load_agent_config(agent_name: str = None) -> Dict[str, str]:
 
 async def get_agent_config(agent_name: str, force_reload: bool = False) -> dict:
     """異步獲取 Agent 配置，帶緩存。若 force_reload=True 則強制重新從磁盤加載。"""
-    async with get_config_lock():
+    with get_config_lock():
         if force_reload or agent_name not in _agent_config_cache:
             old_env = os.environ.get("MOK_AGENT_NAME")
             os.environ["MOK_AGENT_NAME"] = agent_name

@@ -74,6 +74,14 @@ async def _generate_error_report(
     )
 
 
+async def _call_handler(handler, *args, **kwargs):
+    """調用 handler，兼容同步與異步函數"""
+    result = handler(*args, **kwargs)
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
+
+
 async def retry_with_autofix(
     action_func: Callable[..., Awaitable[Any]],
     action_args: tuple = (),
@@ -122,7 +130,7 @@ async def retry_with_autofix(
     # ---------- 第一階段：嘗試執行 ----------
     for attempt in range(1, max_retries_before_autofix + 1):
         try:
-            return await action_func(*action_args, **action_kwargs)
+            return await _call_handler(action_func, *action_args, **action_kwargs)
         except Exception as e:
             last_exception = e
             logging.warning(
@@ -172,7 +180,7 @@ async def retry_with_autofix(
                         action_kwargs["args"] = fixed_args
                     logging.info("[retry_with_autofix] autofix 修復成功，使用修正後參數重試...")
                     try:
-                        return await action_func(*action_args, **action_kwargs)
+                        return await _call_handler(action_func, *action_args, **action_kwargs)
                     except Exception as e:
                         last_exception = e
                         logging.error(f"[retry_with_autofix] 修復後重試仍然失敗: {e}")

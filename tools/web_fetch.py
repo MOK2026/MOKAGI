@@ -13,7 +13,7 @@ PLUGIN_INFO = {
     "intent_keywords": [
         ("/上網", "/fetch"),
     ],
-    "update": "202608110022_出街版",
+    "update": "202608260224_我覺得可以版",
     "naturalize_func": "naturalize_fetch_result",
 
 
@@ -47,7 +47,7 @@ PLUGIN_INFO = {
             "【何時使用】\n"
             "- 用戶要求「打開這個網頁看看內容」、「幫我讀取這篇文章」、「抓取網頁摘要」、「取得網頁標題和正文」時。\n"
             "- 需要從外部網站提取信息進行後續處理時。\n"
-            "- 不適合用於需要登錄的頁面或動態加載內容的網站（如 SPA）。"
+            "- 支援 JS 動態渲染：靜態抓取內容過少時會自動改用無頭瀏覽器（Playwright）渲染後再抓取；也可用 `mode` 參數強制控制。"
         ),
         "parameters": {
             "type": "object",
@@ -62,6 +62,11 @@ PLUGIN_INFO = {
                         "- 如果用戶只給出 `example.com`，應自動補全為 `https://example.com` 再傳入。\n\n"
                         "注意：URL 中不能包含空格或特殊字符（除非已編碼）。"
                     )
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto", "static", "render"],
+                    "description": "抓取模式（可選）。auto=智能（預設）：靜態抓取內容太少時自動改用無頭瀏覽器渲染；static=僅靜態抓取（最快）；render=強制用無頭瀏覽器渲染 JS 後抓取（最完整，適合 SPA/動態頁面）。"
                 }
             },
             "required": ["url"]
@@ -143,11 +148,114 @@ def check_deps():
     return None
 
 
+# ------------------------------------------------------------------------------------ #
+# 函數: _render_with_browser
+# 用途: 使用 Playwright 無頭 Chromium 渲染網頁（執行 JS），提取完整正文。
+#       適用於 SPA / JS 動態載入的頁面——靜態抓取只會看到空白殼或極少內容。
+# 設計:
+#   1. 設定 PLAYWRIGHT_BROWSERS_PATH 指向共享瀏覽器目錄（與 browser.py 一致）。
+#   2. 啟動無頭 Chromium（no-sandbox，反偵測 init script）。
+#   3. 導航到 URL，等待 domcontentloaded + networkidle + 額外等待 JS 渲染。
+#   4. 自動滾動到底部觸發懶加載（lazy-load）。
+#   5. 提取 <title>、meta description、document.body.innerText。
+# 返回:
+#   dict: { success, title, content, url, rendered }
+# ------------------------------------------------------------------------------------ #
+async def _render_with_browser(url: str, max_chars: int = 10000, wait_ms: int = 2500) -> dict:
+    """用無頭瀏覽器渲染 JS 頁面並提取正文。"""
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        return {"success": False, "error": "Playwright 未安裝，無法渲染 JS 頁面。請先 /browser install。"}
 
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/home/ubuntu/.mok/playwright-browsers")
 
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                ],
+            )
+            page = await browser.new_page(
+                viewport={"width": 1280, "height": 900},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            )
+            # 反偵測腳本
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['zh-TW', 'zh', 'en'] });
+                window.chrome = { runtime: {} };
+            """)
 
+            # 導航（domcontentloaded 較快，networkidle 等待資源）
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            except Exception:
+                pass
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(wait_ms)
 
+            # 滾動到底部觸發懶加載
+            try:
+                await page.evaluate("""
+                    async () => {
+                        for (let i = 0; i < 8; i++) {
+                            window.scrollBy(0, document.body.scrollHeight);
+                            await new Promise(r => setTimeout(r, 400));
+                        }
+                        window.scrollTo(0, 0);
+                    }
+                """)
+                await page.wait_for_timeout(800)
+            except Exception:
+                pass
 
+            # 提取正文
+            title = (await page.title()) or ""
+            body_text = (await page.evaluate("document.body ? document.body.innerText : ''")) or ""
+            meta_desc = ""
+            try:
+                meta_desc = (await page.evaluate("""() => {
+                    const m = document.querySelector('meta[name="description"]');
+                    return m ? m.content : '';
+                }""")) or ""
+            except Exception:
+                pass
+
+            await browser.close()
+
+        content = (body_text or "").strip()
+        if meta_desc:
+            content = f"{meta_desc}\n\n{content}"
+        # 清理空白
+        content = re.sub(r'\n\s*\n+', '\n\n', content)
+        content = re.sub(r'[ \t]+', ' ', content)
+        content = content.strip()
+
+        if not content:
+            return {"success": False, "error": "瀏覽器渲染後仍無法提取正文。"}
+
+        if len(content) > max_chars:
+            content = content[:max_chars] + "\n\n... (內容過長，已截斷)"
+
+        return {
+            "success": True,
+            "title": title or "無標題",
+            "content": content,
+            "url": url,
+            "rendered": True,
+        }
+    except Exception as e:
+        return {"success": False, "error": f"瀏覽器渲染失敗: {str(e)}"}
 
 
 
@@ -168,7 +276,7 @@ def check_deps():
 # 返回:
 #   dict: 包含 success, title, content, url, error 等欄位的字典。
 # ------------------------------------------------------------------------------------ #
-async def fetch_webpage(url: str, max_chars: int = 10000) -> dict:
+async def fetch_webpage(url: str, max_chars: int = 10000, mode: str = "auto") -> dict:
     """
     使用 trafilatura 下載網頁，提取正文並轉換為 Markdown。
     :param url: 網頁地址
@@ -292,6 +400,13 @@ async def fetch_webpage(url: str, max_chars: int = 10000) -> dict:
         # 6. 截斷過長內容
         if len(content) > max_chars:
             content = content[:max_chars] + "\n\n... (內容過長，已截斷)"
+
+        # 7. 智能回退：若靜態抓取內容太少（疑似 SPA / JS 動態載入），改用無頭瀏覽器渲染
+        meaningful = len(re.sub(r"\s+", "", content))
+        if mode == "render" or (mode == "auto" and meaningful < 200):
+            rendered = await _render_with_browser(url, max_chars)
+            if rendered.get("success") and len(re.sub(r"\s+", "", rendered.get("content", ""))) > meaningful:
+                return rendered
 
         return {
             "success": True,
@@ -418,13 +533,15 @@ async def handle_web_fetch(args: Union[str, dict], chat_id: str = None, agent_co
             help_text += f'   "{keyword}" → {cmd}\n'
         return help_text
 
+    mode = "auto"
     if isinstance(args, dict):
         url = args.get("url", "").strip()
+        mode = args.get("mode", "auto")
     else:
         url = args.strip()
 
 
-    result = await fetch_webpage(url)
+    result = await fetch_webpage(url, mode=mode)
     return json.dumps(result, ensure_ascii=False)
 
 

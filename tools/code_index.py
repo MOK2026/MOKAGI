@@ -45,8 +45,8 @@ PLUGIN_INFO = {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["search", "rebuild", "read_file", "get_chunk"],
-                    "description": "操作類型：search、rebuild、read_file、get_chunk"
+                    "enum": ["search", "rebuild", "read_file", "get_chunk", "debug_context"],
+                    "description": "操作類型：search、rebuild、read_file、get_chunk、debug_context"
                 },
                 "query": {
                     "type": "string",
@@ -88,6 +88,7 @@ import time
 import hashlib
 import json
 import logging
+import threading
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
@@ -113,10 +114,9 @@ COLLECTION_NAME = "code_index"
 _client = None
 _collection = None
 _embed_fn = None
-import mokagi
-agent_config = mokagi._agent_config
-owner = agent_config.get("MOK_ADMIN_NAME")
-agent_name = agent_config.get("MOK_AGENT_NAME")
+_index_operation_lock = threading.RLock()
+owner = os.environ.get("MOK_ADMIN_NAME", "用戶")
+agent_name = os.environ.get("MOK_AGENT_NAME", "Agent")
 
 
 def _init_embedding():
@@ -364,6 +364,11 @@ def rebuild_index(force: bool = False) -> str:
     重建程式碼索引（刪除舊索引，重新建立）
     返回操作結果訊息
     """
+    with _index_operation_lock:
+        return _rebuild_index_locked(force)
+
+
+def _rebuild_index_locked(force: bool = False) -> str:
     embed_fn = _init_embedding()
     if embed_fn is None:
         return "❌ 缺少 sentence-transformers，請執行: pip install sentence-transformers"
@@ -421,6 +426,11 @@ def search_code(query: str, n_results: int = 10, file_filter: str = None) -> Lis
     搜尋程式碼
     返回 [{text, file, type, name, line_start, line_end}, ...]
     """
+    with _index_operation_lock:
+        return _search_code_locked(query, n_results, file_filter)
+
+
+def _search_code_locked(query: str, n_results: int = 10, file_filter: str = None) -> List[Dict]:
     col = _get_collection()
     if col is None:
         return []
@@ -617,7 +627,7 @@ async def handle_code_index(args, chat_id: str = None, agent_config: Dict = None
             n_results = int(parts[1])
         results = search_code(query, n_results)
         if not results:
-            return f"沒有找到與「{query}」相關的程式碼"
+            return f"⚠️ code_index 沒有找到與「{query}」相關的程式碼；請改用更具體的函數名稱、英文關鍵詞，或先執行 rebuild。"
         output = f"📚 找到 {len(results)} 個相關程式碼區塊：\n\n"
         for i, r in enumerate(results, 1):
             ext_icon = "🐍" if r['ext'] == 'py' else "🌐"

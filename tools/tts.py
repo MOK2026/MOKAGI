@@ -139,24 +139,35 @@ def _get_bot_token(agent_config=None):
     return ""
 
 
+def _is_valid_tg_chat_id(cid):
+    """判斷是否為有效的 Telegram chat_id（必須是數字，可含負號）。
+    排除 web 版產生的 web_guest_xxx 等非 Telegram ID。"""
+    s = str(cid).strip()
+    if not s:
+        return False
+    return s.lstrip('-').isdigit()
+
+
 def _get_chat_id(args_dict, chat_id, agent_config=None):
     """獲取目標 chat_id"""
-    # 1. 如果 args 中指定了 chat_id
+    # 1. 如果 args 中指定了 chat_id（僅接受真實數字 chat_id）
     if isinstance(args_dict, dict) and args_dict.get("chat_id"):
         cid = str(args_dict["chat_id"])
-        if cid and cid != "web":
+        if _is_valid_tg_chat_id(cid):
             return cid
-    # 2. 使用傳入的 chat_id（TG 環境下是真實 ID）
-    if chat_id and chat_id != "web":
+    # 2. 使用傳入的 chat_id（TG 環境下是真實數字 ID）
+    if chat_id and _is_valid_tg_chat_id(chat_id):
         return str(chat_id)
     # 3. 從 agent_config 獲取 ADMIN_CHAT_ID
     if agent_config and isinstance(agent_config, dict):
         cid = agent_config.get("ADMIN_CHAT_ID", "")
-        if cid:
+        if _is_valid_tg_chat_id(cid):
             return str(cid)
     # 4. 從環境變量
     cid = os.environ.get("ADMIN_CHAT_ID", "")
-    return cid
+    if _is_valid_tg_chat_id(cid):
+        return str(cid)
+    return ""
 
 
 def _resolve_voice(voice_name):
