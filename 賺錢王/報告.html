@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>香港商家 AI 客服機會報告</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"PingFang HK","Microsoft JhengHei",sans-serif;background:#f0f4f8;color:#1a2b3c;padding:24px}
+.wrap{max-width:1400px;margin:0 auto}
+h1{font-size:26px;margin-bottom:6px;color:#0f2a43}
+.sub{color:#5b7083;font-size:13px;margin-bottom:20px}
+.stats{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:24px}
+.stat{background:#fff;border-radius:12px;padding:18px 22px;flex:1;min-width:150px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.stat .num{font-size:32px;font-weight:700}
+.stat .lbl{font-size:13px;color:#5b7083;margin-top:4px}
+.nw .num{color:#e74c3c}.na .num{color:#e67e22}.ha .num{color:#27ae60}
+h2{font-size:19px;margin:26px 0 12px;padding-left:10px;border-left:4px solid #0f2a43}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06);font-size:13px}
+th,td{padding:9px 10px;text-align:left;border-bottom:1px solid #eef2f6;vertical-align:top}
+th{background:#0f2a43;color:#fff;font-weight:600;white-space:nowrap}
+tr:hover td{background:#f7fafc}
+.badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap}
+.b-nw{background:#fdecea;color:#c0392b}.b-na{background:#fef5e7;color:#d35400}.b-ha{background:#eafaf1;color:#1e8449}
+.name{font-weight:600;min-width:140px}.muted{color:#98a6b3}
+.hint{color:#6b7f94;font-size:12px;max-width:230px}
+.footer{text-align:center;color:#98a6b3;font-size:12px;margin-top:30px}
+.empty{padding:30px;text-align:center;color:#98a6b3}
+</style></head><body><div class="wrap">
+<h1>🤖 香港商家 AI 客服機會報告</h1>
+<div class="sub">掃描時間：2026-08-25 13:45:17 ｜ 行業：餐廳、美容、髮型屋、裝修工程、寵物店、補習社、健身室、牙科診所、汽車維修、洗衣店、花店、攝影 ｜ 掃描商家：132 間 ｜ 資料檔：leads_7days.jsonl（7 天去重）</div>
+<div class="stats">
+<div class="stat nw"><div class="num">0</div><div class="lbl">🚫 沒有網頁（潛在客戶 A）</div></div>
+<div class="stat na"><div class="num">111</div><div class="lbl">⚠️ 有網頁無 AI 客服（潛在客戶 B）</div></div>
+<div class="stat ha"><div class="num">21</div><div class="lbl">✅ 已有 AI 客服（暫不開發）</div></div>
+</div>
+
+<h2>🚫 A. 沒有網頁的商家（0 間）— 可推薦：建置網站 + AI 客服</h2>
+<table><tr><th>#</th><th>商家名稱</th><th>狀態</th><th>網站</th><th>WhatsApp</th><th>Email</th><th>評分</th><th>即時通訊</th><th>AI客服</th><th>Demo 頁</th><th>檢測說明</th></tr>
+<tr><td colspan="11" class="empty">本次沒有找到</td></tr></table>
+
+<h2>⚠️ B. 有網頁但沒有 AI 客服（111 間）— 可推薦：加裝 AI 客服</h2>
+<table><tr><th>#</th><th>商家名稱</th><th>狀態</th><th>網站</th><th>WhatsApp</th><th>Email</th><th>評分</th><th>即時通訊</th><th>AI客服</th><th>Demo 頁</th><th>檢測說明</th></tr>
+<tr>
+<td>1</td><td class="name">Hutong</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://hutong.com.hk/" target="_blank" rel="noopener">https://hutong.com.hk/</a></td><td><a href="https://wa.me/85254816436" target="_blank" rel="noopener">85254816436</a></td>
+<td><span class="muted">—</span></td><td>4.5</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>2</td><td class="name">The Chairman Restaurant</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.thechairmangroup.com/" target="_blank" rel="noopener">https://www.thechairmangroup.com/</a></td><td><a href="https://wa.me/85255015102" target="_blank" rel="noopener">85255015102</a></td>
+<td><a href="mailto:inquiry@thechairmangroup.com">inquiry@thechairmangroup.com</a></td><td>4.5</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>3</td><td class="name">南蛮亭香港店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://nanbantei.com.hk/" target="_blank" rel="noopener">http://nanbantei.com.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:info@nanbantei.com.hk">info@nanbantei.com.hk</a></td><td>4.5</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>4</td><td class="name">添好運點心專賣店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.timhowan.com.hk/" target="_blank" rel="noopener">https://www.timhowan.com.hk/</a></td><td><a href="https://wa.me/95472392" target="_blank" rel="noopener">95472392</a></td>
+<td><a href="mailto:customercare.hk@timhowan.com">customercare.hk@timhowan.com</a></td><td>4.5</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>5</td><td class="name">La Petite Maison (LPM) Hong Kong</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://lpmrestaurants.com/hongkong/" target="_blank" rel="noopener">https://lpmrestaurants.com/hongkong/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:info@lpmhongkong.com">info@lpmhongkong.com</a></td><td>4.5</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>6</td><td class="name">Glow Hong Kong</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.glowspa.hk/" target="_blank" rel="noopener">https://www.glowspa.hk/</a></td><td><a href="https://wa.me/96802107" target="_blank" rel="noopener">96802107</a></td>
+<td><a href="mailto:reception@glowspa.hk">reception@glowspa.hk</a></td><td>4.8</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>7</td><td class="name">Mó The Slow Bloom</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.mo-hk.com/" target="_blank" rel="noopener">https://www.mo-hk.com/</a></td><td><a href="https://wa.me/85256067848" target="_blank" rel="noopener">85256067848</a></td>
+<td><span class="muted">—</span></td><td>4.8</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>8</td><td class="name">Lux Medical 医繊美</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.luxbeauty.hk/" target="_blank" rel="noopener">https://www.luxbeauty.hk/</a></td><td><a href="https://wa.me/85252323667" target="_blank" rel="noopener">85252323667</a></td>
+<td><a href="mailto:info@luxbeauty.hk">info@luxbeauty.hk</a></td><td>4.8</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>9</td><td class="name">114HAIR</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.114hair.com/" target="_blank" rel="noopener">http://www.114hair.com/</a></td><td><a href="https://wa.me/85260145846" target="_blank" rel="noopener">85260145846</a></td>
+<td><span class="muted">—</span></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>10</td><td class="name">Love Hair</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.lovehairhk.com/" target="_blank" rel="noopener">http://www.lovehairhk.com/</a></td><td><a href="https://wa.me/85294561591" target="_blank" rel="noopener">85294561591</a></td>
+<td><a href="mailto:info@lovehairhk.com">info@lovehairhk.com</a></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>11</td><td class="name">TONI&amp;GUY HK</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.toniandguyhk.com/" target="_blank" rel="noopener">http://www.toniandguyhk.com/</a></td><td><a href="https://wa.me/85294480977" target="_blank" rel="noopener">85294480977</a></td>
+<td><a href="mailto:info@toniandguyhk.com">info@toniandguyhk.com</a></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>12</td><td class="name">iMPROVE HAiR-尖沙咀salon 尖沙咀剪髮 尖沙咀髮廊 尖沙咀中藥染髮 尖沙咀假髮 尖沙咀頭皮護理</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.ihair.com.hk/" target="_blank" rel="noopener">http://www.ihair.com.hk/</a></td><td><a href="https://wa.me/2024101115" target="_blank" rel="noopener">2024101115</a></td>
+<td><span class="muted">—</span></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>13</td><td class="name">金澱装修工程有限公司</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.palaceengineeringltd.com/" target="_blank" rel="noopener">https://www.palaceengineeringltd.com/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:palaceengineeringcare@gmail.com">palaceengineeringcare@gmail.com</a></td><td>4.9</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>14</td><td class="name">鋒主義 - 室內設計公司 | 室內裝修工程 | 工期 報價 服務 三大保證</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.fungstyle.com.hk/" target="_blank" rel="noopener">https://www.fungstyle.com.hk/</a></td><td><a href="https://wa.me/59130556" target="_blank" rel="noopener">59130556</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>15</td><td class="name">装修兄弟</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.renobro.com.hk/" target="_blank" rel="noopener">http://www.renobro.com.hk/</a></td><td><a href="https://wa.me/85252288664" target="_blank" rel="noopener">85252288664</a></td>
+<td><a href="mailto:support@renobro.com.hk">support@renobro.com.hk</a></td><td>4.9</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>16</td><td class="name">居屋皇 House king | 香港室内設計及装修公司</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://housekinghk.com/" target="_blank" rel="noopener">http://housekinghk.com/</a></td><td><a href="https://wa.me/85291491034" target="_blank" rel="noopener">85291491034</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>17</td><td class="name">Toby 裝修設計平台｜免費裝修報價｜香港裝修公司及室內設計公司</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.hellotoby.com/zh-hk/id" target="_blank" rel="noopener">https://www.hellotoby.com/zh-hk/id</a></td><td><a href="https://wa.me/85251326803" target="_blank" rel="noopener">85251326803</a></td>
+<td><a href="mailto:muiangela0113@gmail.com">muiangela0113@gmail.com</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>18</td><td class="name">PET HK - Mid Levels Edition</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://pethk.com/" target="_blank" rel="noopener">http://pethk.com/</a></td><td><a href="https://wa.me/63601010" target="_blank" rel="noopener">63601010</a></td>
+<td><a href="mailto:info@stagheaddesigns.com">info@stagheaddesigns.com</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>19</td><td class="name">Ruff &amp; Fetch 拉夫寵物生活 (佐敦 Jordan)</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.ruffandfetch.com/" target="_blank" rel="noopener">http://www.ruffandfetch.com/</a></td><td><a href="https://wa.me/85266741567" target="_blank" rel="noopener">85266741567</a></td>
+<td><a href="mailto:support@newnationhk.com">support@newnationhk.com</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>20</td><td class="name">HKTA香港導師会</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.hkta.edu.hk/" target="_blank" rel="noopener">https://www.hkta.edu.hk/</a></td><td><a href="https://wa.me/85221176789" target="_blank" rel="noopener">85221176789</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>21</td><td class="name">騎士数学 Knight Mathematics - Band 1 DSE 数学補習社</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://knightmaths.edu.hk/" target="_blank" rel="noopener">https://knightmaths.edu.hk/</a></td><td><a href="https://wa.me/85268790948" target="_blank" rel="noopener">85268790948</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>22</td><td class="name">香港文化教育中心</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://docs.google.com/forms/d/e/1FAIpQLSdjgsQlR4w8ZgKgE9RgAUPsPwrZzAZpo5SCULDDOgygEdeDnQ/viewform" target="_blank" rel="noopener">https://docs.google.com/forms/d/e/1FAIpQLSdjgsQlR4w8ZgKgE9RgAUPsPwrZzAZpo5SCULDDOgygEdeDnQ/viewform</a></td><td><a href="https://wa.me/85295878700" target="_blank" rel="noopener">85295878700</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>23</td><td class="name">英博教学中心 - 数学中文英文補習 - 中小学補習社</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://eplc.edu.hk/" target="_blank" rel="noopener">https://eplc.edu.hk/</a></td><td><a href="https://wa.me/85292800932" target="_blank" rel="noopener">85292800932</a></td>
+<td><a href="mailto:cs@eplc.edu.hk">cs@eplc.edu.hk</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>24</td><td class="name">騎士數學 (荃灣)- 香港No.1數學補習社</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://knightmaths.edu.hk/" target="_blank" rel="noopener">https://knightmaths.edu.hk/</a></td><td><a href="https://wa.me/85268790948" target="_blank" rel="noopener">85268790948</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>25</td><td class="name">進研教育 - 英文中文数学補習社</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://joinin-education.com/" target="_blank" rel="noopener">https://joinin-education.com/</a></td><td><a href="https://wa.me/85254400855" target="_blank" rel="noopener">85254400855</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>26</td><td class="name">學斯教育(灣仔)</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://hoksi-edu.com/" target="_blank" rel="noopener">http://hoksi-edu.com/</a></td><td><a href="https://wa.me/85270737134" target="_blank" rel="noopener">85270737134</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>27</td><td class="name">24/7 Fitness Central</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://247.fitness/" target="_blank" rel="noopener">http://247.fitness/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:cs@247fitness.com.hk">cs@247fitness.com.hk</a></td><td>4.7</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>28</td><td class="name">24/7 Fitness 銅鑼湾第二分店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://247.fitness/" target="_blank" rel="noopener">http://247.fitness/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:cs@247fitness.com.hk">cs@247fitness.com.hk</a></td><td>4.7</td>
+<td>—</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">—</td></tr>
+<tr>
+<td>29</td><td class="name">24/7 Fitness Tsim Sha Tsui Second Branch</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://247.fitness/" target="_blank" rel="noopener">http://247.fitness/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:cs@247fitness.com.hk">cs@247fitness.com.hk</a></td><td>4.7</td>
+<td>—</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">—</td></tr>
+<tr>
+<td>30</td><td class="name">24/7 Fitness Kennedy Town</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://247.fitness/" target="_blank" rel="noopener">http://247.fitness/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:cs@247fitness.com.hk">cs@247fitness.com.hk</a></td><td>4.7</td>
+<td>—</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">—</td></tr>
+<tr>
+<td>31</td><td class="name">24/7 Fitness 湾仔店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://247.fitness/" target="_blank" rel="noopener">http://247.fitness/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:cs@247fitness.com.hk">cs@247fitness.com.hk</a></td><td>4.7</td>
+<td>—</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">—</td></tr>
+<tr>
+<td>32</td><td class="name">24/7 Fitness Mong Kok</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://247.fitness/" target="_blank" rel="noopener">http://247.fitness/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:cs@247fitness.com.hk">cs@247fitness.com.hk</a></td><td>4.7</td>
+<td>—</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">—</td></tr>
+<tr>
+<td>33</td><td class="name">24/7 Fitness Mong Kok Second Branch</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://247.fitness/" target="_blank" rel="noopener">http://247.fitness/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:cs@247fitness.com.hk">cs@247fitness.com.hk</a></td><td>4.7</td>
+<td>—</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">—</td></tr>
+<tr>
+<td>34</td><td class="name">啓弘牙科（旺角店）丨九龍/旺角牙医/智慧歯/箍牙/隠式美/全方位牙科服務/専業治療牙痛/種植牙/補牙/剥牙/洗牙</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://omnesdental.com/" target="_blank" rel="noopener">https://omnesdental.com/</a></td><td><a href="https://wa.me/85295765815" target="_blank" rel="noopener">85295765815</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>35</td><td class="name">啟弘牙科Omnes Dental丨港島/筲箕灣/太古牙醫/智慧齒/全方位牙科服務/專業治療牙痛/種植牙/補牙/剝牙/洗牙</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://omnesdental.com/" target="_blank" rel="noopener">https://omnesdental.com/</a></td><td><a href="https://wa.me/85295765815" target="_blank" rel="noopener">85295765815</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>36</td><td class="name">Smith &amp; Jain Dentists 史密夫和鄭牙醫診所</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://smithandjaindentists.com/" target="_blank" rel="noopener">https://smithandjaindentists.com/</a></td><td><a href="https://wa.me/85263334310" target="_blank" rel="noopener">85263334310</a></td>
+<td><a href="mailto:diestelandpartners9@gmail.com">diestelandpartners9@gmail.com</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>37</td><td class="name">伍裕彤牙医</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://trucaredental.hk/" target="_blank" rel="noopener">https://trucaredental.hk/</a></td><td><a href="https://wa.me/85264146847" target="_blank" rel="noopener">85264146847</a></td>
+<td><a href="mailto:cs@trucaredental.hk">cs@trucaredental.hk</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>38</td><td class="name">啓弘牙科 Omnes Dental（銅鑼湾店）丨港島/銅鑼湾牙医/智慧歯/箍牙/隠式美/全方位牙科服務/専業治療牙痛/種植牙/補牙/剥牙/洗牙</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://omnesdental.com/" target="_blank" rel="noopener">https://omnesdental.com/</a></td><td><a href="https://wa.me/85295765815" target="_blank" rel="noopener">85295765815</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>39</td><td class="name">啓弘牙科 Omnes Dental（観塘店）丨九龍/牛頭角牙医/智慧歯/箍牙/隠式美/全方位牙科服務/専業治療牙痛/種植牙/補牙/剥牙/洗牙</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://omnesdental.com/" target="_blank" rel="noopener">https://omnesdental.com/</a></td><td><a href="https://wa.me/85295765815" target="_blank" rel="noopener">85295765815</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>40</td><td class="name">T.O.P Dental by Family Smile Ltd 香港牙科醫療集團 | (旺角太子牙醫中心)</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.topdental.hk/" target="_blank" rel="noopener">http://www.topdental.hk/</a></td><td><a href="https://wa.me/85293413394" target="_blank" rel="noopener">85293413394</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>41</td><td class="name">Metro Dental 城健総合牙科医療中心</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.metrodental.com.hk/" target="_blank" rel="noopener">https://www.metrodental.com.hk/</a></td><td><a href="https://wa.me/20210730" target="_blank" rel="noopener">20210730</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>42</td><td class="name">大国手 汽車車身維修 Grand Tycoon Automotive Repair Shop</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://grandtycoon.com/" target="_blank" rel="noopener">http://grandtycoon.com/</a></td><td><a href="https://wa.me/85254422422" target="_blank" rel="noopener">85254422422</a></td>
+<td><a href="mailto:info@grandtycoon.com">info@grandtycoon.com</a></td><td>4.8</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>43</td><td class="name">AutoMate | Sham Shui Po Shop</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.automate-app.com/auto-shop" target="_blank" rel="noopener">https://www.automate-app.com/auto-shop</a></td><td><a href="https://wa.me/85264500600" target="_blank" rel="noopener">85264500600</a></td>
+<td><span class="muted">—</span></td><td>4.8</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>44</td><td class="name">Carol Garage Limited</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.carolgarage.com.hk/" target="_blank" rel="noopener">http://www.carolgarage.com.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:info@carolgarage.com.hk">info@carolgarage.com.hk</a></td><td>4.8</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>45</td><td class="name">初洗 First Laundry 觀塘24小時自助洗衣店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://wa.me/85268716550" target="_blank" rel="noopener">https://wa.me/85268716550</a></td><td><a href="https://wa.me/85268716550" target="_blank" rel="noopener">85268716550</a></td>
+<td><span class="muted">—</span></td><td>4.8</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>46</td><td class="name">水漾衣坊 water laundry</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://whalewashmk.hk/" target="_blank" rel="noopener">https://whalewashmk.hk/</a></td><td><a href="https://wa.me/85294433314" target="_blank" rel="noopener">85294433314</a></td>
+<td><a href="mailto:noelcslc@gmail.com">noelcslc@gmail.com</a></td><td>4.8</td>
+<td>WeChat、WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到即時通訊: WeChat</td></tr>
+<tr>
+<td>47</td><td class="name">FLORISTRY by ART OF LIVING</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.floristrybyartofliving.com/" target="_blank" rel="noopener">http://www.floristrybyartofliving.com/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:info@floristrybyartofliving.com">info@floristrybyartofliving.com</a></td><td>4.6</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>48</td><td class="name">花籃 450 - Flower 450</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://flower450.com/" target="_blank" rel="noopener">https://flower450.com/</a></td><td><a href="https://wa.me/98567479" target="_blank" rel="noopener">98567479</a></td>
+<td><a href="mailto:faithfulflorist10808@gmail.com">faithfulflorist10808@gmail.com</a></td><td>4.6</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>49</td><td class="name">Eternal Flora hk</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.eternalflorahk.com/" target="_blank" rel="noopener">https://www.eternalflorahk.com/</a></td><td><a href="https://wa.me/85292062793" target="_blank" rel="noopener">85292062793</a></td>
+<td><span class="muted">—</span></td><td>4.6</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>50</td><td class="name">Joseph Photo 香港專業攝影工作室</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://josephphoto.hk/" target="_blank" rel="noopener">https://josephphoto.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:Info@josephphoto.com.hk">Info@josephphoto.com.hk</a></td><td>5.0</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>51</td><td class="name">Majesty Professional Photo殿堂館-專業照首選</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.majestyprofessional.com/" target="_blank" rel="noopener">https://www.majestyprofessional.com/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:info@majestyprofessional.com">info@majestyprofessional.com</a></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>52</td><td class="name">Owl Photo Studio 貓頭鷹照相館</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.owlphoto.hk/" target="_blank" rel="noopener">https://www.owlphoto.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:business@owlphoto.hk">business@owlphoto.hk</a></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>53</td><td class="name">Owl Photo Studio 貓頭鷹照相館 - CV相 | Headshot | 專業相 |學生相 | 入學照 | 形象照 | 職業照 | 商務相 | 家庭相 | 全家福 | 團體相</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.owlphoto.hk/" target="_blank" rel="noopener">https://www.owlphoto.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:business@owlphoto.hk">business@owlphoto.hk</a></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>54</td><td class="name">Yat Tung Heen - Eaton HK</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.yattungheen.com/" target="_blank" rel="noopener">https://www.yattungheen.com/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:yattungheenhk@eatonworkshop.com">yattungheenhk@eatonworkshop.com</a></td><td>4.3</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>55</td><td class="name">Hair Quest Hair salon Central</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.hairquest-hk.com/" target="_blank" rel="noopener">https://www.hairquest-hk.com/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:hello@hairquest-hk.com">hello@hairquest-hk.com</a></td><td>4.8</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>56</td><td class="name">天下猫猫一様猫</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.catiscat.com.hk/" target="_blank" rel="noopener">https://www.catiscat.com.hk/</a></td><td><a href="https://wa.me/85254966966" target="_blank" rel="noopener">85254966966</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>57</td><td class="name">Bora beauty</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://bora.hk/" target="_blank" rel="noopener">https://bora.hk/</a></td><td><a href="https://wa.me/85266362236" target="_blank" rel="noopener">85266362236</a></td>
+<td><span class="muted">—</span></td><td>4.7</td>
+<td>WhatsApp、WeChat</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到即時通訊: WeChat</td></tr>
+<tr>
+<td>58</td><td class="name">Dream Scenes Studio</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://dreamscenesstudio.com/" target="_blank" rel="noopener">http://dreamscenesstudio.com/</a></td><td><a href="https://wa.me/85269734094" target="_blank" rel="noopener">85269734094</a></td>
+<td><a href="mailto:contact@dreamscenesstudio.com">contact@dreamscenesstudio.com</a></td><td>5.0</td>
+<td>WeChat、WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到即時通訊: WeChat</td></tr>
+<tr>
+<td>59</td><td class="name">Dazzling Smile Dental Clinic 瑩恩牙科診所</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://dazzlingsmiledentalclinic.com/" target="_blank" rel="noopener">https://dazzlingsmiledentalclinic.com/</a></td><td><a href="https://wa.me/85293170112" target="_blank" rel="noopener">85293170112</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>60</td><td class="name">Family Smile Limited</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.familysmile.hk/" target="_blank" rel="noopener">http://www.familysmile.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:info@familysmile.hk">info@familysmile.hk</a></td><td>4.9</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>61</td><td class="name">INDULGENCE hair &amp; beauty salon</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.indulgence.hk/" target="_blank" rel="noopener">http://www.indulgence.hk/</a></td><td><a href="https://wa.me/85264647548" target="_blank" rel="noopener">85264647548</a></td>
+<td><a href="mailto:enquiry@indulgence.hk">enquiry@indulgence.hk</a></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>62</td><td class="name">Rhine Flowers</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://rhineflowers.com/" target="_blank" rel="noopener">https://rhineflowers.com/</a></td><td><a href="https://wa.me/85254974789" target="_blank" rel="noopener">85254974789</a></td>
+<td><a href="mailto:rhineflowers@outlook.com">rhineflowers@outlook.com</a></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>63</td><td class="name">香港花店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.mrsliuflorist.com/" target="_blank" rel="noopener">https://www.mrsliuflorist.com/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:mrsliuflorist@gmail.com">mrsliuflorist@gmail.com</a></td><td>—</td>
+<td>FB Messenger、Telegram、WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到即時通訊: FB Messenger<br>偵測到即時通訊: Telegram</td></tr>
+<tr>
+<td>64</td><td class="name">網上花店| 網上訂花 | 即日送花 | HKfashop</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://hkfashop.com/" target="_blank" rel="noopener">https://hkfashop.com/</a></td><td><a href="https://wa.me/85254883012" target="_blank" rel="noopener">85254883012</a></td>
+<td><a href="mailto:cs@hkfashop.com">cs@hkfashop.com</a></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>65</td><td class="name">【 送花】 ｜訂花｜Flowerbee Florist訂花束 - Flowerbee HK Florist</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://flowerbee-hk.com/zh" target="_blank" rel="noopener">https://flowerbee-hk.com/zh</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:team@flowerbee-hk.com">team@flowerbee-hk.com</a></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>66</td><td class="name">花點時間｜香港旺角花墟實體花店：24小時訂花、鮮花花束、開張花籃、鮮花批發 - 花點時間 Reflower</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.reflower.com.hk/" target="_blank" rel="noopener">https://www.reflower.com.hk/</a></td><td><a href="https://wa.me/85259240290" target="_blank" rel="noopener">85259240290</a></td>
+<td><a href="mailto:cs@reflower.com.hk">cs@reflower.com.hk</a></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>67</td><td class="name">有花漾 ZH Flowers</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.zh-flowers.com/" target="_blank" rel="noopener">https://www.zh-flowers.com/</a></td><td><a href="https://wa.me/85265531222" target="_blank" rel="noopener">85265531222</a></td>
+<td><a href="mailto:info@zh-flowers.com">info@zh-flowers.com</a></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>68</td><td class="name">花店花生花華 | FaSunflower Florist</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.fasunflower.com/" target="_blank" rel="noopener">https://www.fasunflower.com/</a></td><td><a href="https://wa.me/95882371" target="_blank" rel="noopener">95882371</a></td>
+<td><span class="muted">—</span></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>69</td><td class="name">格蘭花店 Grand Floral &amp; Gift Shop</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://grand.com.hk/" target="_blank" rel="noopener">https://grand.com.hk/</a></td><td><a href="https://wa.me/85294837246" target="_blank" rel="noopener">85294837246</a></td>
+<td><a href="mailto:info@grand.com.hk">info@grand.com.hk</a></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>70</td><td class="name">WHY Studio - 上環證件相｜學生相｜專業形象照</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.whystudiohk.com/" target="_blank" rel="noopener">https://www.whystudiohk.com/</a></td><td><a href="https://wa.me/85295422885" target="_blank" rel="noopener">85295422885</a></td>
+<td><a href="mailto:hello@whystudiohk.com">hello@whystudiohk.com</a></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>71</td><td class="name">牙齒矯正及兒童齒科中心 (旺角朗豪坊) | Orthodontic &amp; Children&#x27;s Dental Center (Langham Place, Mongkok)</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.ortho-center.com/" target="_blank" rel="noopener">https://www.ortho-center.com/</a></td><td><a href="https://wa.me/68919136" target="_blank" rel="noopener">68919136</a></td>
+<td><a href="mailto:admin@mycentraldentist.com">admin@mycentraldentist.com</a></td><td>4.9</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>72</td><td class="name">HALO Flowers</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://haloflowers.com.hk/zh-hant/" target="_blank" rel="noopener">https://haloflowers.com.hk/zh-hant/</a></td><td><a href="https://wa.me/85261104206" target="_blank" rel="noopener">85261104206</a></td>
+<td><span class="muted">—</span></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>73</td><td class="name">Pettington 柏靈頓獸醫寵物用品</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.pettington.com/" target="_blank" rel="noopener">https://www.pettington.com/</a></td><td><a href="https://wa.me/20240321" target="_blank" rel="noopener">20240321</a></td>
+<td><a href="mailto:info@pettington.com">info@pettington.com</a></td><td>4.8</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>74</td><td class="name">皓保牙科診所 Craft Smile Dental Center</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://zh.drchrischeung.com/" target="_blank" rel="noopener">https://zh.drchrischeung.com/</a></td><td><a href="https://wa.me/91430462" target="_blank" rel="noopener">91430462</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>75</td><td class="name">Toyota Kowloon Bay Service Centre (Mechanical)</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.toyota.com.hk/?utm_campaign=gmb&amp;utm_medium=organic&amp;utm_source=local" target="_blank" rel="noopener">https://www.toyota.com.hk/?utm_campaign=gmb&amp;utm_medium=organic&amp;utm_source=local</a></td><td><a href="https://wa.me/20260810" target="_blank" rel="noopener">20260810</a></td>
+<td><span class="muted">—</span></td><td>4.8</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>76</td><td class="name">Photobi HK 韓式 証件相拍摂工作室 - 湾仔店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://photobi.hk/" target="_blank" rel="noopener">https://photobi.hk/</a></td><td><a href="https://wa.me/85296653223" target="_blank" rel="noopener">85296653223</a></td>
+<td><a href="mailto:photobistudio.hk@gmail.com">photobistudio.hk@gmail.com</a></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>77</td><td class="name">Advance Pet Food</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://advancepetfood.com/" target="_blank" rel="noopener">http://advancepetfood.com/</a></td><td><a href="https://wa.me/85297850162" target="_blank" rel="noopener">85297850162</a></td>
+<td><span class="muted">—</span></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>78</td><td class="name">Anna Maria Studio</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://annamstudio.com/" target="_blank" rel="noopener">http://annamstudio.com/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:hello@annamstudio.com">hello@annamstudio.com</a></td><td>5.0</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>79</td><td class="name">1984 HAIR SALON</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://1984hairsalon.wixsite.com/1984-hairsalon" target="_blank" rel="noopener">https://1984hairsalon.wixsite.com/1984-hairsalon</a></td><td><a href="https://wa.me/20210222" target="_blank" rel="noopener">20210222</a></td>
+<td><a href="mailto:1984hairsalon@gmail.com">1984hairsalon@gmail.com</a></td><td>4.8</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>80</td><td class="name">Bulls PPF 専門店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.ppf.com.hk/" target="_blank" rel="noopener">https://www.ppf.com.hk/</a></td><td><a href="https://wa.me/85292379151" target="_blank" rel="noopener">85292379151</a></td>
+<td><span class="muted">—</span></td><td>4.7</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>81</td><td class="name">LEEKAJA X AMONG Hair Salon Century Square in Hongkong 한국 미용실</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.leekaja.hk/" target="_blank" rel="noopener">https://www.leekaja.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:leekajaamong.hk@gmail.com">leekajaamong.hk@gmail.com</a></td><td>4.8</td>
+<td>WeChat</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WeChat</td></tr>
+<tr>
+<td>82</td><td class="name">MEGAPET (Kowloon City Shop)</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.megapet.com.hk/" target="_blank" rel="noopener">http://www.megapet.com.hk/</a></td><td><a href="https://wa.me/85292430360" target="_blank" rel="noopener">85292430360</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WeChat</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WeChat</td></tr>
+<tr>
+<td>83</td><td class="name">Photobi HK 韓式 証件相拍摂工作室 - 油麻地店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://photobi.hk/" target="_blank" rel="noopener">https://photobi.hk/</a></td><td><a href="https://wa.me/85296653223" target="_blank" rel="noopener">85296653223</a></td>
+<td><a href="mailto:photobistudio.hk@gmail.com">photobistudio.hk@gmail.com</a></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>84</td><td class="name">香港車房及汽車維修 | CarService.hk</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.carservice.hk/zh-hk" target="_blank" rel="noopener">https://www.carservice.hk/zh-hk</a></td><td><a href="https://wa.me/85293258834" target="_blank" rel="noopener">85293258834</a></td>
+<td><a href="mailto:info@carservice.hk">info@carservice.hk</a></td><td>—</td>
+<td>WeChat、WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到即時通訊: WeChat</td></tr>
+<tr>
+<td>85</td><td class="name">24小時 上門汽車維修保養服務</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://garage-hk.com/onsite.php" target="_blank" rel="noopener">https://garage-hk.com/onsite.php</a></td><td><a href="https://wa.me/85259700355" target="_blank" rel="noopener">85259700355</a></td>
+<td><span class="muted">—</span></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>86</td><td class="name">保養及維修服務 - Dchmsc</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.dchmsc.com/zh/maintenance-repair" target="_blank" rel="noopener">https://www.dchmsc.com/zh/maintenance-repair</a></td><td><a href="https://wa.me/85268938885" target="_blank" rel="noopener">85268938885</a></td>
+<td><span class="muted">—</span></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>87</td><td class="name">車師傅 - 全港認證車師傅總匯</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.mastercar.hk/" target="_blank" rel="noopener">https://www.mastercar.hk/</a></td><td><a href="https://wa.me/20180704" target="_blank" rel="noopener">20180704</a></td>
+<td><a href="mailto:support@mastercar.hk">support@mastercar.hk</a></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>88</td><td class="name">堅記車房平台</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.kinkeecar.com/" target="_blank" rel="noopener">https://www.kinkeecar.com/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:cyis1000@gmail.com">cyis1000@gmail.com</a></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>89</td><td class="name">汽車保養及汽車維修 | CarService.hk</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.carservice.hk/zh-hk/services/car-servicing" target="_blank" rel="noopener">https://www.carservice.hk/zh-hk/services/car-servicing</a></td><td><a href="https://wa.me/85293258834" target="_blank" rel="noopener">85293258834</a></td>
+<td><a href="mailto:info@carservice.hk">info@carservice.hk</a></td><td>—</td>
+<td>WeChat、WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到即時通訊: WeChat</td></tr>
+<tr>
+<td>90</td><td class="name">汽車維修 - Anyone</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.anyonehk.com/%E6%B1%BD%E8%BB%8A%E7%B6%AD%E4%BF%AE/" target="_blank" rel="noopener">https://www.anyonehk.com/%E6%B1%BD%E8%BB%8A%E7%B6%AD%E4%BF%AE/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:support@anyonehk.com">support@anyonehk.com</a></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>91</td><td class="name">香港汽車維修公司名錄 - 新成立/注册及已更改名称的公司名单</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://hkg.databasesets.com/zh-hant/gongsimingdan/type/Motor_Service" target="_blank" rel="noopener">https://hkg.databasesets.com/zh-hant/gongsimingdan/type/Motor_Service</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:contact@databasesets.com">contact@databasesets.com</a></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>92</td><td class="name">汽車服務公司 - Driver.com.hk</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.driver.com.hk/service" target="_blank" rel="noopener">https://www.driver.com.hk/service</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:Aberdeengroup168@gmail.com">Aberdeengroup168@gmail.com</a></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>93</td><td class="name">最佳香港花店推介 送花訂花好去處/網上買花</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.timeout.com.hk/hong-kong/hk/%E8%B3%BC%E7%89%A9/%E6%9C%80%E4%BD%B3%E9%A6%99%E6%B8%AF%E8%8A%B1%E5%BA%97%E6%8E%A8%E4%BB%8B-%E9%80%81%E8%8A%B1%E8%A8%82%E8%8A%B1%E5%A5%BD%E5%8E%BB%E8%99%95-%E7%B6%B2%E4%B8%8A%E8%B2%B7%E8%8A%B1" target="_blank" rel="noopener">https://www.timeout.com.hk/hong-kong/hk/%E8%B3%BC%E7%89%A9/%E6%9C%80%E4%BD%B3%E9%A6%99%E6%B8%AF%E8%8A%B1%E5%BA%97%E6%8E%A8%E4%BB%8B-%E9%80%81%E8%8A%B1%E8%A8%82%E8%8A%B1%E5%A5%BD%E5%8E%BB%E8%99%95-%E7%B6%B2%E4%B8%8A%E8%B2%B7%E8%8A%B1</a></td><td><a href="https://wa.me/96254482" target="_blank" rel="noopener">96254482</a></td>
+<td><span class="muted">—</span></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>94</td><td class="name">HK Florist Directory</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://zh-hk.hk-florist.org/hk-florist-directory/" target="_blank" rel="noopener">https://zh-hk.hk-florist.org/hk-florist-directory/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:contact@hk-florist.org">contact@hk-florist.org</a></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>95</td><td class="name">主頁</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://shunkeeflowers.com.hk/" target="_blank" rel="noopener">https://shunkeeflowers.com.hk/</a></td><td><a href="https://wa.me/85290129219" target="_blank" rel="noopener">85290129219</a></td>
+<td><a href="mailto:shunkeeflowers@gmail.com">shunkeeflowers@gmail.com</a></td><td>—</td>
+<td>WhatsApp、WeChat</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到即時通訊: WeChat</td></tr>
+<tr>
+<td>96</td><td class="name">Photobi HK 韓式 証件相拍摂工作室 - 観塘店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://photobi.hk/" target="_blank" rel="noopener">https://photobi.hk/</a></td><td><a href="https://wa.me/85296653223" target="_blank" rel="noopener">85296653223</a></td>
+<td><a href="mailto:photobistudio.hk@gmail.com">photobistudio.hk@gmail.com</a></td><td>5.0</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>97</td><td class="name">Kushiro</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.kushiro.com.hk/" target="_blank" rel="noopener">http://www.kushiro.com.hk/</a></td><td><a href="https://wa.me/85262026666" target="_blank" rel="noopener">85262026666</a></td>
+<td><a href="mailto:info@kushiro.com.hk">info@kushiro.com.hk</a></td><td>4.5</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>98</td><td class="name">太子中学補習社 - 立方教育</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.ilearndse.com/" target="_blank" rel="noopener">https://www.ilearndse.com/</a></td><td><a href="https://wa.me/85269741087" target="_blank" rel="noopener">85269741087</a></td>
+<td><span class="muted">—</span></td><td>4.5</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>99</td><td class="name">Speedycat Photo Studio</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.speedycat.com.hk/" target="_blank" rel="noopener">https://www.speedycat.com.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:info@speedycat.com.hk">info@speedycat.com.hk</a></td><td>4.9</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>100</td><td class="name">24/7 Fitness Jordan</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://247.fitness/" target="_blank" rel="noopener">http://247.fitness/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:cs@247fitness.com.hk">cs@247fitness.com.hk</a></td><td>4.9</td>
+<td>—</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">—</td></tr>
+<tr>
+<td>101</td><td class="name">進研教育 - 英文中文數學補習社 (北角分校)</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.joinin-education.com/" target="_blank" rel="noopener">https://www.joinin-education.com/</a></td><td><a href="https://wa.me/85254400855" target="_blank" rel="noopener">85254400855</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>102</td><td class="name">聚萌</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.dogatherhk.com/" target="_blank" rel="noopener">https://www.dogatherhk.com/</a></td><td><a href="https://wa.me/85293889783" target="_blank" rel="noopener">85293889783</a></td>
+<td><span class="muted">—</span></td><td>4.4</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>103</td><td class="name">The Factory Hair剪髮染髮電髮專門店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://haircuthk.com/" target="_blank" rel="noopener">http://haircuthk.com/</a></td><td><a href="https://wa.me/85259355605" target="_blank" rel="noopener">85259355605</a></td>
+<td><span class="muted">—</span></td><td>4.8</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>104</td><td class="name">EcHouse 装修配対平台 | 装修報価 | 室内設計 | 装修設計</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.echouse.com.hk/" target="_blank" rel="noopener">https://www.echouse.com.hk/</a></td><td><a href="https://wa.me/95607556" target="_blank" rel="noopener">95607556</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>105</td><td class="name">Element Dental Centre 弘悅牙科</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://www.elementdentalhk.com/" target="_blank" rel="noopener">https://www.elementdentalhk.com/</a></td><td><a href="https://wa.me/85260752515" target="_blank" rel="noopener">85260752515</a></td>
+<td><a href="mailto:elementdentalhk@gmail.com">elementdentalhk@gmail.com</a></td><td>4.9</td>
+<td>WhatsApp、WeChat</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到即時通訊: WeChat</td></tr>
+<tr>
+<td>106</td><td class="name">皆一空間 室内設計 装修工程</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://arone-space.com/" target="_blank" rel="noopener">http://arone-space.com/</a></td><td><a href="https://wa.me/85268864455" target="_blank" rel="noopener">85268864455</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>107</td><td class="name">The Vault Fitness</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://thevault-fitness.com/" target="_blank" rel="noopener">http://thevault-fitness.com/</a></td><td><a href="https://wa.me/85228859300" target="_blank" rel="noopener">85228859300</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>108</td><td class="name">電髮 染髮 焗油 GH Haircut Salon</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://haircuthk.com/%E4%B8%AD%E7%92%B0%E6%9F%93%E9%AB%AE/" target="_blank" rel="noopener">https://haircuthk.com/%E4%B8%AD%E7%92%B0%E6%9F%93%E9%AB%AE/</a></td><td><a href="https://wa.me/85259355605" target="_blank" rel="noopener">85259355605</a></td>
+<td><span class="muted">—</span></td><td>4.8</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>109</td><td class="name">METEOR HK 摂影器材精品店</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="http://www.meteor.com.hk/" target="_blank" rel="noopener">http://www.meteor.com.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:enquiry@meteor.com.hk">enquiry@meteor.com.hk</a></td><td>5.0</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">—</td></tr>
+<tr>
+<td>110</td><td class="name">Goood Car Wrap</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://gooodcarwrap.wixsite.com/goood-car-wrap" target="_blank" rel="noopener">https://gooodcarwrap.wixsite.com/goood-car-wrap</a></td><td><a href="https://wa.me/85269927294" target="_blank" rel="noopener">85269927294</a></td>
+<td><a href="mailto:aberdeengroup168@gmail.com">aberdeengroup168@gmail.com</a></td><td>4.7</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr>
+<tr>
+<td>111</td><td class="name">中環Salon Goody</td>
+<td><span class="badge b-na">無AI客服</span></td><td><a href="https://haircuthk.com/%E4%B8%AD%E7%92%B0salon/" target="_blank" rel="noopener">https://haircuthk.com/%E4%B8%AD%E7%92%B0salon/</a></td><td><a href="https://wa.me/85259355605" target="_blank" rel="noopener">85259355605</a></td>
+<td><span class="muted">—</span></td><td>4.8</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp</td></tr></table>
+
+<h2>✅ C. 已有 AI 客服（21 間）— 參考對照</h2>
+<table><tr><th>#</th><th>商家名稱</th><th>狀態</th><th>網站</th><th>WhatsApp</th><th>Email</th><th>評分</th><th>即時通訊</th><th>AI客服</th><th>Demo 頁</th><th>檢測說明</th></tr>
+<tr>
+<td>1</td><td class="name">GETUTOR 香港導師総会｜上門補習中介平台｜私補導師推介｜Private Tutors Agency｜IB, IGCSE, A-level Tutors</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://www.getutor.com.hk/" target="_blank" rel="noopener">https://www.getutor.com.hk/</a></td><td><a href="https://wa.me/85263080831" target="_blank" rel="noopener">85263080831</a></td>
+<td><a href="mailto:getutorhk@gmail.com">getutorhk@gmail.com</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>2</td><td class="name">補習社｜学博教育 Learn Smart Education</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://learnsmart.edu.hk/" target="_blank" rel="noopener">https://learnsmart.edu.hk/</a></td><td><a href="https://wa.me/85268484314" target="_blank" rel="noopener">85268484314</a></td>
+<td><a href="mailto:info@learnsmart.edu.hk">info@learnsmart.edu.hk</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>3</td><td class="name">Home Dental (Tsim Sha Tsui Branch)</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://homedentalhk.com/cn/contact-us/tst" target="_blank" rel="noopener">https://homedentalhk.com/cn/contact-us/tst</a></td><td><a href="https://wa.me/85254026630" target="_blank" rel="noopener">85254026630</a></td>
+<td><a href="mailto:cs@homedentalhk.com">cs@homedentalhk.com</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>4</td><td class="name">Home Dental</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://homedentalhk.com/cn/contact-us/cwb" target="_blank" rel="noopener">https://homedentalhk.com/cn/contact-us/cwb</a></td><td><a href="https://wa.me/85254026630" target="_blank" rel="noopener">85254026630</a></td>
+<td><a href="mailto:cs@homedentalhk.com">cs@homedentalhk.com</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>5</td><td class="name">八方汽車 | Power Moto Limited</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="http://www.power-moto.hk/" target="_blank" rel="noopener">http://www.power-moto.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:info@power-moto.hk">info@power-moto.hk</a></td><td>4.8</td>
+<td>—</td><td>Tidio</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到客服平台: Tidio<br>偵測到客服文字: live chat<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>6</td><td class="name">Flow &amp; Roll Laundry 自助洗衣 (中環 Central)</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://flowandroll.com/" target="_blank" rel="noopener">https://flowandroll.com/</a></td><td><a href="https://wa.me/85294767955" target="_blank" rel="noopener">85294767955</a></td>
+<td><span class="muted">—</span></td><td>4.8</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>7</td><td class="name">Flow &amp; Roll Laundry 自助洗衣 (灣仔分域街)</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://flowandroll.com/" target="_blank" rel="noopener">https://flowandroll.com/</a></td><td><a href="https://wa.me/85294767955" target="_blank" rel="noopener">85294767955</a></td>
+<td><span class="muted">—</span></td><td>4.8</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>8</td><td class="name">優之花鋪-U Flower Shop</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://www.uflowershop.com/" target="_blank" rel="noopener">https://www.uflowershop.com/</a></td><td><a href="https://wa.me/85255327782" target="_blank" rel="noopener">85255327782</a></td>
+<td><span class="muted">—</span></td><td>4.6</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>9</td><td class="name">FDHK - Flower Delivery Hong Kong</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://flowerdeliveryhongkong.com/" target="_blank" rel="noopener">https://flowerdeliveryhongkong.com/</a></td><td><a href="https://wa.me/85294551118" target="_blank" rel="noopener">85294551118</a></td>
+<td><a href="mailto:sales@flowerdeliveryhongkong.com">sales@flowerdeliveryhongkong.com</a></td><td>4.6</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: chat with us</td></tr>
+<tr>
+<td>10</td><td class="name">花店 | 花束專家</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://www.flowerbouquet.com.hk/" target="_blank" rel="noopener">https://www.flowerbouquet.com.hk/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:info@flowerbouquet.com.hk">info@flowerbouquet.com.hk</a></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>11</td><td class="name">網上訂花 ‧ 送花香港 | Fdhk 最高評分即日網上花店</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://flowerdeliveryhongkong.com/zh" target="_blank" rel="noopener">https://flowerdeliveryhongkong.com/zh</a></td><td><a href="https://wa.me/85294551118" target="_blank" rel="noopener">85294551118</a></td>
+<td><a href="mailto:sales@flowerdeliveryhongkong.com">sales@flowerdeliveryhongkong.com</a></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: chat with us</td></tr>
+<tr>
+<td>12</td><td class="name">香港花店｜網上訂花及送花｜Gift Flowers HK</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://giftflowers.com.hk/cn/" target="_blank" rel="noopener">https://giftflowers.com.hk/cn/</a></td><td><a href="https://wa.me/85297185174" target="_blank" rel="noopener">85297185174</a></td>
+<td><span class="muted">—</span></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>13</td><td class="name">Flora Floriculture - 花店</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://www.floraf.com.hk/" target="_blank" rel="noopener">https://www.floraf.com.hk/</a></td><td><a href="https://wa.me/85296999979" target="_blank" rel="noopener">85296999979</a></td>
+<td><span class="muted">—</span></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>14</td><td class="name">香港花店- 首頁花店推薦 - 我們代表和倡導位於香港島、九龍和新界的花店，以及在線花店和鮮花配送公司 ...</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://zh-hk.hk-florist.org/" target="_blank" rel="noopener">https://zh-hk.hk-florist.org/</a></td><td><span class="muted">—</span></td>
+<td><a href="mailto:contact@hk-florist.org">contact@hk-florist.org</a></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到客服文字: live chat</td></tr>
+<tr>
+<td>15</td><td class="name">花店</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://www.floraf.com.hk/" target="_blank" rel="noopener">https://www.floraf.com.hk/</a></td><td><a href="https://wa.me/85296999979" target="_blank" rel="noopener">85296999979</a></td>
+<td><span class="muted">—</span></td><td>—</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>16</td><td class="name">Cat Watt 晴珊猫舎</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="http://www.catwatt.com/" target="_blank" rel="noopener">http://www.catwatt.com/</a></td><td><a href="https://wa.me/85268023001" target="_blank" rel="noopener">85268023001</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>WeChat、FB Messenger、WhatsApp</td><td>LiveChat、Intercom</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到客服平台: Intercom<br>偵測到客服平台: LiveChat<br>偵測到即時通訊: WhatsApp<br>偵測到即時通訊: WeChat<br>偵測到即時通訊: FB Messenger</td></tr>
+<tr>
+<td>17</td><td class="name">Anglo Chinese Florist</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="http://www.anglochinese.com/" target="_blank" rel="noopener">http://www.anglochinese.com/</a></td><td><a href="https://wa.me/85262388823" target="_blank" rel="noopener">85262388823</a></td>
+<td><span class="muted">—</span></td><td>4.9</td>
+<td>FB Messenger、WhatsApp</td><td>LiveChat、Intercom</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到客服平台: Intercom<br>偵測到客服平台: LiveChat<br>偵測到即時通訊: WhatsApp<br>偵測到即時通訊: FB Messenger</td></tr>
+<tr>
+<td>18</td><td class="name">補習社｜學博教育 Learn Smart Education (旺角華僑分校)【中文英文數學補習】</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://learnsmart.edu.hk/" target="_blank" rel="noopener">https://learnsmart.edu.hk/</a></td><td><a href="https://wa.me/85268484314" target="_blank" rel="noopener">85268484314</a></td>
+<td><a href="mailto:info@learnsmart.edu.hk">info@learnsmart.edu.hk</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-nw">⏳ 未做</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>19</td><td class="name">仁健牙科 Nixon Dental (太子牙醫/旺角牙醫/洗牙/補牙/種牙/植牙/杜牙根/智慧齒/箍牙/Invisalign/牙周病)</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="http://www.nixondental.com/" target="_blank" rel="noopener">http://www.nixondental.com/</a></td><td><a href="https://wa.me/85293056896" target="_blank" rel="noopener">85293056896</a></td>
+<td><a href="mailto:dentalnixon@gmail.com">dentalnixon@gmail.com</a></td><td>4.9</td>
+<td>WhatsApp</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到即時通訊: WhatsApp<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>20</td><td class="name">Carro Care</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://carro.co/hk/zh-hant-hk/carro-care" target="_blank" rel="noopener">https://carro.co/hk/zh-hant-hk/carro-care</a></td><td><a href="https://wa.me/470808381" target="_blank" rel="noopener">470808381</a></td>
+<td><a href="mailto:john@email.com">john@email.com</a></td><td>—</td>
+<td>—</td><td>—</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到客服文字: chat with us<br>偵測到客服文字: live chat<br>偵測到客服文字: customer service</td></tr>
+<tr>
+<td>21</td><td class="name">PETNAR LIVING 裝修工程 室內設計 傢俬訂製</td>
+<td><span class="badge b-ha">已有AI</span></td><td><a href="https://petnar-living.com/interior-design/" target="_blank" rel="noopener">https://petnar-living.com/interior-design/</a></td><td><a href="https://wa.me/85263688640" target="_blank" rel="noopener">85263688640</a></td>
+<td><a href="mailto:business@petnar.com">business@petnar.com</a></td><td>4.9</td>
+<td>WhatsApp</td><td>Drift</td><td><span class="badge b-ha">✅ 已做Demo</span></td><td class="hint">偵測到客服平台: Drift<br>偵測到即時通訊: WhatsApp</td></tr></table>
+
+<div class="footer">由 賺錢王 scanner.py 自動產生 ｜ 記錄保留 7 天，重複商家自動跳過 ｜ 生成時間 2026-08-25 13:45:17</div>
+</div></body></html>
