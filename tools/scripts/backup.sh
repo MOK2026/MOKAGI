@@ -6,6 +6,7 @@
 #   fix2: exclude mpt / browser_profile / browser_profile2（可重建大目錄）
 #   fix3: --warning=no-file-changed 抑制變動警告
 #   fix4: nice -n 19 降低優先級
+#   fix5: 排除 browser_profiles(3.8G,漏網) / live2d素材(1.1G) / mp4影片 / _tmp / 聲音工作 → 備份 2.8G→322M 解決超時
 # ============================================================
 MOK=/home/ubuntu/.mok
 BK=$MOK/backups
@@ -39,6 +40,12 @@ cd "$MOK" && nice -n 19 tar \
   --exclude=mpt \
   --exclude=browser_profile \
   --exclude=browser_profile2 \
+  --exclude=browser_profiles \
+  --exclude=_tmp \
+  --exclude=*.mp4 \
+  --exclude=*/videos \
+  --exclude=*/live2d \
+  --exclude=*/jobs/聲音工作 \
   --warning=no-file-changed \
   -czf "$FP" . 2>>"$LOG"
 

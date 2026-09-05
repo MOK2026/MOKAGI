@@ -16,10 +16,11 @@ stop_desktop() {
 start_desktop() {
     # Xvfb
     if ! pgrep -f "Xvfb.*:1" > /dev/null; then
-        echo "啟動 Xvfb :1 (1280x800)..."
-        Xvfb :1 -screen 0 1280x800x24 -ac &
+        echo "啟動 Xvfb :1 (1280x1280, 預設橫式 1280x800)..."
+        Xvfb :1 -screen 0 1280x1280x24 -ac &
         sleep 1
     fi
+        DISPLAY=:1 xrandr --fb 1280x800 2>/dev/null || true
 
     # fluxbox
     if ! pgrep -f fluxbox > /dev/null; then
@@ -31,7 +32,7 @@ start_desktop() {
     # x11vnc
     if ! pgrep -f "x11vnc.*5900" > /dev/null; then
         echo "啟動 x11vnc (port 5900, localhost only)..."
-        x11vnc -display :1 -forever -shared -rfbport 5900 -localhost -nopw -quiet &
+        x11vnc -display :1 -forever -shared -rfbport 5900 -localhost -nopw -quiet -xrandr &
         sleep 1
     fi
 

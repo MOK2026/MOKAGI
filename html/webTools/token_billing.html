@@ -459,6 +459,8 @@
             .tab-btn { padding: 8px 14px; font-size: 0.8rem; }
         }
     </style>
+<script>window.MOKAGI_PRICE = {{ MOKAGI_PRICE | tojson }};</script>
+<script src="{{ asset_url('mok_price.js') }}"></script>
 </head>
 <body>
 
@@ -479,20 +481,29 @@
 </div>
 
 <div class="footer">
-    MOKAGI · HK$18 / 百萬 token · 數據每 5 分鐘更新
+    <span id="footerPrice">MOKAGI · 收費標準載入中 · 數據每 5 分鐘更新</span>
 </div>
 
 <script>
 (async function() {
     const app = document.getElementById('app');
+    // ══ 統一計費顯示（唯一價格源：core/mok_price.py）══
+    (async function() {
+        try {
+            const p = window.MokAgiPrice ? await MokAgiPrice.ready() : window.MOKAGI_PRICE;
+            const rateText = (p && p.display) ? p.display.per_million : ((p && p.currency) ? p.currency + '$' + p.price_per_million + ' / 百萬 token' : 'HK$68 / 百萬 token');
+            const fp = document.getElementById('footerPrice');
+            if (fp) fp.textContent = 'MOKAGI · ' + rateText + ' · 數據每 5 分鐘更新';
+            const hr = document.getElementById('heroRate');
+            if (hr) hr.textContent = rateText;
+        } catch(e) {}
+    })();
+
     const formatNum = (n) => n.toLocaleString();
-    const MokAgi_Token_Price_HK = 18 / 1_000_000; // 18 HKD per million tokens
-    const formatHKD = (tokens) => {
-        const cost = tokens * MokAgi_Token_Price_HK;
-        if (cost < 0.01) return 'HK$' + cost.toFixed(4);
-        if (cost < 1) return 'HK$' + cost.toFixed(3);
-        return 'HK$' + cost.toFixed(2);
-    };
+    // ══ 統一計費（唯一價格源：core/mok_price.py）══
+    const price = await MokAgiPrice.ready();
+    const MokAgi_Token_Price_HK = price.price_per_token;
+    const formatHKD = (tokens) => MokAgiPrice.formatHKD(tokens);
 
     function escapeHtml(str) {
         if (!str) return '-';
@@ -528,7 +539,7 @@
                 <div class="divider"></div>
                 <div class="hero-col">
                     <div class="hero-cost">HK$${totalCost.toFixed(2)}</div>
-                    <div class="hero-rate">HK$18 / 百萬 token</div>
+                    <div class="hero-rate">${price.display.per_million}</div>
                 </div>
             </div>
         </div>`

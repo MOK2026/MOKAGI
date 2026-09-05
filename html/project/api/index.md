@@ -253,3 +253,67 @@ window.agent_soul +
 
 
 
+
+---
+
+# 🎬 scroll-reveal.js — 滾動顯現動畫接口
+
+> **效果名稱**：Scroll Reveal（滾動觸發動畫），又名 AOS / ScrollReveal / 流水式加載 / 文字漸入。
+> **文件**：https://64071181.xyz/static/scroll-reveal.js
+> **演示**：https://64071181.xyz/scroll-reveal-demo
+
+## 🚀 一行嵌入
+
+在任何網站的 `</body>` 前加入：
+
+```html
+<script src="https://64071181.xyz/static/scroll-reveal.js"></script>
+```
+
+然後給任意元素加 `data-reveal` 屬性即可：
+
+```html
+<div data-reveal="fade-up">從下往上淡入</div>
+<div data-reveal="fade-left">從右往左淡入</div>
+<p data-reveal="text">這段文字逐字逐字慢慢加入</p>
+```
+
+## 🎨 內建特效
+
+| 特效名 | 效果 |
+|---|---|
+| `fade-up` / `fade-down` / `fade-left` / `fade-right` | 四方向位移淡入 |
+| `fade-in` | 純淡入 |
+| `zoom-in` / `zoom-out` | 縮放進入 |
+| `blur-in` | 模糊聚焦 |
+| `flip` | 翻轉進入 |
+| `text` | 逐字漸入（中文適用） |
+| `text-words` / `words` | 逐詞漸入（英文適用） |
+
+## ⚙️ 進階屬性
+
+| 屬性 | 說明 | 範例 |
+|---|---|---|
+| `data-reveal-delay="200"` | 延遲 200ms | `data-reveal-delay="200"` |
+| `data-reveal-duration="800"` | 動畫時長 | `data-reveal-duration="800"` |
+| `data-reveal-interval="100"` | 瀑布/逐字間隔 | `data-reveal-interval="100"` |
+| `data-reveal-once="false"` | 滑入滑出重複播放 | `data-reveal-once="false"` |
+| `data-reveal-group` | 子項瀑布式依序出現 | 見下方 |
+
+瀑布式（流水式）範例：
+
+```html
+<div data-reveal-group data-reveal-interval="130">
+  <div data-reveal="fade-up">項目 1</div>
+  <div data-reveal="fade-up">項目 2</div>
+  <div data-reveal="fade-up">項目 3</div>
+</div>
+```
+
+## 🔧 JS 程式化呼叫
+
+```js
+ScrollReveal.revealAll('.card', { effect: 'fade-up', delay: 100 });
+ScrollReveal.reveal('#hero');
+ScrollReveal.refresh();   // 動態新增內容後手動刷新
+```

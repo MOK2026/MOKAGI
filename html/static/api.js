@@ -6,7 +6,7 @@
 // ============================================================
 (function() {
     // 🔖 目前版本號（改版必改）
-    const __MOKAGI_VER__ = "2026081502";
+    const __MOKAGI_VER__ = "2026082901";
 
     // 🚀 啟動時自我檢查：若瀏覽器/CDN 快取了舊版，自動換成最新版
     (function selfCheck() {
@@ -328,11 +328,11 @@
         div.className = 'mokagi-round';
         div.style.cssText = `
             margin-bottom: 12px;
-            border: 1px solid rgba(0,0,0,0.10);
-            border-radius: 14px;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
             overflow: hidden;
-            background: rgba(255,255,255,0.9);
-            box-shadow: 0 1px 6px rgba(0,0,0,0.05);
+            background: #1f1f22;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.35);
         `;
         // 標題列：🔄 第N輪 完成/進行中 + 工具名
         const header = document.createElement('div');
@@ -340,19 +340,19 @@
         header.style.cssText = `
             padding: 6px 12px;
             font-size: 12px;
-            color: #7a7a85;
+            color: #e0a800;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            background: rgba(0,0,0,0.035);
-            border-bottom: 1px solid rgba(0,0,0,0.07);
+            background: #252526;
+            border-bottom: 1px solid #3e3e42;
         `;
         const titleSpan = document.createElement('span');
         titleSpan.className = 'round-title';
         titleSpan.textContent = '🔄 第' + round.iteration + '輪 進行中';
         const toolsSpan = document.createElement('span');
         toolsSpan.className = 'round-tools';
-        toolsSpan.style.cssText = 'font-size:11px;color:#9a9aa5;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        toolsSpan.style.cssText = 'font-size:11px;color:#90949f;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
         header.appendChild(titleSpan);
         header.appendChild(toolsSpan);
         div.appendChild(header);
@@ -368,7 +368,7 @@
         replyDiv.style.cssText = `
             padding: 8px 12px;
             font-size: 14px;
-            color: #333;
+            color: #e4e4e7;
             white-space: pre-wrap;
             word-break: break-word;
             line-height: 1.6;
@@ -381,19 +381,20 @@
     function _mkDetails(kind, summaryText, bodyHtml) {
         const details = document.createElement('details');
         details.className = kind + '-det';
-        details.style.cssText = `background: rgba(0,0,0,0.015); border-top: 1px solid rgba(0,0,0,0.05);`;
+        details.style.cssText = `background: #1a1a1d; border-top: 1px solid #3e3e42;`;
         const summary = document.createElement('summary');
         summary.textContent = summaryText;
+        const _sumColor = kind === 'think' ? '#a09060' : kind === 'tools' ? '#5b9bd5' : kind === 'results' ? '#00b894' : '#7a7a85';
         summary.style.cssText = `
             padding: 5px 12px;
             font-size: 12px;
-            color: #7a7a85;
+            color: ${_sumColor};
             cursor: pointer;
             user-select: none;
         `;
         const body = document.createElement('div');
         body.className = 'round-details-body ' + kind + '-body';
-        body.style.cssText = `padding: 4px 12px 10px 12px; font-size: 13px; color: #444;`;
+        body.style.cssText = `padding: 4px 12px 10px 12px; font-size: 13px; color: #c0c0c0;`;
         if (bodyHtml) body.innerHTML = bodyHtml;
         details.appendChild(summary);
         details.appendChild(body);
@@ -464,12 +465,12 @@
                     const row = document.createElement('div');
                     row.style.cssText = 'margin:4px 0;';
                     const nm = document.createElement('div');
-                    nm.style.cssText = 'color:#0a7d5f;font-weight:500;';
+                    nm.style.cssText = 'color:#5b9bd5;font-weight:500;';
                     nm.textContent = tc.name || '未知工具';
                     row.appendChild(nm);
                     if (tc.arguments && Object.keys(tc.arguments).length) {
                         const args = document.createElement('div');
-                        args.style.cssText = 'color:#888;font-size:12px;word-break:break-all;';
+                        args.style.cssText = 'color:#90949f;font-size:12px;word-break:break-all;';
                         args.textContent = JSON.stringify(tc.arguments);
                         row.appendChild(args);
                     }
@@ -494,12 +495,12 @@
             const body = det ? det.querySelector('.res-body') : null;
             if (body) {
                 const row = document.createElement('div');
-                row.style.cssText = 'margin:6px 0;padding:6px 8px;background:rgba(0,0,0,0.03);border-radius:8px;';
+                row.style.cssText = 'margin:6px 0;padding:6px 8px;background:#1a2e1a;border-radius:4px;';
                 const nm = document.createElement('div');
-                nm.style.cssText = 'color:#0a7d5f;font-size:12px;font-weight:500;margin-bottom:2px;';
+                nm.style.cssText = 'color:#00b894;font-size:12px;font-weight:500;margin-bottom:2px;';
                 nm.textContent = '🔧 ' + name;
                 const txt = document.createElement('div');
-                txt.style.cssText = 'color:#666;font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;';
+                txt.style.cssText = 'color:#c0c0c0;font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;';
                 txt.textContent = String(content).substring(0, 1200);
                 row.appendChild(nm);
                 row.appendChild(txt);
@@ -1265,4 +1266,83 @@
         console.log('加載完成，初始化 Widget...');
         initWidget();
     }
+
+    // ============ 商家網頁追蹤（Cold Call 客戶開啟統計） ============
+    // 當頁面是 MokCs 商家 demo 頁時，回報「頁面被打開」事件到冷呼控制台
+    (function trackMokCsPage() {
+        try {
+            if (window.__MOKAGI_TRACKED__) return;
+            window.__MOKAGI_TRACKED__ = true;
+            var _path = window.location.pathname || '';
+            // 只追蹤 MokCs 商家頁面（避免污染其他站點統計）
+            if (_path.indexOf('/project/MokCs/') === -1) return;
+            var _startTs = Date.now();
+            var _ua = navigator.userAgent || '';
+            // ── Session ID（localStorage 持久化，供停留時間合併） ──
+            function _newSid() {
+                try {
+                    if (window.crypto && crypto.getRandomValues) {
+                        var a = new Uint8Array(8);
+                        crypto.getRandomValues(a);
+                        return Array.from(a, function(b){ return ('0'+b.toString(16)).slice(-2); }).join('');
+                    }
+                } catch(e) {}
+                return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+            }
+            var _sid = null;
+            try {
+                _sid = localStorage.getItem('mokcs_sid') || _newSid();
+                localStorage.setItem('mokcs_sid', _sid);
+            } catch(e) { _sid = _newSid(); }
+            // ── 裝置類型 ──
+            var _isMobi = /Mobi|Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(_ua);
+            var _isTab = /iPad|Tablet|PlayBook|Silk/i.test(_ua) || (!_isMobi && /Macintosh/.test(_ua) && navigator.maxTouchPoints > 1);
+            var _device = _isTab ? '平板' : (_isMobi ? '手機' : '電腦');
+            var _payload = JSON.stringify({
+                url: window.location.href,
+                title: document.title || '',
+                referrer: document.referrer || '',
+                ua: _ua.slice(0, 200),
+                sid: _sid,
+                screen: (window.screen ? window.screen.width + 'x' + window.screen.height : ''),
+                device: _device,
+                lang: navigator.language || '',
+                tz: (function(){ try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch(e){ return ''; } })()
+            });
+            var _send = function(duration) {
+                try {
+                    var data = _payload;
+                    if (duration) {
+                        try {
+                            var obj = JSON.parse(_payload);
+                            obj.duration = duration;
+                            data = JSON.stringify(obj);
+                        } catch(e) {}
+                    }
+                    if (navigator.sendBeacon) {
+                        navigator.sendBeacon('/api/track',
+                            new Blob([data], { type: 'application/json' }));
+                        return;
+                    }
+                } catch (e) {}
+                try {
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/api/track', true);
+                    xhr.setRequestHeader('Content-Type', 'application/json');
+                    xhr.send(data);
+                } catch (e) {}
+            };
+            // 開啟事件：頁面載入時回報
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function(){ _send(0); });
+            } else {
+                _send(0);
+            }
+            // 離開事件：回報停留時間（秒），後端合併到同一 session 的開啟記錄
+            window.addEventListener('pagehide', function() {
+                var dur = Math.round((Date.now() - _startTs) / 1000);
+                if (dur >= 3) _send(dur);
+            });
+        } catch(e) {}
+    })();
 })();

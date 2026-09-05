@@ -3,9 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>莫氏集團 · AI 應用落地</title>
+    <title>莫氏集團 · AI 應用落地顧問</title>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
-    <style>
+
+    
+
+
+
+<style>
+
         :root {
             --bg: #0a0e14;
             --surface: #131820;
@@ -276,142 +282,707 @@
         .card:nth-child(1) { animation-delay: 0.05s; }
         .card:nth-child(2) { animation-delay: 0.2s; }
         .card:nth-child(3) { animation-delay: 0.35s; }
-    </style>
+
+/* ══════════════════════════════════════
+   莫氏集團 · AI 應用落地顧問
+   新增區塊樣式（Section / Steps / AI 例子 / 新聞 / Q&A）
+   ══════════════════════════════════════ */
+
+/* ── Section 通用 ── */
+.section {
+    margin-bottom: 76px;
+}
+.section-title {
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-align: center;
+    margin-bottom: 42px;
+    color: #f0f0f2;
+}
+.section-title::after {
+    content: '';
+    display: block;
+    width: 60px;
+    height: 1px;
+    margin: 18px auto 0;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+.section-sub {
+    text-align: center;
+    font-size: 15px;
+    color: var(--text-dim);
+    font-weight: 300;
+    max-width: 640px;
+    margin: -28px auto 36px;
+    line-height: 1.8;
+}
+
+/* ── 工作流程 Steps ── */
+.steps {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+}
+.step {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px 24px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    transition: var(--transition);
+    position: relative;
+    overflow: hidden;
+}
+.step::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    opacity: 0;
+    transition: opacity var(--transition);
+}
+.step:hover::before { opacity: 1; }
+.step:hover {
+    transform: translateY(-6px);
+    border-color: rgba(255,255,255,0.12);
+    box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+}
+.step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid var(--gold);
+    color: var(--gold);
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+.step p {
+    font-size: 14px;
+    color: #b0b3bd;
+    line-height: 1.8;
+    font-weight: 300;
+}
+.step p strong { color: #e8e8ea; font-weight: 600; }
+
+/* ── 引入 AI 例子 Grid ── */
+.ai-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+.ai-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 30px 26px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    transition: var(--transition);
+    position: relative;
+    overflow: hidden;
+}
+.ai-item::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    opacity: 0;
+    transition: opacity var(--transition);
+}
+.ai-item:hover::before { opacity: 1; }
+.ai-item:hover {
+    transform: translateY(-6px);
+    border-color: rgba(255,255,255,0.12);
+    box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+}
+.ai-item .ai-icon { font-size: 30px; margin-bottom: 14px; display: block; }
+.ai-item h4 { font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #f0f0f2; letter-spacing: 0.5px; }
+.ai-item p { font-size: 14px; color: #b0b3bd; line-height: 1.8; font-weight: 300; }
+.ai-item p em { color: var(--text-dim); font-style: normal; font-size: 13px; }
+
+/* ── 最近新聞 ── */
+.news-list {
+    display: grid;
+    gap: 14px;
+}
+.news-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px 26px;
+    transition: var(--transition);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.news-item:hover {
+    border-color: rgba(255,255,255,0.12);
+    transform: translateX(6px);
+}
+.news-title { font-size: 16px; font-weight: 600; color: #f0f0f2; line-height: 1.5; }
+.news-title a { color: inherit; text-decoration: none; }
+.news-title a:hover { color: var(--gold); }
+.news-desc { font-size: 14px; color: #b0b3bd; line-height: 1.7; font-weight: 300; }
+.news-meta { font-size: 12px; color: var(--text-dim); letter-spacing: 0.5px; }
+.news-meta .news-flag { color: var(--gold); }
+
+/* ── Q&A ── */
+.qa-list { display: grid; gap: 14px; }
+.qa-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: var(--transition);
+}
+.qa-item:hover { border-color: rgba(255,255,255,0.12); }
+.qa-q {
+    padding: 20px 26px;
+    font-size: 16px;
+    font-weight: 500;
+    color: #f0f0f2;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    user-select: none;
+}
+.qa-q .qa-toggle {
+    color: var(--gold);
+    transition: transform var(--transition);
+    font-size: 18px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.qa-item.open .qa-toggle { transform: rotate(45deg); }
+.qa-a {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height var(--transition), padding var(--transition);
+    padding: 0 26px;
+    font-size: 14px;
+    color: #b0b3bd;
+    line-height: 1.8;
+    font-weight: 300;
+}
+.qa-item.open .qa-a { max-height: 500px; padding: 0 26px 22px; }
+
+/* ── RWD 追加 ── */
+@media (max-width: 768px) {
+    .steps { grid-template-columns: 1fr; }
+    .ai-grid { grid-template-columns: 1fr; }
+    .section-title { font-size: 24px; }
+    .news-item { padding: 18px 20px; }
+    .qa-q { padding: 18px 20px; }
+}
+
+
+
+
+</style>
+
+
+<style>
+
+    /* ===== 語言切換器 ===== */
+    .lang-switcher {
+      position: fixed;
+      top: 18px;
+      right: 20px;
+      z-index: 10000;
+      font-family: "Segoe UI", "Noto Sans TC", sans-serif;
+    }
+    .lang-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(20, 20, 30, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(212, 168, 67, 0.35);
+      color: #d4a843;
+      padding: 10px 16px;
+      border-radius: 28px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    }
+    .lang-btn:hover {
+      background: rgba(30, 30, 45, 0.95);
+      border-color: rgba(212, 168, 67, 0.7);
+      box-shadow: 0 6px 24px rgba(212, 168, 67, 0.15);
+      transform: translateY(-2px);
+    }
+    .lang-btn i {
+      font-size: 16px;
+    }
+    .lang-dropdown {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      background: rgba(20, 20, 30, 0.95);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(212, 168, 67, 0.3);
+      border-radius: 14px;
+      min-width: 170px;
+      overflow: hidden;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-10px);
+      transition: all 0.25s ease;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    }
+    .lang-dropdown.open {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+    .lang-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 18px;
+      color: #ccc;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s ease;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .lang-option:last-child { border-bottom: none; }
+    .lang-option:hover {
+      background: rgba(212, 168, 67, 0.12);
+      color: #d4a843;
+    }
+    .lang-option .flag { font-size: 18px; }
+    .lang-option .lang-name { flex: 1; }
+    .lang-option .lang-native { font-size: 11px; color: #888; }
+
+    @media (max-width: 768px) {
+      .lang-switcher { top: 10px; right: 10px; }
+      .lang-btn { padding: 8px 13px; font-size: 13px; }
+    }
+        /* ── 收費標準 Pricing（統一計費源：core/mok_price.py）── */
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-top: 10px;
+        }
+        .pricing-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 36px 28px 32px;
+            text-align: center;
+            backdrop-filter: blur(20px);
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+        .pricing-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--card-accent), transparent);
+            opacity: 0;
+            transition: opacity var(--transition);
+        }
+        .pricing-card:hover::before { opacity: 1; }
+        .pricing-card:hover {
+            transform: translateY(-6px);
+            border-color: rgba(255,255,255,0.12);
+            box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+        }
+        .pricing--api { --card-accent: var(--accent-3); }
+        .pricing--agent { --card-accent: var(--gold); }
+        .pricing--dev { --card-accent: var(--accent-2); }
+        .pricing-icon { font-size: 40px; margin-bottom: 14px; }
+        .pricing-card h3 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #f0f0f2;
+            margin-bottom: 16px;
+            letter-spacing: 1px;
+        }
+        .pricing-fee {
+            font-size: 30px;
+            font-weight: 700;
+            color: var(--gold);
+            line-height: 1.2;
+        }
+        .pricing-fee small {
+            font-size: 14px;
+            font-weight: 400;
+            color: var(--text-dim);
+            display: block;
+            margin-top: 4px;
+        }
+        .pricing-rate {
+            font-size: 13px;
+            color: var(--text-dim);
+            margin: 12px 0 20px;
+            letter-spacing: 0.5px;
+            border-bottom: 1px dashed var(--border);
+            padding-bottom: 18px;
+        }
+        .pricing-features {
+            list-style: none;
+            text-align: left;
+            font-size: 14px;
+            color: var(--text);
+            line-height: 2;
+        }
+        .pricing-features li::before {
+            content: '✓ ';
+            color: var(--gold);
+        }
+        .pricing-features a {
+            color: var(--accent-1);
+            word-break: break-all;
+        }
+        @media (max-width: 768px) {
+            .pricing-grid { grid-template-columns: 1fr; max-width: 420px; margin-inline: auto; }
+        }
+  </style>
+
 
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
     
-  <link rel="stylesheet" href="https://64071181.github.io//mokJsapi/aki.css">
+  <link rel="stylesheet" href="https://64071181.github.io/mokJsapi/aki.css">
   <script src="https://code.jquery.com/jquery-3.7.0.js"></script>
-  <script src="https://64071181.github.io//mokJsapi/mokJsApi.js"></script>
+  <script src="https://64071181.github.io/mokJsapi/mokJsApi.js"></script>
   
   <meta name="google-site-verification" content="zKKu5phgon5Fp0BeiCOzKKveF1F_iRW9W9cbctL3Hl4" />
-  <script src="https://cdn.staticfile.net/translate.js/3.1.7/translate.js"></script>
 
+
+
+  <!-- ══ MOKAGI 統一計費（唯一價格源：core/mok_price.py）══ -->
+  <script>window.MOKAGI_PRICE = {{ MOKAGI_PRICE | tojson }};</script>
+  <script src="{{ asset_url('mok_price.js') }}"></script>
 </head>
 <body>
+    <!-- ===== 自建語言切換器 ===== -->
+<div class="lang-switcher">
+  <button class="lang-btn" onclick="toggleLangDropdown()" aria-label="切換語言">
+    <i class="fas fa-globe"></i> 語言 / Lang
+    <i class="fas fa-chevron-down" style="font-size:11px;"></i>
+  </button>
+  <div class="lang-dropdown" id="langDropdown">
+    <div class="lang-option" onclick="switchLanguage(&apos;zh-HK&apos;)"><span class="flag">🇭🇰</span><span class="lang-name">繁體中文</span><span class="lang-native">原頁面</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;en&apos;)"><span class="flag">🇬🇧</span><span class="lang-name">English</span><span class="lang-native">English</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;zh-CN&apos;)"><span class="flag">🇨🇳</span><span class="lang-name">简体中文</span><span class="lang-native">简体中文</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;ja&apos;)"><span class="flag">🇯🇵</span><span class="lang-name">日本語</span><span class="lang-native">日本語</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;ko&apos;)"><span class="flag">🇰🇷</span><span class="lang-name">한국어</span><span class="lang-native">한국어</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;th&apos;)"><span class="flag">🇹🇭</span><span class="lang-name">ภาษาไทย</span><span class="lang-native">ไทย</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;vi&apos;)"><span class="flag">🇻🇳</span><span class="lang-name">Tiếng Việt</span><span class="lang-native">Việt</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;id&apos;)"><span class="flag">🇮🇩</span><span class="lang-name">Bahasa Indonesia</span><span class="lang-native">Indonesia</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;fr&apos;)"><span class="flag">🇫🇷</span><span class="lang-name">Français</span><span class="lang-native">Français</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;es&apos;)"><span class="flag">🇪🇸</span><span class="lang-name">Español</span><span class="lang-native">Español</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;de&apos;)"><span class="flag">🇩🇪</span><span class="lang-name">Deutsch</span><span class="lang-native">Deutsch</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;pt&apos;)"><span class="flag">🇵🇹</span><span class="lang-name">Português</span><span class="lang-native">Português</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;ru&apos;)"><span class="flag">🇷🇺</span><span class="lang-name">Русский</span><span class="lang-native">Русский</span></div>
+    <div class="lang-option" onclick="switchLanguage(&apos;ar&apos;)"><span class="flag">🇸🇦</span><span class="lang-name">العربية</span><span class="lang-native">عربي</span></div>
+  </div>
+</div>
+
+
+
+
+
+
 <samp id="莫生查詢" style="display: none;">莫生我要查詢AI 應用落地</samp>
 
-
-
-<!-- 星空背景 -->
 <canvas id="bg-canvas"></canvas>
+<div class="bg-grid"></div>
+<div class="bg-orb bg-orb--1"></div>
+<div class="bg-orb bg-orb--2"></div>
 
+<div class="container">
 
-    <!-- 背景 -->
-    <div class="bg-grid"></div>
-    <div class="bg-orb bg-orb--1"></div>
-    <div class="bg-orb bg-orb--2"></div>
+    <header class="header">
+        <div class="header-tag">MOK GROUP · AI SOLUTIONS</div>
+        <h1>莫氏集團<br><span class="highlight">AI 應用落地顧問</span></h1>
+        <p class="header-sub">
+            我們會協助您找出業務最大虧損點／最痛問題，<br>
+            協助企業將人工智慧技術實際融入業務，<br>
+            <span style="color: var(--gold);">創新科技 + 商業生態網絡 = 解決問題</span>
+        </p>
+    </header>
 
-    <!-- 主內容 -->
-    <div class="container">
-
-        <!-- Header -->
-        <header class="header">
-            <div class="header-tag">MOK GROUP · AI SOLUTIONS</div>
-            <h1>
-                莫氏集團<br><span class="highlight">AI 應用落地</span>
-            </h1>
-            <p class="header-sub">
-                為不同行業注入人工智能，將尖端 AI 無縫融入商業工作場景，重塑企業營運效率。
-            </p>
-        </header>
-
-        <div class="divider"></div>
-
-        <!-- 三大場景 -->
-        <section class="scenarios">
-
-            <!-- 場景一：智慧倉儲 -->
-            <article class="card card--1">
-                <div class="card-icon">📦</div>
-                <h3>智慧倉儲管理</h3>
-                <p class="subtitle">Warehouse Intelligence</p>
-                <p class="desc">
-                    AI 自動解析庫存 Excel 表格，智能歸類貨品位置，秒級定位目標商品。結合自然語言查詢——
-                    「那批三月的訂單放哪？」系統即時回應確切貨架位置，並生成最優出貨路徑，大幅縮短揀貨時間。
-                </p>
-                <div class="tags">
-                    <span class="tag">Excel 智能解析</span>
-                    <span class="tag">自然語言查貨</span>
-                    <span class="tag">路徑優化</span>
-                    <span class="tag">即時庫存</span>
+    <!-- 工作流程 -->
+    <section class="section" id="workflow">
+        <h2 class="section-title">工作流程</h2>
+        <p class="section-sub">我們會協助您找出業務最大虧損點／最痛問題<br>協助企業將人工智慧技術實際融入業務<br><span style="color: var(--gold);">創新科技 + 商業生態網絡 = 解決問題</span></p>
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="wf-content">
+                    <h4>與商家探討業務痛點</h4>
+                    <p>深入了解您的業務運作，找出最大虧損點與瓶頸</p>
                 </div>
-            </article>
-
-            <!-- 場景二：B2B 智能拓展 -->
-            <article class="card card--2">
-                <div class="card-icon">📧</div>
-                <h3>B2B 智能拓展</h3>
-                <p class="subtitle">Automated Outreach</p>
-                <p class="desc">
-                    AI 驅動的 Cold Email 自動化投放系統——精準研究目標客戶背景，生成個人化郵件，追蹤開啟與回覆。
-                    搭配 24/7 AI 客服助手，即時處理客戶查詢、產品說明與初步洽談，讓銷售團隊專注於成交。
-                </p>
-                <div class="tags">
-                    <span class="tag">Cold Email 自動化</span>
-                    <span class="tag">AI 客服回覆</span>
-                    <span class="tag">個人化生成</span>
-                    <span class="tag">24/7 運作</span>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="wf-content">
+                    <h4>實地走訪工作場地</h4>
+                    <p>觀察業務流程、與商家、店員、顧客、各部門溝通，實際了解工作流</p>
                 </div>
-            </article>
-
-            <!-- 場景三：智能會議管理 -->
-            <article class="card card--3">
-                <div class="card-icon">🎯</div>
-                <h3>智能會議管理</h3>
-                <p class="subtitle">Meeting Intelligence</p>
-                <p class="desc">
-                    AI 自動掃描往來郵件與通訊對話，識別會議意向、比對多方行事曆，一鍵完成排程。
-                    會後即時生成結構化會議記錄、待辦事項追蹤清單，並自動分派責任人，確保每項決策落地執行。
-                </p>
-                <div class="tags">
-                    <span class="tag">郵件對話分析</span>
-                    <span class="tag">自動排程</span>
-                    <span class="tag">會議記錄生成</span>
-                    <span class="tag">待辦追蹤</span>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="wf-content">
+                    <h4>找出根因、梳理策略</h4>
+                    <p>分析數據與流程，定位核心問題，制定 AI 整合策略</p>
                 </div>
-            </article>
-
-        </section>
-
-        <!-- CTA -->
-        <div class="cta">
-            <p class="cta-text">讓 AI 成為您企業的核心競爭力</p>
-            <a class="cta-btn" href="https://wa.me/85264071181/?text=莫生我要查詢AI 應用落地">預約諮詢 →</a>
+            </div>
+            <div class="step">
+                <div class="step-num">4</div>
+                <div class="wf-content">
+                    <h4>業務整合 AI 應用</h4>
+                    <p>按成本優化工作流程，透過 AI 實際解決問題，實現落地</p>
+                </div>
+            </div>
         </div>
+    </section>
 
-        <!-- Footer -->
-        <footer class="footer">
-            
-            <div id="ContactAKI" class="ContactAKI"><!-- JS _顯示聯莫 --></div>
-            <p class="mokJsApi_copyright">版權</p>
-            <span>莫氏集團</span> MOK GROUP · AI 應用落地解決方案
-        </footer>
+    <div class="divider"></div>
 
+    <!-- 引入 AI 可幫妳業務的一些例子 -->
+    <section class="section" id="ai-examples">
+        <h2 class="section-title">引入 AI 可幫妳業務的一些例子</h2>
+        <div class="ai-grid">
+            <div class="ai-item">
+                <div class="ai-icon">📊</div>
+                <h4>供需預測與商業分析</h4>
+                <p>透過 AI 分析歷史數據與市場趨勢，精準預測供需變化，優化庫存與營運決策。</p>
+            </div>
+            <div class="ai-item">
+                <div class="ai-icon">💬</div>
+                <h4>客戶體驗優化</h4>
+                <p>例如：AI 聊天機器人、客服自動處理，24/7 回應客戶查詢，提升滿意度與轉化率。</p>
+            </div>
+            <div class="ai-item">
+                <div class="ai-icon">⚙️</div>
+                <h4>自動化工作流程規劃</h4>
+                <p>例如：自動化辦公流程、生產流程⋯等，將重複工序交給 AI，釋放人力專注高價值工作。</p>
+            </div>
+            <div class="ai-item">
+                <div class="ai-icon">🧑‍💼</div>
+                <h4>智能人力資源管理</h4>
+                <p>智能排班、履歷篩選、員工效能分析，優化人力配置與管理效率。</p>
+            </div>
+            <div class="ai-item">
+                <div class="ai-icon">🛒</div>
+                <h4>智能採購</h4>
+                <p>自動比價、供應商評估、訂單跟進，降低採購成本與流程時間。</p>
+            </div>
+            <div class="ai-item">
+                <div class="ai-icon">📦</div>
+                <h4>智能庫存管理</h4>
+                <p>AI 自動解析庫存數據、預測補貨時機，減少囤貨積壓與缺貨損失。</p>
+            </div>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- 三大解決方案 -->
+    <section class="scenarios">
+        <article class="card card--1">
+            <div class="card-icon">📦</div>
+            <h3>智慧倉儲</h3>
+            <p class="subtitle">Smart Warehouse</p>
+            <p class="desc">AI 自動解析庫存 Excel 表格，智能歸類貨品位置，秒級定位目標商品。結合自然語言查詢——「那批三月的訂單放哪？」系統即時回應確切貨架位置，並生成最優出貨路徑，大幅縮短揀貨時間。</p>
+            <div class="tags">
+                <span class="tag">Excel 智能解析</span>
+                <span class="tag">自然語言查貨</span>
+                <span class="tag">路徑優化</span>
+                <span class="tag">即時庫存</span>
+            </div>
+        </article>
+        <article class="card card--2">
+            <div class="card-icon">📧</div>
+            <h3>B2B 智能拓展</h3>
+            <p class="subtitle">Automated Outreach</p>
+            <p class="desc">AI 驅動的 Cold Email 自動化投放系統——精準研究目標客戶背景，生成個人化郵件，追蹤開啟與回覆。自動分類潛在客戶優先級，讓銷售團隊專注於高轉化率商機。</p>
+            <div class="tags">
+                <span class="tag">客戶研究</span>
+                <span class="tag">個人化郵件</span>
+                <span class="tag">自動跟進</span>
+                <span class="tag">CRM 整合</span>
+            </div>
+        </article>
+        <article class="card card--3">
+            <div class="card-icon">🎯</div>
+            <h3>智能會議管理</h3>
+            <p class="subtitle">Meeting Intelligence</p>
+            <p class="desc">AI 自動掃描往來郵件與通訊對話，識別會議意向、比對多方行事曆，一鍵完成排程。會後即時生成結構化會議記錄、待辦事項追蹤清單，並自動分派責任人，確保每項決策落地執行。</p>
+            <div class="tags">
+                <span class="tag">郵件對話分析</span>
+                <span class="tag">自動排程</span>
+                <span class="tag">會議記錄生成</span>
+                <span class="tag">待辦追蹤</span>
+            </div>
+        </article>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- 最近新聞 -->
+    <section class="section" id="news">
+        <h2 class="section-title">最近新聞</h2>
+        <p class="section-sub">AI 應用落地 · 世界各地最新動態（由 Mok_AI_Advisor_news.sh 自動更新）</p>
+        <div class="news-list" id="news-list">
+            <!-- MOK_NEWS_START -->
+<div class="news-item">
+    <div class="news-title">🇹🇼 <a href="https://www.meta-intelligence.tech/insight-genai-trends-2026" target="_blank" rel="noopener">台灣 2026 生成式 AI 六大趨勢：72% 企業已導入，但僅 15% 實現規模化</a></div>
+    <div class="news-desc">超智諮詢引 McKinsey 數據指出，72% 企業已在核心業務流程導入生成式 AI，但能實現規模化價值者僅 15%。2026 年六大趨勢包括：多模態原生模型、推理模型崛起、AI Agent 標準化、小型語言模型（SLM）、合成資料與 AI 治理法規。</div>
+    <div class="news-meta"><span class="news-flag">📍 台灣</span> · 出處：meta-intelligence.tech · 2026</div>
+</div>
+
+<div class="news-item">
+    <div class="news-title">🇯🇵 <a href="https://www.ai-souken.com/article/ai-adoption-japan-status" target="_blank" rel="noopener">日本生成 AI 導入率達 57.7%，3 年成長約 1.7 倍，但仍落後中美約 35–40 百分點</a></div>
+    <div class="news-desc">NRI 2025 年調查顯示日本大企業生成 AI 導入率由 2023 年 33.8% 升至 57.7%，含「檢討中」達 73%。總務省數據顯示日本企業整體利用率僅 55.2%，遠低於中國 95.8% 與美國 90.6%。最大障礙是 31.8% 企業「方針未策定」。</div>
+    <div class="news-meta"><span class="news-flag">📍 日本</span> · 出處：AI総合研究所（ai-souken.com）引 NRI / 總務省 · 2026-06</div>
+</div>
+
+<div class="news-item">
+    <div class="news-title">🇸🇬 <a href="https://traineticsacademy.com.sg/ai-strategy-for-smes-in-singapore-2026-trend-analysis-and-implementation-guide" target="_blank" rel="noopener">新加坡政府目標 3 年支援 10,000 家企業導入 AI，大企業採用率 62.5% 但中小企僅 14.5%</a></div>
+    <div class="news-desc">新加坡國家 AI 策略 2.0 推動下，政府透過 2026 企業創新計劃提供 400% 稅務扣減及 SkillsFuture 資助培訓。零售業 AI 庫存預測準確率已達 98%。關鍵趨勢包括行業專屬 AI Agent、超本地化模型與低程式碼普及化。</div>
+    <div class="news-meta"><span class="news-flag">📍 新加坡</span> · 出處：traineticsacademy.com.sg · 2026</div>
+</div>
+
+<div class="news-item">
+    <div class="news-title">🇰🇷 <a href="https://www.dongascience.com/en/news/76937" target="_blank" rel="noopener">韓國投入 625 億韓元「AI 整合券」計劃，支援中小企業 AI 落地</a></div>
+    <div class="news-desc">韓國科學技術情報通信部（MSIT）2026 年推出「AI 整合券」計劃，總規模 625 億韓元。涵蓋 AI Voucher（252 億）、Data Voucher（72 億）、Cloud Voucher（41 億）及 AX 一站式 Voucher（260 億），自 2019 年起持續協助中小企業進行 AI 方案開發與部署。</div>
+    <div class="news-meta"><span class="news-flag">📍 韓國</span> · 出處：DongA Science（dongascience.com） · 2026</div>
+</div>
+
+<div class="news-item">
+    <div class="news-title">🇪🇺 <a href="https://www.hklaw.com/en/insights/publications/2026/04/us-companies-face-eu-ai-acts-possible-august-2026-compliance-deadline" target="_blank" rel="noopener">EU AI Act 高風險系統合規期限 2026 年 8 月生效，全球企業面臨關鍵抉擇</a></div>
+    <div class="news-desc">歐盟 AI 法案高風險 AI 系統合規要求將於 2026 年 8 月 2 日生效，涵蓋生物辨識、關鍵基礎設施、教育、就業、信用評分及保險等領域。非歐盟企業只要其 AI 輸出影響歐盟居民即受管轄，違規罰款最高 1,500 萬歐元或全球年營收 3%。</div>
+    <div class="news-meta"><span class="news-flag">📍 歐洲</span> · 出處：Holland & Knight（hklaw.com） · 2026-04</div>
+</div>
+            <!-- MOK_NEWS_END -->
+        </div>
+    </section>
+
+    <!-- Q&A：商家對整合 AI 的常見迷思 -->
+    <section class="section" id="qa">
+        <h2 class="section-title">Q&A · 商家常見迷思</h2>
+        <p class="section-sub">關於把 AI 整合到您自己業務時的迷思、痛點、難處與好處</p>
+        <div class="qa-list">
+            <div class="qa-item">
+                <div class="qa-q">Q1：AI 是不是只有大公司才用得起？<span class="qa-toggle">+</span></div>
+                <div class="qa-a">不是。近年 AI 成本大幅下降，很多方案按用量計費、月費門檻低，中小企也能負擔。我們會按您實際預算與痛點，先從成本最低、最快見效的切入點開始，逐步擴展。</div>
+            </div>
+            <div class="qa-item">
+                <div class="qa-q">Q2：我的員工不懂科技，導入 AI 會很難上手？<span class="qa-toggle">+</span></div>
+                <div class="qa-a">這是最大的迷思之一。好的 AI 落地不需要員工成為工程師——介面要像日常工具一樣簡單。我們的流程會實地走訪、觀察員工實際工作，把 AI 融入他們「本來就在做的事」，並提供培訓與輔導，讓團隊自然上手。</div>
+            </div>
+            <div class="qa-item">
+                <div class="qa-q">Q3：導入 AI 會不會取代我的員工？<span class="qa-toggle">+</span></div>
+                <div class="qa-a">AI 的目標是增強而非取代。它處理重複性、高強度計算的工作，讓員工能專注於需要創意、判斷與人際互動的任務。我們協助企業將 AI 定位為「超級助手」，而非「替代品」。</div>
+            </div>
+            <div class="qa-item">
+                <div class="qa-q">Q4：我的業務流程比較傳統／沒數據，能導入 AI 嗎？<span class="qa-toggle">+</span></div>
+                <div class="qa-a">能。沒有現成數據正是我們第一步「實地走訪、了解工作流」要解決的事。很多 AI 應用（如自動化流程、文書處理、聊天機器人）並不需要大量歷史數據即可上線，數據可以在使用過程中逐步累積，形成您自己的資產。</div>
+            </div>
+            <div class="qa-item">
+                <div class="qa-q">Q5：導入 AI 要花多少錢？多久能看到效果？<span class="qa-toggle">+</span></div>
+                <div class="qa-a">視乎痛點與範圍。我們的建議是先做「快速見效」的小範圍試點（通常 2–3 個月內看到成效），用實際結果衡量 ROI 再擴大。您可以先諮詢，我們會按成本優化方案，避免一次投入過大。</div>
+            </div>
+            <div class="qa-item">
+                <div class="qa-q">Q6：數據交給 AI 會不會有安全／私隱問題？<span class="qa-toggle">+</span></div>
+                <div class="qa-a">我們會按行業合規要求設計方案，敏感資料可採「本地儲存 + 雲端運算」的混合模式，原始資料不離開您的控制範圍。系統設有權限管理與稽核機制，保障您與客戶的資料安全。</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 底部 CTA -->
+    <div class="cta">
+        <p class="cta-text">讓 AI 成為您企業的核心競爭力</p>
+        <a class="cta-btn" href="https://wa.me/85264071181/?text=莫生我要查詢AI 應用落地">預約諮詢 →</a>
     </div>
 
+    <!-- ══ 收費標準（統一計費源：core/mok_price.py）══ -->
+    <section class="section" id="pricing">
+        <h2 class="section-title">收費標準 · Pricing</h2>
+        <p class="section-sub">所有 AI 功能統一收費：{{ MOKAGI_PRICE.display.per_million }}<br>由 mok_price.py 統一管理，全系統同步</p>
+        <div class="pricing-grid">
+            <div class="pricing-card pricing--api">
+                <div class="pricing-icon">🔌</div>
+                <h3>純 API</h3>
+                <div class="pricing-fee">無安裝費</div>
+                <div class="pricing-rate">使用費 {{ MOKAGI_PRICE.display.per_million }}</div>
+                <ul class="pricing-features">
+                    <li>網頁 AI 客服</li>
+                    <li>事項提醒</li>
+                    <li>一般生成文字（程式碼、對話）</li>
+                </ul>
+            </div>
+            <div class="pricing-card pricing--agent">
+                <div class="pricing-icon">🤖</div>
+                <h3>AI Agent</h3>
+                <div class="pricing-fee">{{ MOKAGI_PRICE.display.setup_fee }}<small>一次性安裝費</small></div>
+                <div class="pricing-rate">+ 使用費 {{ MOKAGI_PRICE.display.per_million }}</div>
+                <ul class="pricing-features">
+                    <li>人工智能助手，可直接操作主機</li>
+                    <li>自動生成文件</li>
+                    <li>自動化各種工作</li>
+                </ul>
+            </div>
+            <div class="pricing-card pricing--dev">
+                <div class="pricing-icon">💻</div>
+                <h3>開發者</h3>
+                <div class="pricing-fee">完全免費</div>
+                <div class="pricing-rate">MOKAGI 系統完全開源</div>
+                <ul class="pricing-features">
+                    <li>開發者可直接免費使用</li>
+                    <li>完整原始碼公開</li>
+                    <li><a href="https://github.com/MOK2026/MOKAGI" target="_blank" rel="noopener">github.com/MOK2026/MOKAGI</a></li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div id="ContactAKI" class="ContactAKI"><!-- JS _顯示聯莫 --></div>
+        <p class="mokJsApi_copyright">版權</p>
+        <span>莫氏集團</span> MOK GROUP · AI 應用落地顧問
+    </footer>
+
+</div>
+
+<script>
 
 
 
-    <script>
       // 85264071181 // qqq 冇 a.js 錯誤版
       // 顯示聯莫
       const 聯莫 = ['moksurky@gmail.com','https://wa.me/85264071181/','https://i.meee.com.tw/atcX6QM.png','https://www.instagram.com/moksurky/','https://line.me/ti/p/UlSPd7p9zh/','https://www.facebook.com/aki.mok.10/','http://t.me/mokaki/'
       ];
       function Start() {
-        網頁分流();
-        // 翻譯 
-        //translate.language.setLocal('chinese_traditional'); //設置本地語種（當前網頁的語種）。如果不設置，默認自動識別當前網頁顯示文字的語種。 可填寫如 'english'、'chinese_simplified' 等，具體參見文檔下方關於此的說明。
-        translate.service.use('client.edge'); //設置機器翻譯服務通道，直接客戶端本身，不依賴服務端 。相關說明參考 http://translate.zvo.cn/43086.html
-        translate.execute();//進行翻譯 
+
         _顯示聯莫(聯莫);
       }
       Start()
 
-    </script>
-
-    <script>
       window.MOKAGI_AGENT = '客服';
       window.contact = 'https://wa.me/85264071181/?text=莫生我要查詢AI 應用落地/' // ai無法回答的緊急聯絡
 
@@ -430,8 +1001,98 @@
       //window.MOKAGI_AGENT_ICON = '🤖';  // 任意 Emoji 或純文本
       // window.MOKAGI_THEME = '#4A90D9'
       
-    </script>
-    <script src="https://64071181.xyz/static/api.js"></script>
 
+// ── Q&A 手風琴（商家常見迷思）──
+(function () {
+  var items = document.querySelectorAll('.qa-item');
+  items.forEach(function (item) {
+    var q = item.querySelector('.qa-q');
+    if (!q) return;
+    q.addEventListener('click', function () {
+      var isOpen = item.classList.contains('open');
+      items.forEach(function (o) { o.classList.remove('open'); });
+      if (!isOpen) item.classList.add('open');
+    });
+  });
+})();
+
+
+
+// ===== 語言切換功能 =====
+function toggleLangDropdown() {
+  document.getElementById("langDropdown").classList.toggle("open");
+}
+
+// 點擊其他地方關閉下拉
+document.addEventListener("click", function(e) {
+  var dropdown = document.getElementById("langDropdown");
+  var btn = document.querySelector(".lang-btn");
+  if (!dropdown || !btn) return;
+  if (!dropdown.contains(e.target) && !btn.contains(e.target)) {
+    dropdown.classList.remove("open");
+  }
+});
+
+function switchLanguage(lang) {
+  document.getElementById("langDropdown").classList.remove("open");
+  localStorage.setItem("mok_lang", lang);
+  
+  if (lang === "zh-HK") {
+    document.cookie = "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    location.reload();
+    return;
+  }
+  
+  document.cookie = "googtrans=/zh-HK/" + lang + "; path=/";
+  
+  var select = document.querySelector("#google_translate_element select");
+  if (select) {
+    select.value = lang;
+    select.dispatchEvent(new Event("change"));
+    return;
+  }
+  
+  if (!document.getElementById("google-translate-script")) {
+    var script = document.createElement("script");
+    script.id = "google-translate-script";
+    script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
+    document.head.appendChild(script);
+  } else {
+    location.reload();
+  }
+}
+
+function googleTranslateElementInit() {
+  new google.translate.TranslateElement({
+    pageLanguage: "zh-HK",
+    includedLanguages: "zh-CN,en,ja,ko",
+    layout: google.translate.TranslateElement.InlineLayout.HORIZONTAL,
+    autoDisplay: false
+  }, "google_translate_element");
+}
+
+// 頁面載入時恢復語言偏好
+(function() {
+  var savedLang = localStorage.getItem("mok_lang");
+  if (savedLang && savedLang !== "zh-HK") {
+    document.cookie = "googtrans=/zh-HK/" + savedLang + "; path=/";
+  }
+})();
+
+</script>
+<div id="google_translate_element" style="display:none;"></div>
+
+<!-- 🔮 MOKAGI AI 客服氣泡 -->
+<script>
+    window.MOKAGI_AGENT      = "客服";
+    window.MOKAGI_SERVER     = "https://64071181.xyz";
+    window.quickLinks = [
+        { text: "📋 服務項目", query: "你們提供哪些AI顧問服務？" },
+        { text: "💰 詢價",      query: "我想了解收費方案" },
+        { text: "📅 預約諮詢", query: "我想預約免費諮詢" },
+        { text: "📞 聯絡我們", query: "如何聯絡你們？" }
+    ];
+</script>
+<script src="https://64071181.xyz/static/api.js"></script><script src="https://64071181.xyz/static/scroll-reveal.js"></script><script>document.addEventListener("DOMContentLoaded", function () { if (window.ScrollReveal) ScrollReveal.revealAll("section, .section, .hero, .card, .step, .ai-item, .news-item, .stat-card, .footer, h1, h2, h3, .section-title, .section-sub, .n-title, .news-title", { effect: "fade-up" }); });</script>
 </body>
 </html>

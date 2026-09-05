@@ -7,6 +7,7 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; font-family: 'Segoe UI', sans-serif; }
+        body { display: flex; flex-direction: column; }
 
         #statusBar {
             display: flex; align-items: center; justify-content: space-between;
@@ -30,9 +31,13 @@
         #statusBar button.active { background: #4ec9b0; color: #000; border-color: #4ec9b0; }
 
         #screenWrapper {
-            flex: 1; display: flex; align-items: center; justify-content: center;
-            background: #0a0a1a; position: relative; overflow: hidden;
+            flex: 1; min-height: 0; min-width: 0;
+            display: flex;
+            background: #0a0a1a; position: relative; overflow: auto;
         }
+        #screenWrapper > * { margin: auto; }
+        #screenWrapper.panMode { cursor: grab; }
+        #screenWrapper.panMode.panning, #screenWrapper.panning { cursor: grabbing; user-select: none; }
 
         #connectOverlay {
             position: absolute; inset: 0;
@@ -48,6 +53,47 @@
         }
         @keyframes spin { 100% { transform: rotate(360deg); } }
         #connectOverlay p { color: #888; font-size: 12px; }
+
+        /* ===== 旋轉（直版顯示） ===== */
+        #screenWrapper.rotated .noVNC_screen,
+        #screenWrapper.rotated canvas {
+            transform: rotate(90deg) !important;
+            transform-origin: center center !important;
+        }
+
+        /* ===== 剪貼簿面板 ===== */
+        #clipPanel {
+            position: absolute; right: 8px; bottom: 48px; z-index: 30;
+            width: min(320px, calc(100% - 16px));
+            background: #16213e; border: 1px solid #0f3460; border-radius: 10px;
+            padding: 10px; color: #e0e0e0; font-size: 12px;
+            display: none; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            box-sizing: border-box;
+        }
+        #clipPanel.show { display: block; }
+        #clipPanel h4 { margin: 0 0 8px; font-size: 13px; color: #4ec9b0; }
+        #clipPanel textarea {
+            width: 100%; height: 70px; resize: vertical;
+            background: #0a0a1a; color: #e0e0e0; border: 1px solid #0f3460;
+            border-radius: 6px; padding: 6px; font-size: 12px; box-sizing: border-box;
+            font-family: monospace;
+        }
+        #clipPanel .row { display: flex; gap: 6px; margin-top: 8px; }
+        #clipPanel .row button {
+            flex: 1; padding: 6px 4px; font-size: 11px; cursor: pointer;
+            background: #0f3460; color: #e0e0e0; border: 1px solid #0f3460;
+            border-radius: 6px;
+        }
+        #clipPanel .row button:hover { background: #4ec9b0; color: #000; }
+        #clipPanel .hint { margin-top: 6px; font-size: 10px; color: #888; }
+
+        /* ===== 手機直版優化 ===== */
+        @media (max-width: 600px) {
+            #statusBar { flex-wrap: wrap; height: auto; padding: 6px 8px; gap: 4px; }
+            #statusBar .btns { display: flex; flex-wrap: wrap; gap: 4px; }
+            #statusBar button { padding: 4px 6px; font-size: 11px; }
+            #statusText { font-size: 11px; }
+        }
         #connectOverlay .error-msg { color: #e74c3c; margin-top: 8px; font-size: 11px; max-width: 80%; text-align: center; }
     </style>
 </head>
@@ -58,10 +104,13 @@
         <span id="statusText">未連接</span>
         <div class="btns">
             <button id="btnFit" class="active" title="適應視窗">🔲 適應</button>
+            <button id="btnPan" title="拖曳平移：畫面超出時按住拖動捲動">🖐️ 拖曳</button>
             <button id="btnFull" title="原始大小">📐 1:1</button>
             <button id="btnViewOnly" title="切換唯讀/控制">🖱️ 控制</button>
             <button id="btnReconnect" title="重新連線">🔄 重連</button>
+            <button id="btnRotate" title="旋轉 90°（直版/橫版切換）">↻ 直版</button>
             <button id="btnClipboard" title="貼上剪貼簿">📋 貼上</button>
+            <button id="btnClipPanel" title="剪貼簿面板">📋 剪貼簿</button>
         </div>
     </div>
 
@@ -71,6 +120,16 @@
             <h2>正在連接主機桌面...</h2>
             <p id="connectDetail"></p>
             <p class="error-msg" id="errorMsg"></p>
+        </div>
+
+        <div id="clipPanel">
+            <h4>📋 剪貼簿</h4>
+            <textarea id="clipText" placeholder="桌面剪貼簿內容（可編輯後貼回桌面）"></textarea>
+            <div class="row">
+                <button id="btnClipCopy">⬇️ 複製到手機</button>
+                <button id="btnClipPaste">⬆️ 貼上到桌面</button>
+            </div>
+            <div class="hint" id="clipHint">桌面剪貼簿變更會自動同步到這裡；編輯後按「貼上到桌面」寫入</div>
         </div>
     </div>
 
@@ -88,12 +147,21 @@
         const btnFull = document.getElementById('btnFull');
         const btnViewOnly = document.getElementById('btnViewOnly');
         const btnReconnect = document.getElementById('btnReconnect');
+        const btnPan = document.getElementById('btnPan');
         const btnClipboard = document.getElementById('btnClipboard');
         const screenWrapper = document.getElementById('screenWrapper');
+        const btnRotate = document.getElementById('btnRotate');
+        const btnClipPanel = document.getElementById('btnClipPanel');
+        const clipPanel = document.getElementById('clipPanel');
+        const clipText = document.getElementById('clipText');
+        const clipHint = document.getElementById('clipHint');
 
         let rfb = null;
         let viewOnly = false;
         let fitMode = true;
+        let autoReconnectTimer = null;
+        let reconnectAttempts = 0;
+        let rotated = false;
 
         function getWSURL() {
             const params = new URLSearchParams(window.location.search);
@@ -107,7 +175,20 @@
             statusText.textContent = text;
         }
 
+        function scheduleReconnect() {
+            if (autoReconnectTimer) return;
+            reconnectAttempts++;
+            const delay = Math.min(3000 * reconnectAttempts, 30000);
+            setStatus("connecting", "自動重連中...");
+            connectDetail.textContent = "將在 " + (delay * 0.001) + " 秒後自動重連（第 " + reconnectAttempts + " 次）";
+            autoReconnectTimer = setTimeout(() => {
+                autoReconnectTimer = null;
+                connect();
+            }, delay);
+        }
+
         function connect() {
+            if (autoReconnectTimer) { clearTimeout(autoReconnectTimer); autoReconnectTimer = null; }
             if (rfb) {
                 try { rfb.disconnect(); } catch(e) {}
                 rfb = null;
@@ -129,7 +210,9 @@
                 rfb.addEventListener('connect', () => {
                     setStatus('connected', '已連接 ✅');
                     overlay.classList.add('hidden');
+                    reconnectAttempts = 0;
                     applyFitMode();
+                    ensureOrientation();
                 });
 
                 rfb.addEventListener('disconnect', (e) => {
@@ -138,6 +221,7 @@
                     overlay.classList.remove('hidden');
                     connectDetail.textContent = reason;
                     if (!e.detail.clean) {
+                        scheduleReconnect();
                         errorMsg.textContent = '💡 提示：確認主機端 VNC 服務是否已啟動（bash ~/.mok/setup_desktop.sh）';
                     }
                 });
@@ -149,6 +233,9 @@
                 rfb.addEventListener('clipboard', (e) => {
                     if (e.detail.text) {
                         navigator.clipboard.writeText(e.detail.text).catch(()=>{});
+                        clipText.value = e.detail.text;
+                        clipHint.textContent = '📥 已同步桌面剪貼簿內容';
+                        setTimeout(() => { clipHint.textContent = '桌面剪貼簿變更會自動同步到這裡；編輯後按「貼上到桌面」寫入'; }, 3000);
                     }
                 });
 
@@ -172,7 +259,7 @@
                 btnFull.classList.remove('active');
             } else {
                 rfb.scaleViewport = false;
-                rfb.resizeSession = true;
+                rfb.resizeSession = false;
                 btnFit.classList.remove('active');
                 btnFull.classList.add('active');
             }
@@ -189,7 +276,59 @@
             errorMsg.textContent = '';
         }
 
+        // ===== 拖曳平移（畫面超出可視範圍時使用） =====
+        let panMode = false;
+        let panning = false;
+        let panStartX = 0, panStartY = 0, panStartL = 0, panStartT = 0;
+
+        function getScreenEl() {
+            return screenWrapper.querySelector('.noVNC_screen') || screenWrapper;
+        }
+        function hasOverflow() {
+            const el = getScreenEl();
+            return el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
+        }
+
+        screenWrapper.addEventListener('pointerdown', (e) => {
+            // 只處理滑鼠：觸控交由瀏覽器原生捲動（單指滑動平移、點擊仍可操作桌面）
+            if (e.pointerType !== 'mouse') return;
+            if (!hasOverflow()) return;                       // 畫面完整可見時不攔截，維持正常操作
+            if (!(panMode || e.button === 1)) return;         // 拖曳模式 或 中鍵拖曳
+            panning = true;
+            const el = getScreenEl();
+            panStartX = e.clientX; panStartY = e.clientY;
+            panStartL = el.scrollLeft; panStartT = el.scrollTop;
+            screenWrapper.classList.add('panning');
+            try { screenWrapper.setPointerCapture(e.pointerId); } catch (err) {}
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }, true);
+
+        screenWrapper.addEventListener('pointermove', (e) => {
+            if (!panning) return;
+            const el = getScreenEl();
+            el.scrollLeft = panStartL - (e.clientX - panStartX);
+            el.scrollTop  = panStartT - (e.clientY - panStartY);
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }, true);
+
+        const endPan = (e) => {
+            if (!panning) return;
+            panning = false;
+            screenWrapper.classList.remove('panning');
+            if (e) { e.preventDefault(); e.stopImmediatePropagation(); }
+        };
+        screenWrapper.addEventListener('pointerup', endPan, true);
+        screenWrapper.addEventListener('pointercancel', endPan, true);
+
         // ===== 按鈕事件 =====
+        btnPan.addEventListener('click', () => {
+            panMode = !panMode;
+            btnPan.classList.toggle('active', panMode);
+            screenWrapper.classList.toggle('panMode', panMode);
+            btnPan.title = panMode ? '拖曳模式：按住左鍵拖動捲動畫面（再按一次關閉）' : '拖曳平移：畫面超出時按住拖動捲動';
+        });
         btnFit.addEventListener('click', () => { fitMode = true; applyFitMode(); });
         btnFull.addEventListener('click', () => { fitMode = false; applyFitMode(); });
         btnViewOnly.addEventListener('click', () => {
@@ -207,6 +346,116 @@
             } catch(e) {
                 errorMsg.textContent = '⚠️ 無法讀取剪貼簿（需要 HTTPS 且授權）';
                 setTimeout(() => { errorMsg.textContent = ''; }, 3000);
+            }
+        });
+
+
+        // ===== 自動對齊方向 =====
+        function ensureOrientation() {
+            if (!rfb) return;
+            let w = 0, h = 0;
+            try {
+                const d = rfb.get_display();
+                w = d.get_width();
+                h = d.get_height();
+            } catch (e) { return; }
+            const pv = window.innerHeight > window.innerWidth;
+            if ((pv && w > h) || (!pv && w < h)) {
+                fetch("/novnc-rotate?mode=" + (pv ? "portrait" : "landscape"), { cache: "no-store" }).then(r => r.json()).then(d => {
+                    if (d.ok) {
+                        btnRotate.textContent = d.mode === "portrait" ? "📱 直版" : "↻ 橫版";
+                        if (rfb) { rfb.disconnect(); rfb = null; }
+                        setTimeout(() => connect(), 600);
+                    }
+                }).catch(() => {});
+            }
+        }
+        // ===== 直版旋轉 =====
+        btnRotate.addEventListener('click', () => {
+            rotated = !rotated;
+            btnRotate.classList.toggle('active', rotated);
+            // 優先嘗試伺服器端旋轉（xrandr）：座標完全正確
+            fetch('/novnc-rotate', { cache: 'no-store' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        rotated = false;
+                        screenWrapper.classList.remove('rotated');
+                        btnRotate.textContent = data.mode === 'portrait' ? '📱 直版' : '↻ 橫版';
+                        // 重新連線以取得新解析度畫面
+                        if (rfb) { rfb.disconnect(); rfb = null; }
+                        setTimeout(() => connect(), 600);
+                        return;
+                    }
+                    applyCssRotate();
+                })
+                .catch(() => applyCssRotate());
+        });
+
+        function applyCssRotate() {
+            rotated = false;
+            screenWrapper.classList.remove('rotated');
+            btnRotate.textContent = '↻ 橫版';
+            errorMsg.textContent = '⚠️ 伺服器端缺少 xrandr，無法切換直版解析度（畫面保持直立）';
+            setTimeout(() => { errorMsg.textContent = ''; }, 4000);
+            if (rfb) {
+                const sv = rfb.scaleViewport;
+                rfb.scaleViewport = false;
+                rfb.scaleViewport = sv;
+            }
+        }
+
+        // 旋轉模式下修正觸控/滑鼠座標（順時針 90°）
+        let synthPointer = false;
+        ['pointerdown','pointermove','pointerup','pointercancel'].forEach(evt => {
+            screenWrapper.addEventListener(evt, (e) => {
+                if (!rotated || synthPointer) return;
+                const rect = screenWrapper.getBoundingClientRect();
+                const W = rect.width, H = rect.height;
+                const relX = e.clientX - rect.left;
+                const relY = e.clientY - rect.top;
+                const px = relY;
+                const py = W - relX;
+                synthPointer = true;
+                e.stopImmediatePropagation();
+                const proxy = new MouseEvent(e.type, {
+                    clientX: rect.left + px,
+                    clientY: rect.top + py,
+                    button: e.button, buttons: e.buttons,
+                    bubbles: true, cancelable: true
+                });
+                screenWrapper.dispatchEvent(proxy);
+                synthPointer = false;
+            }, true);
+        });
+
+        // ===== 剪貼簿面板 =====
+        btnClipPanel.addEventListener('click', () => {
+            clipPanel.classList.toggle('show');
+        });
+        document.addEventListener('click', (e) => {
+            if (clipPanel.classList.contains('show') &&
+                !clipPanel.contains(e.target) &&
+                e.target !== btnClipPanel) {
+                clipPanel.classList.remove('show');
+            }
+        });
+        btnClipCopy.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(clipText.value);
+                clipHint.textContent = '✅ 已複製到手機剪貼簿';
+            } catch(e) {
+                clipHint.textContent = '⚠️ 複製失敗（需要 HTTPS）';
+            }
+            setTimeout(() => { clipHint.textContent = '桌面剪貼簿變更會自動同步到這裡；編輯後按「貼上到桌面」寫入'; }, 2500);
+        });
+        btnClipPaste.addEventListener('click', () => {
+            if (!rfb) { clipHint.textContent = '⚠️ 尚未連線'; return; }
+            const text = clipText.value;
+            if (text) {
+                rfb.clipboardPasteFrom(text);
+                clipHint.textContent = '✅ 已貼上到桌面剪貼簿';
+                setTimeout(() => { clipHint.textContent = '桌面剪貼簿變更會自動同步到這裡；編輯後按「貼上到桌面」寫入'; }, 2500);
             }
         });
 

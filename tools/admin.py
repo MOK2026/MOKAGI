@@ -463,6 +463,94 @@ import tempfile
 import mokagi
 mokagi_name = mokagi.MOKAGI_home
 
+# ------------------------------------------------------------------------------------ #
+# 已知 cron 任務的人類可讀說明（供 /admin 查詢與 cron 確認時附註）
+# 內容與 tools/cron_tool.py 的 CRON_TASK_DESCRIPTIONS 同步，修改時請兩處一起更新
+# ------------------------------------------------------------------------------------ #
+CRON_TASK_EXPLAIN = {
+    "discover_topics.py": {
+        "title": "📦 短影音帶貨 · 主題自動發現（每天 02:40）",
+        "desc": "自動用種子關鍵字（config.json 的 discovery.seed_keywords）搜尋熱門帶貨話題，把候選主題 + hashtags 寫回 config.json 的 products 商品池，供 pipeline 產片使用。搜尋三層備援：Tavily → DuckDuckGo → 模板產生。",
+        "view": "今日候選：cat ~/.mok/work/短影音帶貨/topics/suggestions_*.json\n商品池　：cat ~/.mok/work/短影音帶貨/config.json\n執行日誌：tail -50 ~/.mok/work/短影音帶貨/logs/discover.log\n手動預覽：cd ~/.mok/work/短影音帶貨 && python3 scripts/discover_topics.py --dry-run --limit 10",
+        "delete": "/cron delete 11（刪除後此任務不再自動執行）",
+        "install": "無需安裝套件。僅需 Tavily API Key（在 ~/.mok/.稚 設 TAVILY_API_KEY）啟用第一層搜尋；缺 Key 時自動降級 DuckDuckGo，功能仍可用。",
+        "risk": "⚠️ 高風險：--apply 會「直接覆寫」config.json 的 products 商品池（舊商品被覆蓋）。若種子關鍵字太冷門或搜尋 API 異常，可能寫入不相關/重複主題，影響後續產片品質。建議先 --dry-run 預覽再 apply；修改 config.json 前先備份。",
+        "code": "scripts/discover_topics.py：讀 seed_keywords → 三層搜尋 → 去重 → 寫 topics/suggestions_*.json；--apply 時額外寫回 config.json 的 products。",
+        "mokagi": "mokagi說明：這是短影音帶貨流水線的「找題材」前置步驟；每天 03:00 的 run_pipeline.sh（pipeline.py）會消費商品池產出影片並發佈。兩者互補：discover 找題材 → pipeline 出片。",
+    },
+}
+
+
+def get_cron_task_explain(command: str = "") -> str:
+    """查詢 cron 任務的人類可讀說明。
+
+    - command 留空：回傳所有已知任務的說明
+    - command 帶特徵字串：回傳命中的任務說明；找不到回傳空字串
+    """
+    def _fmt(info: dict) -> str:
+        title = info.get("title", "任務說明")
+        lines = [f"┌─ {title}"]
+        if info.get("desc"):
+            lines.append(f"│ 📌 用途：{info['desc']}")
+        if info.get("view"):
+            lines.append(f"│ 🔍 查看：{info['view']}")
+        if info.get("delete"):
+            lines.append(f"│ 🗑 刪除：{info['delete']}")
+        if info.get("install"):
+            lines.append(f"│ 📥 安裝：{info['install']}")
+        if info.get("risk"):
+            lines.append(f"│ ⚠️ 風險：{info['risk']}")
+        if info.get("code"):
+            lines.append(f"│ 💻 代碼：{info['code']}")
+        if info.get("mokagi"):
+            lines.append(f"│ 🤖 {info['mokagi']}")
+        lines.append("└─")
+        return "\n".join(lines)
+
+    if command:
+        for key, info in CRON_TASK_EXPLAIN.items():
+            if key in command:
+                return _fmt(info)
+        return ""
+    parts = []
+    for key, info in CRON_TASK_EXPLAIN.items():
+        parts.append(_fmt(info))
+    return "\n\n".join(parts)
+
+
+
+# ------------------------------------------------------------------------------------ #
+# 輔助函數: _build_confirm_warning
+# 用途: 統一生成 /admin confirm 確認警告訊息。
+#       在「操作內容」之外，附上人類可讀的詳細說明（查看/刪除/安裝/風險/代碼操作），
+#       讓用戶在確認前能看懂這個操作在做什麼、有什麼風險。
+#       若命令命中 CRON_TASK_EXPLAIN（如短影音帶貨的 cron 任務），會自動附加完整說明。
+# ------------------------------------------------------------------------------------ #
+def _build_confirm_warning(operation_desc: str, risk: str = "", command: str = "", agent_config: dict = None) -> str:
+    lines = [
+        "🔐 此確認碼用於授權執行下方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。",
+        "⚠️ 需要確認的操作 ⚠️",
+        f"📋 操作內容：{operation_desc}",
+    ]
+    if risk:
+        lines.append(f"⚠️ 風險等級：{risk}")
+    explain = ""
+    try:
+        explain = get_cron_task_explain(command)
+    except Exception:
+        explain = ""
+    if explain:
+        lines.append("")
+        lines.append("📖 此任務的人類可讀說明：")
+        lines.append(explain)
+    else:
+        lines.append("")
+        lines.append("📖 說明：此操作會修改系統狀態，執行後無法自動回復，請確認無誤再授權。")
+    lines.append("⏰ 請在 5 分鐘內發送確認碼以執行：")
+    return "\n".join(lines)
+
+
+
 # ---------- 安全目錄白名單 ----------
 MOKAGI_HOME = os.path.expanduser(f"~/.{mokagi_name}")
 # 當前 Agent 的工作目錄（由 agent_config 提供）
@@ -1737,7 +1825,7 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
             }, ensure_ascii=False)
         token = generate_token(chat_id, "ollama_rm", model_name)
         _store_pending(token, "ollama_rm", model_name, chat_id)
-        warning = f"🔐 此確認碼用於授權執行下方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n⚠️ 危險操作 ⚠️\n📋 操作內容：[刪除模型：{model_name}]\n⏰ 請在5分鐘內發送確認碼以執行："
+        warning = _build_confirm_warning(f"刪除 Ollama 模型：{model_name}", "high", "", agent_config)
         return f"CONFIRM_SPLIT:{warning}\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     if args.startswith("pip"):
@@ -1760,7 +1848,7 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
         else:
             token = generate_token(chat_id, "pip_install", rest)
             _store_pending(token, "pip_install", rest, chat_id)
-            warning = f"🔐 此確認碼用於授權執行下方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n⚠️ 危險操作 ⚠️\n📋 操作內容：[pip 安裝：{rest}]\n風險等級：{risk}\n⏰ 請在5分鐘內發送確認碼以執行："
+            warning = _build_confirm_warning(f"pip 安裝 Python 套件：{rest}", risk, "", agent_config)
             return f"CONFIRM_SPLIT:{warning}\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     if args.startswith("exec"):
@@ -1797,7 +1885,7 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
             return result if success else f"❌ 執行失敗: {result}"
         token = generate_token(chat_id, "shell_exec", rest)
         _store_pending(token, "shell_exec", rest, chat_id)
-        warning = f"🔐 此確認碼用於授權執行下方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n⚠️ 危險操作 ⚠️\n📋 操作內容：[執行命令：{html.escape(rest)}]\n風險等級：{risk}\n⏰ 請在5分鐘內發送確認碼以執行："
+        warning = _build_confirm_warning(f"執行 Shell 命令：{html.escape(rest)}", risk, rest, agent_config)
         return f"CONFIRM_SPLIT:{warning}\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     return json.dumps({

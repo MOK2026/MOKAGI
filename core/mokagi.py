@@ -1307,6 +1307,10 @@ async def call_llm(
     
     else:
         
+        # 兼容舊配置：若 api_url 為 OpenAI 兼容的 /v1 端點，轉為 Ollama 原生 /api/generate
+        if api_url and '/v1' in api_url:
+            api_url = api_url.split('/v1')[0] + '/api/generate'
+        
         # 從 agent_config 讀取 Ollama 參數
         ollama_options = {
             "num_ctx": int(agent_config.get("MOK_num_ctx", 16384)),
@@ -1654,7 +1658,7 @@ async def naturalize_tool_result(
                         naturalize_func,
                         user_text=user_text,
                         raw_result=raw_result,
-                        ollama_api=agent_config.get("MOK_MODEL_url", "http://localhost:11434/v1"),
+                        ollama_api=agent_config.get("MOK_MODEL_url", "http://localhost:11434/api/generate"),
                         model_name=agent_config.get("MOK_MODEL_NAME", "minimax-m3:cloud"),
                         temp_msg=None,
                         context=None
@@ -1691,7 +1695,7 @@ async def handle_direct_command(user_text: str, user_id: str, agent_config: Opti
         return None
     if agent_config is None:
         agent_config = _agent_config
-    ollama_api = agent_config.get("MOK_MODEL_url", "http://localhost:11434/v1")
+    ollama_api = agent_config.get("MOK_MODEL_url", "http://localhost:11434/api/generate")
     model_name = agent_config.get("MOK_MODEL_NAME", "minimax-m3:cloud")
     result = await tool_handler.process_message(
         user_text=user_text,
@@ -1935,21 +1939,22 @@ def save_pending_task(user_id, messages, goal, max_iterations, iteration, agent_
     if unique_key not in _pending_task:
         _pending_task[unique_key] = {}
     _pending_task[unique_key][continue_code] = task
-    # 寫入文件
-    task_file = _get_pending_task_file(agent_name)
-    os.makedirs(os.path.dirname(task_file), exist_ok=True)
-    all_data = {}
-    if os.path.exists(task_file):
-        with open(task_file, 'r', encoding='utf-8') as f:
-            try:
-                all_data = json.load(f)
-            except:
-                all_data = {}
-    if unique_key not in all_data:
-        all_data[unique_key] = {}
-    all_data[unique_key][continue_code] = task
-    with open(task_file, 'w', encoding='utf-8') as f:
-        json.dump(all_data, f, ensure_ascii=False, indent=2)
+    # 寫入文件（MOK_ENABLE_PENDING_TASK=0 停用，_job.json 不再生成/膨脹；預設 0，/continue 暫不使用）
+    if str(_agent_config.get("MOK_ENABLE_PENDING_TASK", "0")) != "0":
+        task_file = _get_pending_task_file(agent_name)
+        os.makedirs(os.path.dirname(task_file), exist_ok=True)
+        all_data = {}
+        if os.path.exists(task_file):
+            with open(task_file, 'r', encoding='utf-8') as f:
+                try:
+                    all_data = json.load(f)
+                except:
+                    all_data = {}
+        if unique_key not in all_data:
+            all_data[unique_key] = {}
+        all_data[unique_key][continue_code] = task
+        with open(task_file, 'w', encoding='utf-8') as f:
+            json.dump(all_data, f, ensure_ascii=False, indent=2)
     if status == "waiting_for_user":
         return f"📌 已暫停任務，等待你的補充。\n繼續碼：`{continue_code}`\n請直接補充內容，或輸入：`/continue {continue_code} 你的補充`"
     return f"📌 已保存任務進度，繼續碼：`{continue_code}`\n繼續執行：`/continue {continue_code}`"
@@ -2436,6 +2441,7 @@ async def process_message(
 
     from recovery import ask_clarification
 
+    working_text = text
 
     # 優先使用傳入的 agent_name，若未傳則從全局配置讀取（向後兼容）
     if agent_name is None:
@@ -2449,7 +2455,7 @@ async def process_message(
     owner = agent_config.get("MOK_ADMIN_NAME", "用戶")              # 用戶名
     owner_time = agent_config.get("MOK_ADMIN_TIME_ZONE", 0)         # 用戶時區
     model_name = agent_config.get("MOK_MODEL_NAME", "minimax-m3:cloud")     # 現用模型名
-    api_url = agent_config.get("MOK_MODEL_url", "http://localhost:11434/v1")
+    api_url = agent_config.get("MOK_MODEL_url", "http://localhost:11434/api/generate")
     token = agent_config.get("MOK_MODEL_token", "")
     max_history_rounds = int(agent_config.get("MOK_MAX_HISTORY_ROUNDS", 6)) # 加入 prompt的最多對話歷史
     max_tack_rounds = int(agent_config.get("MOK_max_tack_rounds", 3))
@@ -2649,8 +2655,9 @@ async def process_message(
     # ===== 結束 =====
 
     async def _run():
-
-        
+        # 強制在此作用域內先初始化，避免在確認成功後續接自動繼續時出現
+        # "working_text referenced before assignment" 這類 UnboundLocalError。
+        working_text = text
 
         _pending_task_dir = os.path.expanduser(f"~/.{MOKAGI_home}/agent/{agent_name}")
         _pending_task_file = os.path.join(_pending_task_dir, "_job.json")
@@ -2783,7 +2790,10 @@ async def process_message(
                 final_reply_text = direct_result
             # 保存本輪對話到歷史，並獲取 conv_id
             conv_id = await add_to_history(user_id, text, final_reply_text + get_model_tag(model_name), agent_config=agent_config)
-            await _send({"type": "done", "conv_id": conv_id})
+            # /admin confirm 訊息不在這裡立刻 done：改由下方「自動繼續」流程決定結束時機，
+            # 避免前端收到第一個 done 就關閉串流，導致同意後 Agent 的續行輸出看不見。
+            if not text.strip().startswith('/admin confirm'):
+                await _send({"type": "done", "conv_id": conv_id})
 
 
 
@@ -2792,9 +2802,20 @@ async def process_message(
                 # 提取 token
                 token = text.strip().split()[-1] if len(text.strip().split()) > 1 else None
                 confirm_result = None
-                if token:
+                # 上方 handle_admin → confirm_command 其實已執行過確認（一次性 token 已消耗）。
+                # 這裡先檢查 token 是否仍在等待：已消耗 = 確認已執行，直接沿用其結果，避免重複執行誤報「❌ 確認碼無效或已過期」。
+                token = text.strip().split()[-1] if len(text.strip().split()) > 1 else None
+                admin_mod = tool_handler.get_tools().get("admin")
+                token_still_pending = False
+                try:
+                    if token and admin_mod and hasattr(admin_mod, "pending_confirmations"):
+                        token_still_pending = token in getattr(admin_mod, "pending_confirmations", {})
+                except Exception:
+                    token_still_pending = False
+                if token_still_pending:
+                    # token 仍在等待 → 在此真正執行確認（不經 handle_admin 攔截的場景）
+                    _confirm_already_shown = False
                     try:
-                        admin_mod = tool_handler.get_tools().get("admin")
                         if admin_mod and hasattr(admin_mod, "confirm_command"):
                             success, result = await admin_mod.confirm_command(user_id, token, agent_config)
                             if success:
@@ -2805,9 +2826,17 @@ async def process_message(
                             confirm_result = "⚠️ 無法獲取確認結果（admin 模塊不可用）"
                     except Exception as e:
                         confirm_result = f"❌ 獲取確認結果時出錯：{str(e)}"
+                else:
+                    # token 已消耗 → 上方 direct 流程已處理並把結果放在 direct_result；沿用（避免重複送出）
+                    _confirm_already_shown = True
+                    if direct_result and not str(direct_result).startswith(("❌", "⚠️")):
+                        confirm_result = f"✅ 確認成功，執行結果：\n{direct_result}"
+                    else:
+                        confirm_result = direct_result or "❌ 確認失敗：無效的確認碼。"
 
                 # 發送確認結果給用戶（人話化：成功時用當前角色口吻轉述）
-                if confirm_result:
+                # （token 已由上方 direct 流程處理並回傳結果時，不再重複送出）
+                if confirm_result and not _confirm_already_shown:
                     if "✅" in confirm_result:
                         human_result = await _humanize_admin_message(confirm_result, agent_config, purpose="result")
                         await _send({"type": "reply", "content": human_result if human_result else confirm_result})
@@ -2834,19 +2863,38 @@ async def process_message(
                                     user_id, messages, task.get("goal", "未知任務"),
                                     max_iterations, 0, agent_name, continue_code=code
                                 )
-                        # 啟動任務恢復（會讀取最新的 messages）
-                        asyncio.create_task(_resume_pending_task(code))
+                        # 啟動任務恢復（僅在確認成功且任務存在時執行，會讀取最新的 messages）
+                        if confirm_result and "✅" in confirm_result and task:
+                            try:
+                                from job import run_task
+                                resume_text = f"/continue {code} ✅ 已同意並執行完成，請繼續剛才的工作。"
+                                result = await run_task(user_id, agent_name, code, resume_text, stream_callback=_send)
+                                await _send({"type": "reply", "content": result})
+                                await _send({"type": "done", "conv_id": conv_id})
+                                return
+                            except ImportError as e:
+                                await _send({"type": "reply", "content": f"⚠️ 任務管理系統未就緒，請檢查 job.py 是否存在。\n錯誤: {e}"})
+                                await _send({"type": "done", "conv_id": conv_id})
+                                return
                     else:
                         msg = "發現多個未完成任務，請選擇要恢復的任務：\n"
                         for idx, item in enumerate(pending_list, 1):
                             msg += f"{idx}. `/continue {item['code']}` ({item['goal']})\n"
                         await _send({"type": "reply", "content": msg})
                 else:
-                    # 沒有掛起任務，但確認成功，直接結束
+                    # 沒有掛起任務，但確認成功 → 自動繼續：把確認結果帶入下一輪對話，讓 Agent 自動接續原本的工作
                     if confirm_result and "✅" in confirm_result:
+                        # 使用新的工作變數，避免在同一作用域中反覆重寫 `text`，避免閉包/重分配造成的 UnboundLocalError
+                        working_text = "✅ 已同意並執行完成，請繼續剛才的工作。"
+                        # 不 return → 落入下方正常對話流程（同一串流繼續輸出，自動接續工作）
+                    else:
+                        # 確認失敗或無效確認碼：直接結束（錯誤訊息已在上面送出）
                         await _send({"type": "done", "conv_id": conv_id})
-                # ===== 結束 =====
-                return
+                        return
+                # ===== 結束（pending 分支於上方各自處理並 return；成功且無 pending 時落入下方流程自動接續）=====
+                if not (confirm_result and "✅" in confirm_result and not pending_list):
+                    await _send({"type": "done", "conv_id": conv_id})
+                    return
 
 
 
@@ -2866,7 +2914,7 @@ async def process_message(
         # 檢查是否為已暫停任務的直接補充內容，或 /continue 命令
         ''' 工作流精髓 記錄最終目標並重上次失敗新 loop '''
         pending_resume_code = None
-        if not text.strip().startswith("/"):
+        if not working_text.strip().startswith("/"):
             unique_key = _get_unique_user_id(user_id, agent_name)
             if unique_key in _pending_task:
                 for code, task in _pending_task[unique_key].items():
@@ -2890,7 +2938,7 @@ async def process_message(
         if pending_resume_code:
             try:
                 from job import run_task
-                resume_text = f"/continue {pending_resume_code} {text.strip()}"
+                resume_text = f"/continue {pending_resume_code} {working_text.strip()}"
                 result = await run_task(user_id, agent_name, pending_resume_code, resume_text, stream_callback=_send)
                 await _send({"type": "reply", "content": result})
                 await _send({"type": "done", "conv_id": None})
@@ -2900,11 +2948,11 @@ async def process_message(
                 await _send({"type": "done", "conv_id": None})
                 return
 
-        continue_code = extract_continue_command(text)
+        continue_code = extract_continue_command(working_text)
         if continue_code:
             try:
                 from job import run_task
-                result = await run_task(user_id, agent_name, continue_code, text, stream_callback=_send)
+                result = await run_task(user_id, agent_name, continue_code, working_text, stream_callback=_send)
                 await _send({"type": "reply", "content": result})
                 await _send({"type": "done", "conv_id": None})
                 return
@@ -3157,17 +3205,11 @@ async def process_message(
                             final_reply_parts.append(full_reply)
                             break
                         else:
-                            # ⚠️ 未完成 → 保存任務，讓用戶繼續
-                            save_pending_task(user_id, messages, text, max_iterations, iteration, agent_name, continue_code=task_code)
-                            await _send({"type": "reply", "content": f"📌 {check_text}\n\n💡 繼續執行：`/continue {task_code}`"})
+                            # ⚠️ 未完成（/continue 機制已廢棄）→ 直接以目前回覆結束，不再保存任務
                             final_reply_parts.append(full_reply)
-                            final_reply_parts.append(check_text)
                             break
                     except Exception as e:
                         logging.warning(f"[完成檢查] 檢查失敗: {e}")
-                        # 檢查失敗 → 保守處理：保存任務
-                        save_pending_task(user_id, messages, text, max_iterations, iteration, agent_name, continue_code=task_code)
-                        await _send({"type": "reply", "content": f"⚠️ 無法確認任務是否完成，請手動確認後繼續。\n\n💡 繼續執行：`/continue {task_code}`"})
                         final_reply_parts.append(full_reply)
                         break
 
@@ -3214,10 +3256,9 @@ async def process_message(
                 ''' 工作流精髓 記錄最終目標並重上次失敗新 loop '''
                 # � 記錄失敗經驗（達到最大迭代次數）
                 log_experience(user_id, agent_name, text, "failure", messages, "達到最大迭代次數", agent_config=agent_config)
-                # 超過最大輪次，保存狀態並提示用戶
-                txt = save_pending_task(user_id, messages, text, max_iterations, iteration, agent_name, continue_code=task_code)
-                await _send({"type": "reply", "content": txt})
-                final_reply_parts.append(txt)
+                # 超過最大輪次（/continue 機制已廢棄）→ 直接結束
+                await _send({"type": "reply", "content": "⚠️ 已達最大執行輪次，本次任務未能完成。"})
+                final_reply_parts.append("⚠️ 已達最大執行輪次，本次任務未能完成。")
 
 
 
@@ -3332,15 +3373,10 @@ async def process_message(
                             delete_pending_task(user_id, task_code, agent_name)
                             break
                         else:
-                            save_pending_task(user_id, messages, text, max_iterations, iteration, agent_name, continue_code=task_code)
-                            await _send({"type": "reply", "content": f"📌 {check_text}\n\n💡 繼續執行：`/continue {task_code}`"})
-                            final_reply_parts.append(f"📌 {check_text}")
+                            # ⚠️ 未完成（/continue 機制已廢棄）→ 直接結束
                             break
                     except Exception as e:
                         logging.warning(f"[完成檢查] 檢查失敗: {e}")
-                        save_pending_task(user_id, messages, text, max_iterations, iteration, agent_name, continue_code=task_code)
-                        await _send({"type": "reply", "content": f"⚠️ 無法確認任務是否完成，請手動確認後繼續。\n\n💡 繼續執行：`/continue {task_code}`"})
-                        final_reply_parts.append(f"⚠️ 無法確認完成")
                         break
                 
                 # ----- 執行工具 -----
@@ -3380,11 +3416,10 @@ async def process_message(
                     break
                 # 繼續下一輪迭代
             else:
-                # 達到最大迭代次數，保存掛起任務
+                # 達到最大迭代次數（/continue 機制已廢棄）→ 直接結束
                 log_experience(user_id, agent_name, text, "failure", messages, "達到最大迭代次數", agent_config=agent_config)
-                txt = save_pending_task(user_id, messages, text, max_iterations, iteration, agent_name, continue_code=task_code)
-                await _send({"type": "reply", "content": txt})
-                final_reply_parts.append(txt)
+                await _send({"type": "reply", "content": "⚠️ 已達最大執行輪次，本次任務未能完成。"})
+                final_reply_parts.append("⚠️ 已達最大執行輪次，本次任務未能完成。")
 
         # ===== 最後保存歷史 =====
         if not final_reply_text and final_reply_parts:

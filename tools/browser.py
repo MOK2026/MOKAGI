@@ -70,6 +70,7 @@ import time
 import glob
 import random
 import subprocess
+import fcntl
 from typing import Optional, Dict, Union
 
 # MOKAGI 沙箱：Chromium 存放在共享的 .mok/playwright-browsers
@@ -348,6 +349,72 @@ def naturalize_browser_result(user_text: str = "", raw_result: str = "", ollama_
 
 
 # ------------------------------------------------------------------------------------ #
+# 瀏覽器進程鎖：每次僅允許一位侍女使用瀏覽器
+# 任何 /browser 調用前必須先上鎖；若鎖被其他侍女持有，等待 10 秒再試，最多試 3 次
+# ------------------------------------------------------------------------------------ #
+
+BROWSER_LOCK_FILE = "/tmp/mok_browser.lock"
+BROWSER_LOCK_WAIT = 10   # 等待秒數
+BROWSER_LOCK_MAX_TRIES = 3  # 最多嘗試次數
+
+
+def _try_lock_browser(holder_info: str) -> Optional[int]:
+    """嘗試非阻塞獲取瀏覽器鎖，成功返回鎖 fd，失敗返回 None。"""
+    try:
+        fd = os.open(BROWSER_LOCK_FILE, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return None
+        # 寫入持有者資訊，方便其他侍女看到是誰在使用
+        try:
+            os.ftruncate(fd, 0)
+            os.write(fd, holder_info.encode("utf-8"))
+        except Exception:
+            pass
+        return fd
+    except Exception:
+        return None
+
+
+def _get_lock_holder() -> str:
+    """讀取目前鎖持有者的資訊。"""
+    try:
+        with open(BROWSER_LOCK_FILE, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read().strip()
+        return content or "未知進程"
+    except Exception:
+        return "未知進程"
+
+
+def _release_browser_lock(fd: int) -> None:
+    """釋放瀏覽器鎖並關閉 fd。"""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        os.close(fd)
+    except Exception:
+        pass
+
+
+async def _acquire_browser_lock(holder_info: str) -> Optional[int]:
+    """
+    獲取瀏覽器鎖：先試一次，被佔用則等 10 秒再試，最多試 3 次。
+    成功返回鎖 fd；3 次都失敗返回 None。
+    """
+    for attempt in range(BROWSER_LOCK_MAX_TRIES):
+        fd = _try_lock_browser(holder_info)
+        if fd is not None:
+            return fd
+        if attempt < BROWSER_LOCK_MAX_TRIES - 1:
+            await asyncio.sleep(BROWSER_LOCK_WAIT)
+    return None
+
+
+# ------------------------------------------------------------------------------------ #
 # 核心 handler
 # ------------------------------------------------------------------------------------ #
 
@@ -390,48 +457,65 @@ async def handle_browser(args: Union[str, dict], chat_id: str = None, agent_conf
     else:
         return json.dumps({"success": False, "error": "無效的參數格式"}, ensure_ascii=False)
 
-    # --- 路由到各處理器 ---
-    try:
-        if action == "install":
-            return await _handle_install()
-        elif action == "launch":
-            return await _handle_launch(action_args)
-        elif action == "goto":
-            return await _handle_goto(action_args)
-        elif action == "click":
-            return await _handle_click(action_args)
-        elif action == "type":
-            return await _handle_type(action_args)
-        elif action == "screenshot":
-            return await _handle_screenshot(action_args)
-        elif action == "scroll":
-            return await _handle_scroll(action_args)
-        elif action == "wait":
-            return await _handle_wait(action_args)
-        elif action == "press":
-            return await _handle_press(action_args)
-        elif action == "close":
-            return await _handle_close(action_args)
-        elif action == "status":
-            return await _handle_status(action_args)
-        elif action == "execute":
-            return await _handle_execute(action_args)
-        elif action == "content":
-            return await _handle_content(action_args)
-        else:
-            return json.dumps({
-                "success": False,
-                "error": f"未知操作「{action}」。支援：install, launch, goto, click, type, screenshot, scroll, wait, press, close, status, execute, content"
-            }, ensure_ascii=False)
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
+    # --- 進程鎖：每次僅允許一位侍女使用瀏覽器 ---
+    agent_name = "?"
+    if agent_config and isinstance(agent_config, dict):
+        agent_name = agent_config.get("MOK_AGENT_NAME") or agent_config.get("name") or "?"
+    holder_info = f"agent={agent_name} pid={os.getpid()} chat={chat_id or chr(63)}"
+    lock_fd = await _acquire_browser_lock(holder_info)
+    if lock_fd is None:
         return json.dumps({
             "success": False,
-            "error": f"{type(e).__name__}: {e}",
+            "error": f"瀏覽器正在使用中（{_get_lock_holder()}），請等對方用完再試。",
             "action": action,
-            "traceback": tb[-500:]
+            "locked": True
         }, ensure_ascii=False)
+
+    try:
+        # --- 路由到各處理器 ---
+        try:
+            if action == "install":
+                return await _handle_install()
+            elif action == "launch":
+                return await _handle_launch(action_args)
+            elif action == "goto":
+                return await _handle_goto(action_args)
+            elif action == "click":
+                return await _handle_click(action_args)
+            elif action == "type":
+                return await _handle_type(action_args)
+            elif action == "screenshot":
+                return await _handle_screenshot(action_args)
+            elif action == "scroll":
+                return await _handle_scroll(action_args)
+            elif action == "wait":
+                return await _handle_wait(action_args)
+            elif action == "press":
+                return await _handle_press(action_args)
+            elif action == "close":
+                return await _handle_close(action_args)
+            elif action == "status":
+                return await _handle_status(action_args)
+            elif action == "execute":
+                return await _handle_execute(action_args)
+            elif action == "content":
+                return await _handle_content(action_args)
+            else:
+                return json.dumps({
+                    "success": False,
+                    "error": f"未知操作「{action}」。支援：install, launch, goto, click, type, screenshot, scroll, wait, press, close, status, execute, content"
+                }, ensure_ascii=False)
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            return json.dumps({
+                "success": False,
+                "error": f"{type(e).__name__}: {e}",
+                "action": action,
+                "traceback": tb[-500:]
+            }, ensure_ascii=False)
+    finally:
+        _release_browser_lock(lock_fd)
 
 
 # ------------------------------------------------------------------------------------ #
@@ -622,8 +706,11 @@ async def _handle_launch(args: str) -> str:
                         "--no-sandbox",
                         "--disable-setuid-sandbox",
                         "--disable-blink-features=AutomationControlled",
-                        "--disable-gpu",
-                        "--disable-software-rasterizer",
+                        "--enable-unsafe-swiftshader",
+                        "--ignore-gpu-blocklist",
+                        "--enable-webgl",
+                        "--use-gl=angle",
+                        "--use-angle=swiftshader",
                         "--disable-dev-shm-usage",
                     ],
                     executable_path=chromium_path,
@@ -735,6 +822,22 @@ async def _handle_click(args: str) -> str:
     selector = clean_args.strip()
     if not selector:
         return json.dumps({"success": False, "error": "請提供點擊目標（CSS 選擇器或 text=文字）"}, ensure_ascii=False)
+
+    # 支援座標點擊：格式 "x,y" 或 "x=100,y=200"
+    import re as _re
+    _m = _re.match(r"^\s*(\d+)\s*[,xX]\s*(\d+)\s*$", selector)
+    if _m:
+        cx, cy = int(_m.group(1)), int(_m.group(2))
+        await page.mouse.move(cx, cy, steps=5)
+        await page.mouse.click(cx, cy)
+        title = await page.title()
+        return json.dumps({
+            "success": True,
+            "action": "click",
+            "target": f"座標({cx},{cy})",
+            "title": title,
+            "profile": _active_profile
+        }, ensure_ascii=False)
 
     # 如果沒前綴，預設用 text= 匹配
     if not any(selector.startswith(p) for p in ["text=", "css=", "xpath=", "#", ".", "[", "button", "a", "input", "div", "span", "li", "p", "h1", "h2", "h3", "h4"]):

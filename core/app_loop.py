@@ -20,6 +20,7 @@ app_loop.py — 全局持久 Event Loop（方案 B 根治核心）
     init_app_loop()
 """
 import asyncio
+import inspect
 import threading
 
 APP_LOOP = None
@@ -61,6 +62,45 @@ def get_app_loop():
 def is_loop_thread():
     """目前執行緒是否就是 APP_LOOP 執行緒"""
     return _APP_LOOP_THREAD is not None and threading.current_thread() is _APP_LOOP_THREAD
+
+
+def safe_asyncio_run(coro_or_func, *args, **kwargs):
+    """
+    全局安全入口：在任意上下文中執行 coroutine。
+    - 若當前執行緒沒有正在運行的 event loop，直接使用 asyncio.run()
+    - 若已存在正在運行的 loop（例如在 async function 中呼叫），則在新執行緒內執行，
+      避免 "Cannot run the event loop while another loop is running"。
+    """
+    if inspect.iscoroutinefunction(coro_or_func):
+        coro = coro_or_func(*args, **kwargs)
+    elif inspect.isawaitable(coro_or_func):
+        coro = coro_or_func
+    else:
+        if args or kwargs:
+            return coro_or_func(*args, **kwargs)
+        return coro_or_func()
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result = {}
+    error = {}
+
+    def _runner():
+        try:
+            result["value"] = asyncio.run(coro)
+        except BaseException as exc:  # pragma: no cover - 只為同步協調
+            error["exc"] = exc
+
+    t = threading.Thread(target=_runner, daemon=True)
+    t.start()
+    t.join()
+
+    if "exc" in error:
+        raise error["exc"]
+    return result.get("value")
 
 
 def run_async(coro, timeout=None):

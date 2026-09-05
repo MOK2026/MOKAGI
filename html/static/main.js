@@ -3,6 +3,36 @@
     console.log('[MOK_BUILD]', MOK_WEB_BUILD, 'host=', location.hostname);
     const MONACO_CDN = "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min";
     
+    // ===== 一鍵確認（web 版免打字）=====
+    // 從回覆文字中提取確認指令：/confirm <code>、/cancel <code>、/admin confirm <token>
+    function extractConfirmCommands(text) {
+        if (!text) return [];
+        var cmds = [];
+        var m1 = String(text).match(/\/admin\s+confirm\s+([A-Za-z0-9_\-]+)/g);
+        var m2 = String(text).match(/\/confirm\s+([A-Za-z0-9_\-]+)/g);
+        var m3 = String(text).match(/\/cancel\s+([A-Za-z0-9_\-]+)/g);
+        if (m1) cmds = cmds.concat(m1);
+        if (m2) cmds = cmds.concat(m2);
+        if (m3) cmds = cmds.concat(m3);
+        // 去重
+        return cmds.filter(function(v, i, a) { return a.indexOf(v) === i; });
+    }
+    // 點擊同意/取消按鈕 → 自動發送確認指令
+    async function sendConfirmCommand(btn) {
+        if (!btn) return;
+        var cmd = btn.getAttribute("data-cmd");
+        if (!cmd) return;
+        btn.disabled = true;
+        btn.textContent = "⏳ 發送中...";
+        try {
+            await sendUserMessage(cmd);
+        } catch (e) {
+            console.error("[sendConfirmCommand]", e);
+            btn.disabled = false;
+            btn.textContent = (cmd.indexOf("/cancel") === 0) ? "❌ 取消" : "✅ 同意執行";
+        }
+    }
+    
     // 設定 Monaco Worker 從 CDN 載入
     window.MonacoEnvironment = {
         getWorkerUrl: function(workerId, label) {
@@ -194,7 +224,7 @@
     let chatHistoryOffset = 0;
     let chatHistoryHasMore = true;
     let loadingMore = false;
-    const CHAT_HISTORY_PAGE_SIZE = 20;
+    const CHAT_HISTORY_PAGE_SIZE = 10;
 
     const socket = (function() {
         const ioFn = typeof window !== 'undefined' ? window.io : undefined;
@@ -256,7 +286,7 @@ let currentHtmlContent = '';      // 儲存當前 HTML 檔案的完整內容
     let currentRoundIdx = {};     // { agentName: number } 當前活躍的輪次索引
     let _roundRenderPending = {}; // { agentName: bool } 渲染節流：同一幀內只排一次完整重建
     let _roundRenderRAF = {};     // { agentName: rafId }
-    let fileContentPre, imageViewer, videoViewer, currentFilenameSpan;
+    let fileContentPre, imageViewer, videoViewer, audioViewer, currentFilenameSpan;
     let scrollBtn = null;
     let quickJumpPanel = null;  // 快速跳轉面板的DOM
     
@@ -988,7 +1018,11 @@ function renderMarkdown(text) {
             renderAgentList();
             
             if (agentList.length && (!currentAgent || !agentList.some(a => a.name === currentAgent))) {
-                await activateAgent(agentList[0].name);
+                // 🔧 優先回到上次使用的 Agent（連同其進行中的串流一起續流），否則用第一個
+                let lastAgent = null;
+                try { lastAgent = localStorage.getItem('mokagi_last_agent'); } catch (e) {}
+                const target = (lastAgent && agentList.some(a => a.name === lastAgent)) ? lastAgent : agentList[0].name;
+                await activateAgent(target);
             }
         } catch (err) { console.error(err); }
     }
@@ -1102,7 +1136,10 @@ function renderAgentList() {
         const state = agentStates[agent.name] || { isRunning: false, hasNewCompleted: false };
         const icon = agentIcons[agent.name] || '🌸';
         const statusMark = state.isRunning ? ':...' : (state.hasNewCompleted ? '🔔' : '');
+        const unreadMap = getUnreadMap();
+        const hasUnread = !!unreadMap[agent.name];
         let classes = 'agent-item';
+        if (hasUnread) classes += ' has-unread';
         if (currentAgent === agent.name) {
             classes += ' active';
         }
@@ -1113,8 +1150,13 @@ function renderAgentList() {
         }
         const div = document.createElement('div');
         div.className = classes;
-        div.title = agent.name + ':' + (state.isRunning ? ' (執行中)' : (state.hasNewCompleted ? ' (有新完成)' : '')) + escapeHtml(agent.post);
-        div.innerHTML = `<div class="agent-icon">${icon}</div><span class="agent-name">${escapeHtml(agent.name)}</span> <small class="agent-post" style="color:#888;font-size:0.7rem;">${escapeHtml(agent.post)}</small> ${statusMark}${state.isRunning ? '<span class="agent-wave"></span>' : ''}`;
+        div.title = agent.name + ':' + (state.isRunning ? ' (執行中)' : (state.hasNewCompleted ? ' (有新完成)' : '')) + (hasUnread ? ' (未讀)' : '') + escapeHtml(agent.post);
+        let waTag = '';
+        const unreadBadge = hasUnread ? '<span class="agent-unread-badge">未讀</span>' : '';
+        if (agent.name === 'ws客服') {
+            waTag = ' <span id="waAutoTag" class="wa-auto-tag" title="wa_auto.py 執行狀態">⋯</span>';
+        }
+        div.innerHTML = `<div class="agent-icon">${icon}</div><span class="agent-name">${escapeHtml(agent.name)}</span>${waTag} <small class="agent-post" style="color:#888;font-size:0.7rem;">${escapeHtml(agent.post)}</small> ${unreadBadge}${statusMark}${state.isRunning ? '<span class="agent-wave"></span>' : ''}`;
         // 內聯點擊監聽
         div.addEventListener('click', function() {
             if (currentAgent !== agent.name) {
@@ -1123,6 +1165,37 @@ function renderAgentList() {
         });
         targetBody.appendChild(div);
     });
+
+    // ----- ws客服：wa_auto.py 狀態標籤輪詢 -----
+    if (document.getElementById('waAutoTag')) {
+        updateWaAutoTag();
+        if (!window._waAutoTimer) {
+            window._waAutoTimer = setInterval(updateWaAutoTag, 10000);
+        }
+    }
+}
+
+// 更新 ws客服 名片上的 wa_auto.py 執行狀態標籤
+async function updateWaAutoTag() {
+    const tag = document.getElementById('waAutoTag');
+    if (!tag) return;
+    try {
+        const res = await fetch('/api/wa_auto_status', { credentials: 'same-origin' });
+        const data = await res.json();
+        if (data.running) {
+            tag.textContent = '🟢 wa_auto 運行中';
+            tag.className = 'wa-auto-tag on';
+            tag.title = 'wa_auto.py 正在執行' + (data.pid ? ' (PID ' + data.pid + ')' : '');
+        } else {
+            tag.textContent = '🔴 wa_auto 已停止';
+            tag.className = 'wa-auto-tag off';
+            tag.title = 'wa_auto.py 未在執行';
+        }
+    } catch (e) {
+        tag.textContent = '⚪ 無法檢測';
+        tag.className = 'wa-auto-tag';
+        tag.title = '無法連線檢查 wa_auto.py';
+    }
 }
     
 
@@ -1178,7 +1251,7 @@ if (headerDisplay) {
         const [configRes, modelsRes, historyRes] = await Promise.all([
             fetch('/api/mok_config'),
             fetch('/api/models'),
-            fetch(`/api/chat_history?agent=${encodeURIComponent(agentName)}&limit=20&offset=0`)
+            fetch(`/api/chat_history?agent=${encodeURIComponent(agentName)}&limit=10&offset=0`)
         ]);
 
         // 獲取配置數據
@@ -1211,6 +1284,10 @@ if (headerDisplay) {
 
         // ===== 所有請求成功，開始更新 UI =====
         currentAgent = agentName;
+        // 🔧 記住最後使用的 Agent，刷新後回到同一個 Agent（連同進行中的串流一起續流）
+        try { localStorage.setItem('mokagi_last_agent', agentName); } catch (e) {}
+        // 🔔 Live2D 桌面寵物：廣播 agent 切換事件（Open-LLM-VTuber/live2d-pet.js 監聽）
+        try { window.dispatchEvent(new CustomEvent('agent_switched', { detail: { agent: agentName } })); } catch (e) {}
         // 🔧 修復對話污染：切換 Agent 時立即清除所有舊消息（外層游離 div + #message-list 內殘留），避免 A agent 輸出污染 B 對話
         document.querySelectorAll("#chatMessages > .message").forEach(function(_el) { _el.remove(); });
         const _msgList = document.getElementById("message-list");
@@ -1296,6 +1373,9 @@ if (headerDisplay) {
         // fix: restore in-progress streaming state (thoughts/output) when switching back to a working agent
         _restoreStreamState(currentAgent);
 
+        // 🔧 頁面刷新/切換後：若該 agent 有進行中的串流，自動重連並重放（思考/工具/回答即時恢復）
+        resumeActiveSessionForAgent(currentAgent);
+
         // 檢測未完成工作列表
         let foundPendingList = null;
         for (const msg of allMessages) {
@@ -1321,6 +1401,8 @@ if (headerDisplay) {
         document.getElementById('showToolProcessBtn').style.display = classifiedData.toolProcess ? 'inline-block' : 'none';
         document.getElementById('showSemanticBtn').style.display = classifiedData.semanticSearch ? 'inline-block' : 'none';
         document.getElementById('showExperienceBtn').style.display = classifiedData.experience ? 'inline-block' : 'none';
+        updateUnreadBtnState();
+        updateHeaderBtnsLayout();
 
         if (agentStates[agentName]) {
             agentStates[agentName].hasNewCompleted = false;
@@ -1434,111 +1516,37 @@ if (headerDisplay) {
 function renderPlainTextWithFold(text) {
     if (!text) return '';
 
-    // 存儲需要保護的標籤（用佔位符替代）
-    const placeholders = [];
+    // 將 fenced code block 與普通文字拆開處理，避免最後一輪的程式碼與自然語言被包成同一個 HTML 區塊，
+    // 造成對話框被整段黑底覆蓋、渲染崩潰，或頁面失去互動。
+    const parts = [];
+    let lastIndex = 0;
+    const codeRegex = /```(\w*)\n([\s\S]*?)```/g;
+    let match;
 
-    // 1. 處理 ```html ... ``` 塊 → iframe
-    let processed = text.replace(/```html\s*\n([\s\S]*?)```/g, function(match, htmlContent) {
-        const safeContent = htmlContent
-            .replace(/&/g, '&amp;')
-            .replace(/"/g, '&quot;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-        const iframe = `<iframe srcdoc="${safeContent}" sandbox="allow-scripts" style="width:100%; min-height:200px; border:1px solid #4ec9b0; border-radius:8px; background:white;"></iframe>`;
-        const placeholder = `__PLACEHOLDER_${placeholders.length}__`;
-        placeholders.push(iframe);
-        return placeholder;
-    });
-
-    // 2. 處理其他語言代碼塊 → 摺疊 details
-    let withDetails = processed.replace(/```(\w*)\n([\s\S]*?)```/g, function(match, lang, code) {
-        const codeEscaped = escapeHtml(code);
-        const langDisplay = lang ? ` (${escapeHtml(lang)})` : '';
-        const details = `<details style="margin:4px 0;">
-            <summary style="cursor:pointer;color:#4ec9b0;font-weight:bold;">📄 點擊展開代碼塊${langDisplay}</summary>
-            <pre style="background:#1e1e1e;padding:8px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;"><code>${codeEscaped}</code></pre>
-        </details>`;
-        const placeholder = `__PLACEHOLDER_${placeholders.length}__`;
-        placeholders.push(details);
-        return placeholder;
-    });
-
-    // 2.3. 處理 code_index 📝 程式碼內容 → 摺疊（保留【N】標題和 📁 路徑可見）
-    withDetails = withDetails.replace(/📝 (.+?)(?=\n【|\n*$)/gs, function(match, code) {
-        const codeEscaped = escapeHtml(code);
-        const details = `<details style="margin:2px 0 2px 20px;">
-            <summary style="cursor:pointer;color:#ce9178;font-size:0.9rem;">📝 點擊展開程式碼</summary>
-            <pre style="background:#1e1e1e;padding:6px 8px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;font-size:0.82rem;"><code>${codeEscaped}</code></pre>
-        </details>`;
-        const placeholder = `__PLACEHOLDER_${placeholders.length}__`;
-        placeholders.push(details);
-        return placeholder;
-    });
-
-    // 2.5. 檢測並摺疊工具輸出區塊（以行為單位，連續工具輸出自動合併為一個摺疊塊）
-    (function() {
-        const lines = withDetails.split("\n");
-        const resultLines = [];
-        let toolBlock = [];
-        let inToolBlock = false;
-
-        function isToolLine(line) {
-            const t = line.trim();
-            if (!t) return false;
-            // JSON 工具回應（長行）
-            if (/^\{.*"(action|success|error_type|status|tool|error_message)".*\}$/.test(t) && t.length > 60) return true;
-            // chunked 檔案讀取狀態
-            if (/^\{"action":\s*"read_file"/.test(t)) return true;
-            // 工具結果標頭
-            if (/^(✅|📚|📋|📄|📝|🔧)/.test(t)) return true;
-            // 搜索結果標題行 → 永遠顯示，不摺疊
-            // CONFIRM_SPLIT 行
-            if (t.includes("CONFIRM_SPLIT")) return true;
-            return false;
+    while ((match = codeRegex.exec(text)) !== null) {
+        const before = text.slice(lastIndex, match.index);
+        if (before.trim()) {
+            parts.push(`<div style="white-space:pre-wrap; word-break:break-word;">${escapeHtml(before).replace(/\n/g, '<br>')}</div>`);
         }
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (isToolLine(line)) {
-                if (!inToolBlock) {
-                    inToolBlock = true;
-                    toolBlock = [];
-                }
-                toolBlock.push(line);
-            } else {
-                if (inToolBlock) {
-                    const escapedBlock = escapeHtml(toolBlock.join("\n"));
-                    const ph = "__PLACEHOLDER_" + placeholders.length + "__";
-                    placeholders.push("<details class=\"tool-collapse\" style=\"margin:4px 0;\"><summary class=\"tool-summary\" title=\"🔧 工具輸出 — 點擊展開\"></summary><div style=\"margin-top:2px;padding:6px 10px;background:#252526;border-radius:4px;font-size:0.85rem;\">" + escapedBlock + "</div></details>");
-                    resultLines.push(ph);
-                    inToolBlock = false;
-                }
-                resultLines.push(line);
-            }
-        }
-        if (inToolBlock) {
-            const escapedBlock = escapeHtml(toolBlock.join("\n"));
-            const ph = "__PLACEHOLDER_" + placeholders.length + "__";
-            placeholders.push("<details class=\"tool-collapse\" style=\"margin:4px 0;\"><summary class=\"tool-summary\" title=\"🔧 工具輸出 — 點擊展開\"></summary><div style=\"margin-top:2px;padding:6px 10px;background:#252526;border-radius:4px;font-size:0.85rem;\">" + escapedBlock + "</div></details>");
-            resultLines.push(ph);
-        }
+        const lang = match[1] ? ` (${escapeHtml(match[1])})` : '';
+        const code = escapeHtml(match[2]);
+        parts.push(`
+            <details style="margin:4px 0; border:1px solid #3e3e42; border-radius:8px; background:#1e1e1e; overflow:hidden;">
+                <summary style="cursor:pointer; color:#4ec9b0; font-weight:bold; padding:6px 12px; user-select:none;">📄 點擊展開代碼塊${lang}</summary>
+                <pre style="margin:0; padding:8px 12px 12px; background:#1a1a1a; overflow-x:auto; white-space:pre-wrap; word-break:break-all; font-family:'Cascadia Code','JetBrains Mono',monospace; font-size:0.82rem; line-height:1.5;"><code>${code}</code></pre>
+            </details>
+        `);
 
-        withDetails = resultLines.join("\n");
-    })();
-
-    // 3. 對剩餘文本進行 HTML 轉義（佔位符不會被轉義）
-    let escaped = escapeHtml(withDetails);
-
-    // 4. 將佔位符替換回真實的 HTML 標籤
-    for (let i = 0; i < placeholders.length; i++) {
-        const placeholder = `__PLACEHOLDER_${i}__`;
-        escaped = escaped.replace(new RegExp(placeholder, 'g'), placeholders[i]);
+        lastIndex = match.index + match[0].length;
     }
 
-    // 5. 換行轉 <br>
-    let final = escaped.replace(/\n/g, '<br>');
+    const tail = text.slice(lastIndex);
+    if (tail.trim()) {
+        parts.push(`<div style="white-space:pre-wrap; word-break:break-word;">${escapeHtml(tail).replace(/\n/g, '<br>')}</div>`);
+    }
 
-    return `<div style="margin:4px 0;">${final}</div>`;
+    return `<div style="margin:4px 0;">${parts.join('')}</div>`;
 }
 
 
@@ -1699,34 +1707,99 @@ function _restoreStreamState(agent) {
     const hasReply = (accumulatedReply[agent] || '') !== '';
     const hasRounds = !!(rounds[agent] && rounds[agent].length);
     if (!hasThink && !hasReply && !hasRounds) {
-        // no in-progress stream: hide and clear stream-container to avoid stale content from previous agent
-        const _sc = document.getElementById('stream-container');
-        if (_sc) _sc.remove();
-        const _tc = document.getElementById('think-content');
-        const _rc = document.getElementById('reply-content');
-        if (_tc) _tc.textContent = '';
-        if (_rc) _rc.textContent = '';
+        // 方案B(20260904)：底部 #stream-container 已整組收掉，此處無需清理
         return;
     }
     _renderRoundBlocks(agent);
-    _ensureStreamUI(agent);
-    const sc = document.getElementById('stream-container');
-    if (sc) { sc.style.display = 'flex'; sc.style.opacity = '1'; }
-    const tc = document.getElementById('think-content');
-    const rc = document.getElementById('reply-content');
-    if (tc) tc.textContent = accumulatedThink[agent] || '';
-    if (rc) rc.textContent = accumulatedReply[agent] || '';
+    // 方案B(20260904)：底部 #stream-container 即時面板已整組收掉，還原內容直接由輪次區塊呈現
     const cm = document.getElementById('chatMessages');
     if (cm) cm.scrollTop = cm.scrollHeight;
 }
 
+// 🔧 頁面刷新/切換後，自動恢復該 agent 進行中的串流（重放已發生的思考/工具/回答並繼續實時接收）
+async function resumeActiveSessionForAgent(agent) {
+    if (!agent) return false;
+    try {
+        const res = await fetch(`/api/chat/active?agent=${encodeURIComponent(agent)}`, { cache: 'no-store' });
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (!data.ok || !data.sessions || data.sessions.length === 0) return false;
+        // 取緩衝事件數最多（進度最新）的 session
+        const s = data.sessions[data.sessions.length - 1];
+        console.log(`[resume] agent=${agent} 恢復 session=${s.session_id} buffered=${s.buffered}`);
+        // 🔧 續流優化 v2：以 server 聚合快照一鍵重建目前進度，不再從第一輪逐筆重放
+        const _st = (s && s.state) || null;
+        streamFinished[agent] = false;
+        if (_st && Array.isArray(_st.rounds) && _st.rounds.length) {
+            rounds[agent] = _st.rounds.map(function (r) {
+                return {
+                    think: (r && r.think) || '',
+                    tool_calls: (r && Array.isArray(r.tool_calls)) ? r.tool_calls : [],
+                    tool_results: (r && Array.isArray(r.tool_results)) ? r.tool_results : [],
+                    reply: (r && r.reply) || '',
+                    iteration: (r && r.iteration) || 0
+                };
+            });
+        } else {
+            rounds[agent] = [];
+        }
+        currentRoundIdx[agent] = (rounds[agent] && rounds[agent].length) ? rounds[agent].length - 1 : -1;
+        accumulatedThink[agent] = (_st && _st.think) || '';
+        accumulatedReply[agent] = (_st && _st.reply) || '';
+        streamGen[agent] = (streamGen[agent] || 0) + 1;
+        currentThinkDiv[agent] = null;
+        currentReplyDiv[agent] = null;
+        currentAssistantDiv[agent] = null;
+        if (agentStates[agent]) agentStates[agent].isRunning = true;
+        if (agent === currentAgent) showWorkingIndicator();
+        // 🔧 續流：不再整段清空聊天區（避免刷新瞬間全黑/卡死/無法切侍女），
+        // 只移除最後一則 user 之後的本回合暫存泡泡（DB 會隨回合逐步寫入），保留先前回合歷史；
+        // 本回合內容改由下方 EventSource 重放增量重建（批次、不阻塞主執行緒）。
+        try {
+            const listEl = document.getElementById('message-list') || document.getElementById('chatMessages');
+            if (listEl) {
+                const allUsers = listEl.querySelectorAll('.message.user');
+                const lastUser = allUsers[allUsers.length - 1];
+                if (lastUser) {
+                    let n = lastUser.nextSibling;
+                    while (n) { const nn = n.nextSibling; n.remove(); n = nn; }
+                }
+                listEl.scrollTop = listEl.scrollHeight;
+            }
+        } catch (e) {
+            console.warn('[resume] 清理暫存泡泡失敗', e);
+        }
+        // 🔧 以聚合快照一次性重建目前進度 UI（避免從第一輪重放、一筆筆重建 DOM → 卡）
+        const _resumeAfter = (_st && typeof _st.n === 'number') ? _st.n : 0;
+        _restoreStreamState(agent);
+        _sseSessionByAgent[agent] = s.session_id;
+        _resumeViaEventSource(agent, s.session_id, 0, _resumeAfter);
+        return true;
+    } catch (e) {
+        console.warn('[resume] 查詢進行中 session 失敗:', e);
+        return false;
+    }
+}
+
 // renderChatMessages 保持不變（但注意 msg.timestamp 現在是毫秒）
 // ---- 渲染聊天消息（純文本摺疊版） ----
+function _foldLegacyToolDump(raw) {
+    if (!raw || typeof raw !== "string") return null;
+    var s = String(raw);
+    var headRe = /^\s*(✅\s*命令執行成功|✅\s*執行成功|❌\s*命令執行失敗|❌\s*[^\n]*(?:拒絕執行|風險過高|失敗)|<pre>|&lt;pre&gt;)/;
+    var jsonRe = /^\s*\{[\s\S]*?"(?:success|error|ok)"\s*:/;
+    if (!headRe.test(s) && !jsonRe.test(s)) return null;
+    var cleaned = s.replace(/&lt;\/?pre&gt;/gi, "").replace(/<\/?pre>/gi, "");
+    var body = escapeHtml(cleaned).replace(/\n/g, "<br>");
+    return "<details style=\"margin:6px 0;border:1px solid #3e3e42;border-radius:8px;overflow:hidden;background:#18181b;\">"
+        + "<summary style=\"cursor:pointer;user-select:none;background:#252526;padding:5px 10px;font-size:0.85rem;color:#e0a800;\">📦 工具輸出（點擊展開 / 摺疊）</summary>"
+        + "<div style=\"padding:8px 10px;font-size:0.85rem;color:#c9c9ce;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:55vh;overflow:auto;\">" + body + "</div>"
+        + "</details>";
+}
+// 🔧 方案1：舊格式 / 純文字 assistant 訊息「工具輸出自動摺疊」（見 _foldLegacyToolDump）
 function renderChatMessages(messages) {
     const listEl = document.getElementById('message-list') || document.getElementById('chatMessages');
     if (!listEl) return;
-    const staleStreamContainer = document.getElementById('stream-container');
-    if (staleStreamContainer) staleStreamContainer.remove();
     listEl.innerHTML = '';
     let seqNum = 0;
 
@@ -1866,20 +1939,8 @@ function renderChatMessages(messages) {
                 }
             }
 
-            // ---- 思考區摺疊（默認收起） ----
+            // 思考過程區塊已停用：只顯示最終回答，不再顯示 "💭 思考過程（點擊展開）"。
             let thinkFoldHtml = '';
-            if (msg.thinkContent) {
-                const thinkEscaped = escapeHtml(msg.thinkContent);
-                thinkFoldHtml = `
-                    <details class="think-fold" style="margin:4px 0; border:1px solid #3a3a2e; border-radius:6px; background:#1e1e18; overflow:hidden;">
-                        <summary style="cursor:pointer; color:#a09060; font-weight:bold; padding:6px 12px; font-size:0.85rem; background:#252520; user-select:none;">💭 思考過程（點擊展開）</summary>
-                        <div class="think-container" style="max-height:30vh; overflow-y:auto; padding:8px 12px;">
-                            <div style="font-size:0.7rem; color:#a09060; margin-bottom:4px;">${agenticon} ${currentAgent} 思考中...</div>
-                            <div class="think-content" style="font-size:0.85rem; line-height:1.5; white-space:pre-wrap; word-break:break-word; color:#b0a080;">${thinkEscaped}</div>
-                        </div>
-                    </details>
-                `;
-            }
 
             // ---- 複製按鈕 ----
             const copyBtnHtml = `<button class="copy-msg-btn" data-msg="${content.replace(/"/g, '&quot;')}" style="background:none; border:none; cursor:pointer; color:#ccc; font-size:12px;">📋</button>`;
@@ -1887,9 +1948,11 @@ function renderChatMessages(messages) {
             // 🔧 輪次結構持久化：若帶有 rounds 結構，用輪次區塊渲染；否則用傳統氣泡
             let bodyHtml;
             if (msg.rounds && Array.isArray(msg.rounds) && msg.rounds.length) {
-                bodyHtml = _buildHistoryRoundBlocksHtml(msg.rounds) + copyBtnHtml;
+                bodyHtml = (thinkFoldHtml || '') + _buildHistoryRoundBlocksHtml(msg.rounds) + copyBtnHtml;
             } else {
-                bodyHtml = `<div class="message-bubble" style="flex:1;">${thinkFoldHtml}${processedHtml}${copyBtnHtml}</div>`;
+                // 🔧 方案1：舊訊息（無 rounds / rounds 失效）若整段是工具輸出，自動摺疊成 📦 工具輸出
+                const _legacyToolFold = (msg.role === "assistant") ? _foldLegacyToolDump(rawContent) : null;
+                bodyHtml = `<div class="message-bubble" style="flex:1;">${thinkFoldHtml}${_legacyToolFold || processedHtml}${copyBtnHtml}</div>`;
             }
 
             // ---- 組裝 ----
@@ -2045,6 +2108,28 @@ const _sseSessionByAgent = {};     // 記錄每個 agent 當前可續流的 sess
 const _eventSourceRetryTimers = {}; // 每個 agent 的續流重試計時器
 const _eventSourceRetryCount = {};  // 每個 agent 的續流重試次數
 const _MAX_EVENTSOURCE_RETRIES = 3;
+const _sseReplayQ = {};        // 續流重放事件佇列（批次 flush，避免主執行緒被上萬事件卡死 → 全黑/無法捲動）
+const _sseReplayFlush = {};    // 每個 agent 是否已有排程中的批次 flush
+function _drainSseReplayQ(agent) {
+    const q = _sseReplayQ[agent];
+    if (!q || q.length === 0) { _sseReplayFlush[agent] = false; return; }
+    const batch = q.splice(0, 250);
+    for (let bi = 0; bi < batch.length; bi++) {
+        const ed = batch[bi];
+        try { window.dispatchEvent(new CustomEvent('chat_stream_sse', { detail: ed })); }
+        catch (err) { console.warn('[SSE resume] 事件處理失敗', err); }
+        if (ed.type === 'done' || ed.type === 'error') {
+            _closeAgentEventSource(agent);
+            delete _eventSourceRetryCount[agent];
+            delete _sseSessionByAgent[agent];
+        }
+    }
+    if (q.length > 0 && _activeEventSources[agent]) {
+        setTimeout(() => _drainSseReplayQ(agent), 0);
+    } else {
+        _sseReplayFlush[agent] = false;
+    }
+}
 
 function _closeAgentEventSource(agent) {
     const t = _eventSourceRetryTimers[agent];
@@ -2059,13 +2144,14 @@ function _closeAgentEventSource(agent) {
     }
 }
 
-function _resumeViaEventSource(agent, sessionId, retryCount = 0) {
+function _resumeViaEventSource(agent, sessionId, retryCount = 0, after = 0) {
     if (!sessionId) return false;
     _closeAgentEventSource(agent);
     try {
         _eventSourceRetryCount[agent] = retryCount;
         const retryNonce = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-        const es = new EventSource(`/api/chat/stream/${encodeURIComponent(sessionId)}?r=${retryNonce}`);
+        const _afterQ = (after > 0) ? `&after=${after}` : '';
+        const es = new EventSource(`/api/chat/stream/${encodeURIComponent(sessionId)}?r=${retryNonce}${_afterQ}`);
         _activeEventSources[agent] = es;
         es.onmessage = (evt) => {
             if (!evt || !evt.data) return;
@@ -2075,11 +2161,13 @@ function _resumeViaEventSource(agent, sessionId, retryCount = 0) {
                     _sseSessionByAgent[agent] = eventData.sse_session_id;
                     return;
                 }
-                window.dispatchEvent(new CustomEvent('chat_stream_sse', { detail: eventData }));
-                if (eventData.type === 'done' || eventData.type === 'error') {
-                    _closeAgentEventSource(agent);
-                    delete _eventSourceRetryCount[agent];
-                    delete _sseSessionByAgent[agent];
+                // 🔧 續流事件改為「批次入隊 + 分時 flush」：一次只處理 250 筆、其餘下一幀再處理，
+                // 讓 UI 每幀都有喘息，避免一次同步 dispatch 上萬事件把頁面卡成全黑/無法切換侍女。
+                if (!_sseReplayQ[agent]) _sseReplayQ[agent] = [];
+                _sseReplayQ[agent].push(eventData);
+                if (!_sseReplayFlush[agent]) {
+                    _sseReplayFlush[agent] = true;
+                    setTimeout(() => _drainSseReplayQ(agent), 0);
                 }
             } catch (e) {
                 console.warn('[SSE resume] JSON 解析失敗', e);
@@ -2093,11 +2181,12 @@ function _resumeViaEventSource(agent, sessionId, retryCount = 0) {
                 console.warn(`[SSE resume] EventSource 續流失敗，第 ${nextRetry} 次重試，${backoffMs}ms 後重連`);
                 _eventSourceRetryTimers[agent] = setTimeout(() => {
                     delete _eventSourceRetryTimers[agent];
-                    _resumeViaEventSource(agent, sessionId, nextRetry);
+                    _resumeViaEventSource(agent, sessionId, nextRetry, after);
                 }, backoffMs);
                 return;
             }
             delete _eventSourceRetryCount[agent];
+            delete _sseSessionByAgent[agent];
             console.warn('[SSE resume] EventSource 續流最終失敗');
             clearPersistedRunningAgent(agent);
             if (agentStates[agent]) agentStates[agent].isRunning = false;
@@ -2141,6 +2230,8 @@ async function _startThenStreamViaEventSource(message, agent) {
 }
 
 async function sendViaSSE(message, agent) {
+    // 🔧 新一輪串流開始，重置流式結束標記（雙保險：sendUserMessage 已重置，這裡再確保一次）
+    streamFinished[agent] = false;
     // 🔧 僅取消同一 agent 的舊 SSE 請求（不影響其他 agent 的並行工作）
     if (_activeSSEControllers[agent]) {
         _activeSSEControllers[agent].abort();
@@ -2290,71 +2381,8 @@ async function sendUserMessage(content) {
     // 🔧 新一輪發送，重置流式結束標記（允許本次正常顯示 stream-container）
     streamFinished[currentAgent] = false;
 
-    // ---- 修復：確保 stream-container 存在 ----
-    let streamContainer = document.getElementById('stream-container');
-    if (!streamContainer) {
-        // 若不存在，動態創建並插入到 chatMessagesDiv 中
-        streamContainer = document.createElement('div');
-        streamContainer.id = 'stream-container';
-        streamContainer.style.cssText = 'display:flex; flex-shrink:0; height:35%; min-height:180px; max-height:45vh; border-top:1px solid #3e3e42; background:#1e1e1e; position:relative; overflow:hidden;';
-        streamContainer.innerHTML = `
-            <div style="display:flex; flex-direction:column; height:100%;">
-                <div id="think-panel" style="max-height:30vh; overflow-y:auto; padding:6px 10px; border-bottom:1px solid #3e3e42; white-space:pre-wrap; word-break:break-word;">
-                    <div style="font-weight:bold; font-size:0.85rem; color:#a09060; margin-bottom:4px;">💭 思考</div>
-                    <div id="think-content" style="font-size:0.9rem; line-height:1.5;"></div>
-                </div>
-                <div id="reply-panel" style="flex:1; overflow-y:auto; padding:6px 10px; white-space:pre-wrap; word-break:break-word;">
-                    <div style="font-weight:bold; font-size:0.9rem; color:#4ec9b0; margin-bottom:4px;">💬 回應</div>
-                    <div id="reply-content" style="font-size:0.9rem; line-height:1.5;"></div>
-                </div>
-            </div>
-            <button id="expand-stream-btn" style="position:absolute; top:6px; right:6px; background:#4ec9b0; border:none; border-radius:16px; padding:2px 12px; cursor:pointer; font-size:0.8rem; z-index:5;">🔍 展開</button>
-        `;
-        // 插入到 chatMessagesDiv 最後
-        chatMessagesDiv.appendChild(streamContainer);
-        // 重新綁定展開按鈕事件（若需要）
-        streamContainer.querySelector('#expand-stream-btn')?.addEventListener('click', function() {
-            const thinkText = document.getElementById('think-content')?.textContent || '';
-            const replyText = document.getElementById('reply-content')?.textContent || '';
-            if (!thinkText && !replyText) {
-                alert('目前沒有流式內容可查看');
-                return;
-            }
-            const modal = document.createElement('div');
-            modal.className = 'expand-modal';
-            modal.innerHTML = `
-                <div class="modal-box">
-                    <div class="modal-header">
-                        <h3>📄 完整內容</h3>
-                        <button class="modal-close">&times;</button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="panel">
-                            <div class="label think">💭 思考</div>
-                            <div class="content">${escapeHtml(thinkText) || '（無思考內容）'}</div>
-                        </div>
-                        <div class="panel">
-                            <div class="label reply">💬 回應</div>
-                            <div class="content">${escapeHtml(replyText) || '（無回應內容）'}</div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(modal);
-            modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
-            modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-        });
-    } else {
-        // 若已存在，確保顯示（修復 opacity:0 導致內容隱形）
-        streamContainer.style.display = 'flex';
-        streamContainer.style.opacity = '1';
-        const tp = document.getElementById('think-panel');
-        const rp = document.getElementById('reply-panel');
-        if (tp) tp.style.opacity = '1';
-        if (rp) rp.style.opacity = '1';
-    }
-
-    // 清空流式內容
+    // stream-container 已停用：這段邏輯不再建立或依賴它，避免再次干擾發送流程。
+    // 清空流式內容（已經不再使用底部串流面板）
     const thinkContent = document.getElementById('think-content');
     const replyContent = document.getElementById('reply-content');
     if (thinkContent) thinkContent.textContent = '';
@@ -2389,12 +2417,7 @@ async function sendUserMessage(content) {
     currentThinkDiv[currentAgent] = assistantDiv.querySelector('.think-content');
     currentReplyDiv[currentAgent] = assistantDiv.querySelector('.message-bubble');
 
-    // 🔧 確保 stream-container 可見（在發送前就顯示，避免延遲）
-    const _sc = document.getElementById('stream-container');
-    if (_sc) {
-        _sc.style.display = 'flex';
-        _sc.style.opacity = '1';
-    }
+    // 方案B(20260904)：底部即時串流面板已整組收掉，不再顯示
 
     console.log('[sendUserMessage] 發送 SSE 請求, agent=', currentAgent);
     // 🔧 使用 SSE 作為主要傳輸（繞過 Socket.IO 502），保留 socket.emit 作為 fallback
@@ -2459,9 +2482,9 @@ function showWaitingForUserPanel(agent, waitingFor, continueCode, promptText) {
     _waitingForUserState = { agent, waitingFor, continueCode, prompt: promptText || '請補充必要資訊後繼續。', visible: true };
     const textEl = document.getElementById('waitingForUserText');
     if (textEl) {
-        const codeText = continueCode ? `續跑碼：${continueCode}` : '';
+        // 🔧 /continue 已停用（_job.json 停用），不再顯示續跑碼
         const waitText = waitingFor ? `類型：${waitingFor}` : '類型：人工補充';
-        textEl.innerHTML = `${promptText || '請繼續提供必要資訊。'}<br><span style="color:#f9e7a3;">${waitText}${codeText ? ' · ' + codeText : ''}</span>`;
+        textEl.innerHTML = `${promptText || '請繼續提供必要資訊。'}<br><span style="color:#f9e7a3;">${waitText}</span>`;
     }
     panel.style.display = 'block';
     const inputWrapper = document.getElementById('chatInputWrapper');
@@ -2633,14 +2656,35 @@ function stopGeneration() {
                 const childUl = document.createElement('ul');
                 childUl.style.display = 'none';
                 span.classList.add('collapsed');
-                if (node.children) renderTree(node.children, childUl);
+                if (node.children && node.children.length > 0) {
+                    renderTree(node.children, childUl);
+                    childUl.dataset.loaded = '1';   // 已有子層，不需再掃
+                }
                 li.appendChild(childUl);
-                span.onclick = (e) => {
+                span.onclick = async (e) => {
                     e.stopPropagation();
                     const isHidden = childUl.style.display === 'none';
-                    childUl.style.display = isHidden ? 'block' : 'none';
-                    span.classList.toggle('collapsed', !isHidden);
-                    // ===== 新增：更新當前目錄 =====
+                    if (isHidden) {
+                        // 惰性載入：展開資料夾時才向後端掃描該層（看才掃描）
+                        if (!childUl.dataset.loaded && !childUl.dataset.loading) {
+                            childUl.dataset.loading = '1';
+                            try {
+                                const res = await fetch('/api/tree?path=' + encodeURIComponent(node.path));
+                                const data = await res.json();
+                                renderTree(data.tree || [], childUl);
+                                childUl.dataset.loaded = '1';
+                            } catch (err) {
+                                console.error('載入子目錄失敗', node.path, err);
+                            } finally {
+                                delete childUl.dataset.loading;
+                            }
+                        }
+                        childUl.style.display = 'block';
+                        span.classList.remove('collapsed');
+                    } else {
+                        childUl.style.display = 'none';
+                        span.classList.add('collapsed');
+                    }
                     setCurrentDirectory(node.path);
                 };
             } else {
@@ -2728,6 +2772,8 @@ async function loadFile(path, name, silent = false) {
     // 重置顯示狀態
     imageViewer.style.display = 'none';
     videoViewer.style.display = 'none';
+    if (audioViewer) { audioViewer.pause(); }
+    audioViewer.style.display = 'none';
     htmlPreview.style.display = 'none';
     mediaView.style.display = 'block';   // 預設顯示媒體區（但內部元素隱藏）
     editorArea.style.display = 'none';
@@ -2764,12 +2810,28 @@ async function loadFile(path, name, silent = false) {
         return;
     }
     // ---- 處理影片 ----
-    else if (['mp4','webm','ogg'].includes(ext)) {
+    else if (['mp4','webm','ogg','ml3'].includes(ext)) {
         videoViewer.src = rawUrl;
         videoViewer.style.display = 'block';
         imageViewer.style.display = 'none';
         htmlPreview.style.display = 'none';
         videoViewer.load();
+        editorArea.style.display = 'none';
+        mediaView.style.display = 'block';
+        modeToggleBar.style.display = 'none';
+        updatePathInput();
+        return;
+    }
+
+    // ---- 處理音訊 ----
+    else if (['mp3','wav','m4a','aac','flac','oga','opus','weba'].includes(ext)) {
+        audioViewer.src = rawUrl;
+        audioViewer.style.display = 'block';
+        videoViewer.style.display = 'none';
+        imageViewer.style.display = 'none';
+        htmlPreview.style.display = 'none';
+        audioViewer.load();
+        audioViewer.play().catch(() => {});
         editorArea.style.display = 'none';
         mediaView.style.display = 'block';
         modeToggleBar.style.display = 'none';
@@ -3385,7 +3447,15 @@ function initEditorPathResize() {
     }
 }
 
-function renderAsciiContent() {
+function renderEmlContent() {
+        document.getElementById('toolsContent').innerHTML = '<iframe src="/webTools/eml_viewer.html" style="width:100%; height:100%; border:none; border-radius:8px;"></iframe>';
+    }
+
+    function renderMl3Content() {
+        document.getElementById('toolsContent').innerHTML = '<iframe src="/webTools/ml3_player.html" style="width:100%; height:100%; border:none; border-radius:8px;"></iframe>';
+    }
+
+    function renderAsciiContent() {
         document.getElementById('toolsContent').innerHTML = '<iframe src="/webTools/ASCII.html" style="width:100%; height:100%; border:none; border-radius:8px;"></iframe>';
     }
 
@@ -3644,6 +3714,7 @@ async function renderFilesContent() {
                 <div id="media-view" style="display:none; flex:1; overflow:auto; padding:8px;">
                     <img id="image-viewer" style="display:none; max-width:100%; border-radius:8px;" />
                     <video id="video-viewer" style="display:none; max-width:100%; border-radius:8px;" controls></video>
+                    <audio id="audio-viewer" style="display:none; width:100%; border-radius:8px;" controls></audio>
                     <iframe id="html-preview" style="display:none; width:100%; height:100%; border:none; border-radius:8px; background:white;"></iframe>
                     <div id="current-filename" style="display:none;"></div>
                 </div>
@@ -3670,6 +3741,7 @@ async function renderFilesContent() {
     // 4. 重新綁定所有元素引用和事件（原 renderFilesContent 中的綁定）
     imageViewer = document.getElementById('image-viewer');
     videoViewer = document.getElementById('video-viewer');
+    audioViewer = document.getElementById('audio-viewer');
     currentFilenameSpan = document.getElementById('current-filename');
 
     document.getElementById('save-file-btn').addEventListener('click', function(){ saveFileContent(false); });
@@ -3821,10 +3893,14 @@ async function createFromPath() {
         else if (tool === 'logs') renderLogsContent();
         else if (tool === 'search') renderSearchContent();
         else if (tool === 'bookmark') document.getElementById('toolsContent').innerHTML = '<iframe src="/webTools/書籤/書籤.html" style="width:100%; height:100%; border:none; border-radius:8px;"></iframe>';
+        else if (tool === 'moneymaker') document.getElementById('toolsContent').innerHTML = '<iframe src="/report/賺錢王/index.html" style="width:100%; height:100%; border:none; border-radius:8px;"></iframe>';
+        else if (tool === 'eml') renderEmlContent();
+        else if (tool === 'ml3') renderMl3Content();
 
         else if (tool === 'game') rendergame();
         else if (tool === 'novnc') renderNovncContent();
         else if (tool === 'backup') renderBackupContent();
+        else if (tool === 'room') renderRoomContent();
         else if (tool === 'agent') renderAgentInfo();
 
     }
@@ -3934,8 +4010,10 @@ async function createFromPath() {
 
     // 🔧 若當前侍女但流式 UI（stream-container + assistantDiv）遺失，重建之
     function _ensureStreamUI(agent) {
+        // 方案B(20260904)：底部即時串流面板 #stream-container 已整組收掉；本函式改為空操作（相容既有呼叫）
+        return;
+        // ▼ 下列為原始建立邏輯，保留為 dead code（永不執行）
         if (agent !== currentAgent) return;
-        // 🔧 done 後殘留 reply/think 事件不得重建 stream-container（修復輸出重複）
         if (streamFinished[agent]) return;
         let sc = document.getElementById('stream-container');
         if (!sc) {
@@ -3973,6 +4051,7 @@ async function createFromPath() {
     // 🔧 渲染節流：多個 chunk 事件合併為同一幀內一次完整重建，避免每個 chunk 都重建整個 DOM 導致卡死
     function _scheduleRoundRender(agent) {
         if (agent !== currentAgent) return; // 背景 agent 不可見，不排程重建（切回時 _restoreStreamState 會重建）
+        if (streamFinished[agent]) return; // 🔧 done 後不再排程重建（防殘留事件重建 assistant div → 輸出重複）
         if (_roundRenderPending[agent]) return; // 已排程，跳過
         _roundRenderPending[agent] = true;
         _roundRenderRAF[agent] = requestAnimationFrame(function() {
@@ -4001,6 +4080,65 @@ async function createFromPath() {
 
     // 🔧 輪次結構持久化：把已存的 rounds 陣列渲染成靜態輪次區塊 HTML（全部標記「完成」）
     // 🔧 找出最後一個有「最後回答」(reply) 的輪次索引；若全部無 reply 則回傳最後一輪索引
+
+    // 🔧 工具區塊 HTML（tool_calls + tool_results），全量渲染與增量更新共用
+    function _buildRoundToolsHtml(r, isActive, isLast, openDetails) {
+        var html = '';
+        if (r.tool_calls && r.tool_calls.length) {
+            html += '<details style="background:#1a1a1d;padding:6px 12px;" ' + (openDetails ? 'open' : '') + '>';
+            html += '<summary style="color:#5b9bd5;font-size:0.8rem;">使用工具 (' + r.tool_calls.length + ')</summary>';
+            for (var j = 0; j < r.tool_calls.length; j++) {
+                var tc = r.tool_calls[j];
+                html += '<div style="margin:4px 0;padding:6px;background:#1e2a3a;border-radius:4px;font-size:0.8rem;">';
+                html += '<span style="color:#5b9bd5;">' + escapeHtml(tc.name) + '</span>';
+                var argsStr = JSON.stringify(tc.arguments || {}, null, 2);
+                if (argsStr.length > 600) argsStr = argsStr.substring(0, 600) + '\n...（參數過長已截斷）';
+                html += '<div style="color:#90949f;max-height:80px;overflow-y:auto;white-space:pre-wrap;">' + escapeHtml(argsStr) + '</div></div>';
+            }
+            html += '</details>';
+        }
+        if (r.tool_results && r.tool_results.length) {
+            html += '<details style="background:#1a1a1d;padding:6px 12px;" ' + (openDetails ? 'open' : '') + '>';
+            html += '<summary style="color:#00b894;font-size:0.8rem;">工具結果 (' + r.tool_results.length + ')</summary>';
+            for (var k = 0; k < r.tool_results.length; k++) {
+                var tr = r.tool_results[k];
+                var _content = String(tr.content || '');
+                var _truncated = _content.length > 800;
+                var _display = _truncated ? _content.substring(0, 800) + '\n…（內容過長，僅顯示前 800 字元）' : _content;
+                html += '<div style="margin:4px 0;padding:6px;background:#1a2e1a;border-radius:4px;font-size:0.8rem;">';
+                html += '<span style="color:#00b894;">' + escapeHtml(tr.name) + '</span>';
+                html += '<div style="color:#b0b0b0;max-height:150px;overflow-y:auto;white-space:pre-wrap;">' + escapeHtml(_display) + '</div></div>';
+            }
+            html += '</details>';
+        }
+        return html;
+    }
+
+    // 🔧 效能修復：tool_calls / tool_result 到達時只重建當前輪次的工具區塊，避免整段 rounds innerHTML 重建卡死
+    function _incrementalUpdateRoundTools(agent) {
+        if (agent !== currentAgent) return false;
+        var assistantDiv = currentAssistantDiv[agent];
+        if (!assistantDiv || !document.contains(assistantDiv)) return false;
+        var rIdx = currentRoundIdx[agent];
+        if (rIdx === undefined || !rounds[agent] || !rounds[agent][rIdx]) return false;
+        var blocks = assistantDiv.querySelectorAll('.round-block');
+        var block = blocks[rIdx];
+        if (!block) return false;
+        var r = rounds[agent][rIdx];
+        var isLast = rIdx === rounds[agent].length - 1;
+        var toolsHtml = _buildRoundToolsHtml(r, true, isLast, false);
+        var oldContainer = block.querySelector('.round-tools');
+        if (oldContainer) {
+            oldContainer.innerHTML = toolsHtml;
+        } else {
+            var wrap = document.createElement('div');
+            wrap.className = 'round-tools';
+            wrap.innerHTML = toolsHtml;
+            block.appendChild(wrap);
+        }
+        return true;
+    }
+
     function _findLastReplyIdx(roundsArr) {
         var lastReplyIdx = -1;
         for (var k = 0; k < roundsArr.length; k++) {
@@ -4023,35 +4161,28 @@ async function createFromPath() {
         }
         html += '</div>';
         if (r.think) {
-            html += '<details style="background:#1a1a1d;padding:6px 12px;" ' + ((isActive && isLast) || openDetails ? 'open' : '') + '>';
+            html += '<details style="background:#1a1a1d;padding:6px 12px;" ' + (openDetails ? 'open' : '') + '>';
             html += '<summary style="color:#a09060;font-size:0.8rem;">思考</summary>';
             html += '<div class="round-think-text" style="white-space:pre-wrap;font-size:0.85rem;color:#c0c0c0;max-height:200px;overflow-y:auto;">' + escapeHtml(r.think) + '</div>';
             html += '</details>';
         }
-        if (r.tool_calls && r.tool_calls.length) {
-            html += '<details style="background:#1a1a1d;padding:6px 12px;" ' + ((isActive && isLast) || openDetails ? 'open' : '') + '>';
-            html += '<summary style="color:#5b9bd5;font-size:0.8rem;">使用工具 (' + r.tool_calls.length + ')</summary>';
-            for (var j = 0; j < r.tool_calls.length; j++) {
-                var tc = r.tool_calls[j];
-                html += '<div style="margin:4px 0;padding:6px;background:#1e2a3a;border-radius:4px;font-size:0.8rem;">';
-                html += '<span style="color:#5b9bd5;">' + escapeHtml(tc.name) + '</span>';
-                html += '<div style="color:#90949f;max-height:80px;overflow-y:auto;">' + escapeHtml(JSON.stringify(tc.arguments || {}, null, 2)) + '</div></div>';
-            }
-            html += '</details>';
-        }
-        if (r.tool_results && r.tool_results.length) {
-            html += '<details style="background:#1a1a1d;padding:6px 12px;" ' + ((isActive && isLast) || openDetails ? 'open' : '') + '>';
-            html += '<summary style="color:#00b894;font-size:0.8rem;">工具結果 (' + r.tool_results.length + ')</summary>';
-            for (var k = 0; k < r.tool_results.length; k++) {
-                var tr = r.tool_results[k];
-                html += '<div style="margin:4px 0;padding:6px;background:#1a2e1a;border-radius:4px;font-size:0.8rem;">';
-                html += '<span style="color:#00b894;">' + escapeHtml(tr.name) + '</span>';
-                html += '<div style="color:#b0b0b0;max-height:150px;overflow-y:auto;">' + escapeHtml(String(tr.content).substring(0, 800)) + '</div></div>';
-            }
-            html += '</details>';
-        }
+        html += '<div class="round-tools">' + _buildRoundToolsHtml(r, isActive, isLast, openDetails) + '</div>';
         if (r.reply) {
             html += '<div class="round-reply-text" style="padding:8px 12px;font-size:0.9rem;color:#e4e4e7;white-space:pre-wrap;">' + renderPlainTextWithFold(r.reply) + '</div>';
+            // 🔧 一鍵確認：偵測 /confirm、/admin confirm、/cancel 指令並生成按鈕
+            var _confirmCmds = extractConfirmCommands(String(r.reply));
+            if (_confirmCmds && _confirmCmds.length) {
+                html += '<div style="padding:4px 12px 10px 12px;display:flex;gap:8px;flex-wrap:wrap;">';
+                for (var _ci = 0; _ci < _confirmCmds.length; _ci++) {
+                    var _cmd = _confirmCmds[_ci];
+                    if (_cmd.indexOf('/confirm') === 0 || _cmd.indexOf('/admin confirm') === 0) {
+                        html += '<button type="button" onclick="sendConfirmCommand(this)" data-cmd="' + escapeHtml(_cmd) + '" style="background:#2ea043;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:0.85rem;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.4);">✅ 同意執行</button>';
+                    } else if (_cmd.indexOf('/cancel') === 0) {
+                        html += '<button type="button" onclick="sendConfirmCommand(this)" data-cmd="' + escapeHtml(_cmd) + '" style="background:#da3633;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:0.85rem;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.4);">❌ 取消</button>';
+                    }
+                }
+                html += '</div>';
+            }
         }
         html += '</div>';
         return html;
@@ -4072,7 +4203,7 @@ async function createFromPath() {
             html += '</div></details>';
         }
         for (var i = collapseCount; i < roundsArr.length; i++) {
-            html += _buildRoundBlockHtml(roundsArr[i], i, false, (i === roundsArr.length - 1), false, (i === roundsArr.length - 1));
+            html += _buildRoundBlockHtml(roundsArr[i], i, false, (i === roundsArr.length - 1), false, false);
         }
         return html;
     }
@@ -4082,6 +4213,8 @@ async function createFromPath() {
     function _renderRoundBlocks(agent, finalize) {
         if (!rounds[agent] || !rounds[agent].length) return;
         if (agent !== currentAgent) return;
+        // 🔧 done 後僅允許 done 的最終渲染（finalize）；其餘殘留觸發直接丟棄，防止重建出第二個 assistant div
+        if (streamFinished[agent] && !finalize) return;
         var msgList = document.getElementById('message-list');
         if (!msgList) return;
         var assistantDiv = currentAssistantDiv[agent];
@@ -4115,7 +4248,7 @@ async function createFromPath() {
         for (var i = collapseCount; i < arr.length; i++) {
             var isActive = (i === currentRoundIdx[agent]);
             var isLast = (i === arr.length - 1);
-            html += _buildRoundBlockHtml(arr[i], i, isActive, isLast, false, (finalize && isLast));
+            html += _buildRoundBlockHtml(arr[i], i, isActive, isLast, false, false);
         }
         var listEl = container.querySelector('.round-blocks-list');
         if (!listEl) {
@@ -4123,7 +4256,18 @@ async function createFromPath() {
             listEl.className = 'round-blocks-list';
             container.insertBefore(listEl, container.firstChild);
         }
+        // 🔧 保存 details（思考/工具框）展開狀態：流式重建時不關閉用戶正在看的思考框
+        // 🔧 done(finalize) 時不恢復 → 生成完成關閉一次；之後 streamFinished 阻止重建，用戶展開狀態保持
+        var _savedOpen = [];
+        if (!finalize) {
+            listEl.querySelectorAll('details').forEach(function(d) { _savedOpen.push(d.open); });
+        }
         listEl.innerHTML = html;
+        // 🔧 重建後恢復展開狀態（僅流式期間；done 時保持關閉一次）
+        if (!finalize && _savedOpen.length) {
+            var _newDetails = listEl.querySelectorAll('details');
+            _newDetails.forEach(function(d, i) { if (_savedOpen[i]) d.open = true; });
+        }
         // 🔧 統一顯示：流式與 done 都只保留 round-blocks 卡片，隱藏冗餘的 think-container / message-bubble（避免重複顯示、混成一條）
         var _dupThink = container.querySelector(".think-container");
         var _dupBubble = container.querySelector(".message-bubble");
@@ -4134,6 +4278,20 @@ async function createFromPath() {
 
 
     function _onChatStream(data, channel) {
+    // 🔧 除錯追蹤：記錄每個事件（含 channel / streamFinished / gen），供重複輸出問題分析
+    try {
+        if (!window.__chatEventLog) window.__chatEventLog = [];
+        window.__chatEventLog.push({
+            t: Date.now(),
+            type: data.type,
+            agent: data.agent,
+            ch: channel,
+            fin: !!streamFinished[data.agent],
+            gen: streamGen[data.agent] || 0,
+            len: (data.content || '').length
+        });
+        if (window.__chatEventLog.length > 5000) window.__chatEventLog.splice(0, 1000);
+    } catch (e) {}
     // 🔧 效能修復：reply/think 每個 chunk 都 console.log 會拖垮主執行緒（尤其開 DevTools 時），只記錄稀有事件
     if (data.type !== 'reply' && data.type !== 'think') {
         console.log('[chat_stream] 收到事件:', data.type, data.agent, data.content ? data.content.substring(0, 50) : '');
@@ -4141,6 +4299,13 @@ async function createFromPath() {
     const agent = data.agent; // 修復對話污染：事件必須自帶 agent 標籤，缺失時直接丟棄，不得回退到 currentAgent（否則 A 的輸出會被誤歸到 B）
     if (!agent) {
         console.warn('[chat_stream] 無法識別 agent，跳過狀態更新');
+        return;
+    }
+    // 🔧 核心防重複（第 3 層）：done 後一律丟棄殘留事件。
+    // 殘留來源：雙通道晚到封包 / 續流重播 / 上一輪未排空的事件。
+    // 若放行，think/reply/tool_calls/tool_result 會經 _scheduleRoundRender/_ensureStreamUI
+    // 重建 assistant div 或重顯 stream-container → 輸出重複（「第2次是多餘」的元兇）。
+    if (streamFinished[agent] && data.type !== 'done') {
         return;
     }
     // 🔧 防雙通道重複輸出：後端 stream_emit 會同時透過 Socket.IO 與 SSE 隊列發送同一批事件，
@@ -4186,32 +4351,12 @@ async function createFromPath() {
             // 🔧 增量更新：只改當前輪次思考文字節點，避免整段重建卡死
             if (!_incrementalUpdateRoundText(agent, 'think', data.content)) _scheduleRoundRender(agent);
         }
-        // 🔧 若當前侍女但流式 DOM 遺失（切換過侍女），重建 UI
-        if (agent === currentAgent) {
-            _ensureStreamUI(agent);
-            // 🔧 確保 stream-container 可見
-            const _sc = document.getElementById('stream-container');
-            if (_sc && _sc.style.display === 'none') {
-                _sc.style.display = 'flex';
-                _sc.style.opacity = '1';
-            }
-        }
-        const thinkPanel = document.getElementById('think-content');
-        if (thinkPanel && agent === currentAgent) {
-            // 🔧 效能修復：append 文字節點而非整段替換累積字串（O(n²) → O(n)），避免長回覆越流越卡
-            if (data.content) thinkPanel.appendChild(document.createTextNode(data.content));
-            const _thinkPanel = document.getElementById('think-panel');
-            if (_thinkPanel) _thinkPanel.scrollTop = _thinkPanel.scrollHeight;
-        }
-        // 🔧 只更新與當前世代匹配的 div
-        if (currentThinkDiv[agent] && _checkStreamGen(agent, currentThinkDiv[agent])) {
-            currentThinkDiv[agent].appendChild(document.createTextNode(data.content));
-        }
+        // 方案A/B(20260904)：思考串流只寫入輪次區塊 .round-think-text（單一即時節點）；已移除 #think-content 底部面板與舊式 .think-content 的重複寫入
 } else if (data.type === 'tool_calls') {
         if (rounds[agent] && currentRoundIdx[agent] !== undefined) {
             var rIdx = currentRoundIdx[agent];
             if (rounds[agent][rIdx]) rounds[agent][rIdx].tool_calls = data.calls;
-            _scheduleRoundRender(agent);
+            if (!_incrementalUpdateRoundTools(agent)) _scheduleRoundRender(agent);
         }
     } else if (data.type === 'tool_result') {
         if (rounds[agent] && currentRoundIdx[agent] !== undefined) {
@@ -4219,19 +4364,12 @@ async function createFromPath() {
             if (rounds[agent][rIdx]) {
                 rounds[agent][rIdx].tool_results.push({name: data.tool_name || '未知工具', content: data.content});
             }
-            _scheduleRoundRender(agent);
+            if (!_incrementalUpdateRoundTools(agent)) _scheduleRoundRender(agent);
         }
     } else if (data.type === 'reply') {
         const subtype = data.subtype || 'normal';
         const content = data.content || '';
-        // 🔧 確保 stream-container 可見（每次 reply 都檢查，防止被意外隱藏）；done 後殘留 reply 不再顯示
-        if (agent === currentAgent && !streamFinished[agent]) {
-            const _sc = document.getElementById('stream-container');
-            if (_sc && _sc.style.display === 'none') {
-                _sc.style.display = 'flex';
-                _sc.style.opacity = '1';
-            }
-        }
+        // 方案B(20260904)：底部即時串流面板已收掉，此處不再顯示
         if (subtype === 'pending_list') {
             pendingWorkList = content;
             document.getElementById('showPendingBtn').style.display = 'inline-block';
@@ -4268,19 +4406,10 @@ async function createFromPath() {
             // 🔧 增量更新：只改當前輪次回覆文字節點，避免整段重建卡死
             if (!_incrementalUpdateRoundText(agent, 'reply', content)) _scheduleRoundRender(agent);
         }
-        // 🔧 若當前侍女但流式 DOM 遺失，重建 UI
-        if (agent === currentAgent) {
-            _ensureStreamUI(agent);
-        }
-        const replyPanel = document.getElementById('reply-content');
-        if (replyPanel && agent === currentAgent) {
-            // 🔧 效能修復：append 文字節點而非整段替換累積字串（O(n²) → O(n)）
-            if (content) replyPanel.appendChild(document.createTextNode(content));
-            const _replyPanel = document.getElementById('reply-panel');
-            if (_replyPanel) _replyPanel.scrollTop = _replyPanel.scrollHeight;
-        }
+        // 方案A/B(20260904)：回覆串流只寫入輪次區塊 .round-reply-text（單一即時節點）；已移除 #reply-content 底部面板的重複寫入
         // 🔧 只更新與當前世代匹配的 div
-        if (currentReplyDiv[agent] && _checkStreamGen(agent, currentReplyDiv[agent])) {
+        // 方案B(20260904)：舊式 .message-bubble 已被輪次區塊取代（且早已脫離 DOM），停用此重複寫入
+        if (false && currentReplyDiv[agent] && _checkStreamGen(agent, currentReplyDiv[agent])) {
             let displayContent = content;
             if (subtype === 'tool_result') {
                 displayContent = `📋 執行結果\n\n${content}`;
@@ -4415,17 +4544,8 @@ async function createFromPath() {
                 }
             }
         }
-        // 🔧 清空流式區域並隱藏（僅當前侍女）— 防止 done 後殘留事件重建導致輸出重複
-        const streamContainer = document.getElementById('stream-container');
-        if (agent === currentAgent && streamContainer) {
-            streamContainer.style.display = 'none';
-            streamContainer.style.opacity = '0';
-            const _tc = streamContainer.querySelector('#think-content');
-            const _rc = streamContainer.querySelector('#reply-content');
-            if (_tc) _tc.textContent = '';
-            if (_rc) _rc.textContent = '';
-        }
-        // 🔧 標記該 agent 流式已結束，殘留 reply/think 事件不得再重建/顯示 stream-container
+        // stream-container 已停用；done 事件不再操作它，避免重複清理與 DOM 干擾
+        // 🔧 標記該 agent 流式已結束，殘留 reply/think 事件不得再重建 UI
         streamFinished[agent] = true;
 
         // 🔧 僅在世代未變時清除參考（防止清除新訊息的 UI 參考）
@@ -4894,6 +5014,22 @@ function loadAgentSoul(container, agentName) {
     };
     socket.on("agent_soul_result", handler);
     setTimeout(() => { socket.off("agent_soul_result", handler); if (container.innerHTML.includes("載入中")) container.innerHTML = "<div style=\"color:#e0a800;\">⚠️ 載入逾時</div>"; }, 8000);
+}
+
+// 👁 工作報告預覽開關（由 Jobs 面板的報告按鈕呼叫）
+function toggleReportPreview(btn) {
+    const row = btn.parentElement;
+    const wrap = row ? row.nextElementSibling : null;
+    if (!wrap || !wrap.querySelector) return;
+    const iframe = wrap.querySelector('iframe');
+    if (wrap.style.display === 'none' || !wrap.style.display) {
+        if (iframe && !iframe.getAttribute('src')) iframe.src = btn.dataset.src;
+        wrap.style.display = 'block';
+        btn.textContent = '✖ 關閉';
+    } else {
+        wrap.style.display = 'none';
+        btn.textContent = '👁 預覽';
+    }
 }
 
 function loadAgentJobs(container, agentName) {
@@ -5805,6 +5941,121 @@ document.getElementById('desktopTopBtn')?.addEventListener('click', () => { wind
 
 
 });
+
+// ══════════ indexPage：未讀標記 + 標頭按鈕摺疊收藏 ══════════
+const UNREAD_KEY = 'mokUnreadAgents_v1';
+function getUnreadMap() {
+    try { return JSON.parse(localStorage.getItem(UNREAD_KEY) || '{}'); } catch (e) { return {}; }
+}
+function saveUnreadMap(m) { try { localStorage.setItem(UNREAD_KEY, JSON.stringify(m)); } catch (e) {} }
+
+// 切換目前 Agent 的未讀標示（左側名片長期顯示）
+function toggleUnreadMark() {
+    if (!currentAgent) { showQuoteToast('請先選擇一位 Agent'); return; }
+    const m = getUnreadMap();
+    if (m[currentAgent]) {
+        delete m[currentAgent];
+        showQuoteToast('🔕 已取消未讀標示');
+    } else {
+        m[currentAgent] = Date.now();
+        showQuoteToast('🔔 已標記未讀：左側名片將顯示未讀');
+    }
+    saveUnreadMap(m);
+    renderAgentList();
+    updateUnreadBtnState();
+    updateHeaderBtnsLayout();
+}
+
+// 更新 未讀 按鈕外觀
+function updateUnreadBtnState() {
+    const btn = document.getElementById('unreadBtn');
+    if (!btn) return;
+    const on = !!currentAgent && !!getUnreadMap()[currentAgent];
+    btn.classList.toggle('on', !!on);
+    btn.innerHTML = on ? '🔔 未讀' : '🔕 未讀';
+    btn.title = on ? '取消左側名片未讀標示' : '標記左側名片為未讀';
+}
+
+// 手機版：標頭按鈕過多時摺疊收藏（其餘收進 ⋯ 下拉）
+function updateHeaderBtnsLayout() {
+    const wrap = document.getElementById('agentHeaderBtns');
+    const more = document.getElementById('headerMoreBtn');
+    const dropdown = document.getElementById('headerBtnsDropdown');
+    if (!wrap || !more || !dropdown) return;
+    const isMobile = window.innerWidth <= 768;
+    const MAX_VISIBLE = isMobile ? 1 : 99;
+    const btns = Array.from(wrap.querySelectorAll('button[data-foldable]'));
+    const visible = btns.filter(b => getComputedStyle(b).display !== 'none');
+    if (visible.length > MAX_VISIBLE) {
+        more.style.display = 'inline-flex';
+        visible.forEach((b, i) => {
+            if (i < MAX_VISIBLE) { b.classList.remove('header-folded'); }
+            else { b.classList.add('header-folded'); }
+        });
+        const sig = visible.map(b => b.id).join(',');
+        if (!dropdown._built || dropdown._agents !== (currentAgent || '') || dropdown._sig !== sig) {
+            dropdown.innerHTML = '';
+            visible.slice(MAX_VISIBLE).forEach(b => {
+                const item = document.createElement('button');
+                item.className = 'header-dropdown-item';
+                item.innerHTML = b.innerHTML;
+                item.title = b.title || b.textContent.trim();
+                item.onclick = (e) => {
+                    e.stopPropagation();
+                    b.click();
+                    closeHeaderDropdown();
+                };
+                dropdown.appendChild(item);
+            });
+            dropdown._built = true;
+            dropdown._agents = currentAgent || '';
+            dropdown._sig = sig;
+        }
+    } else {
+        more.style.display = 'none';
+        dropdown.classList.remove('open');
+        dropdown.innerHTML = '';
+        dropdown._built = false;
+        dropdown._sig = '';
+        btns.forEach(b => b.classList.remove('header-folded'));
+    }
+}
+
+function closeHeaderDropdown() {
+    const d = document.getElementById('headerBtnsDropdown');
+    if (d) d.classList.remove('open');
+}
+
+// 綁定（main.js 在 <head> 載入，DOM 尚未就緒 → 等 DOMContentLoaded）
+document.addEventListener('DOMContentLoaded', function initUnreadFold() {
+    // 綁定 未讀 按鈕
+    document.getElementById('unreadBtn')?.addEventListener('click', toggleUnreadMark);
+    // 綁定 ⋯ 摺疊開關
+    document.getElementById('headerMoreBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const d = document.getElementById('headerBtnsDropdown');
+        if (d) d.classList.toggle('open');
+    });
+    // 點擊外部關閉下拉
+    document.addEventListener('click', (e) => {
+        const d = document.getElementById('headerBtnsDropdown');
+        if (d && d.classList.contains('open') && !d.contains(e.target) && e.target.id !== 'headerMoreBtn') {
+            d.classList.remove('open');
+        }
+    });
+    // 監聽按鈕顯隱變化，自動重新摺疊
+    const wrap = document.getElementById('agentHeaderBtns');
+    if (wrap) {
+        const obs = new MutationObserver(() => updateHeaderBtnsLayout());
+        obs.observe(wrap, { childList: true, attributes: true, subtree: true, attributeFilter: ['style', 'class'] });
+    }
+    window.addEventListener('resize', () => {
+        updateHeaderBtnsLayout();
+        closeHeaderDropdown();
+    });
+    // 初次整理
+    setTimeout(updateHeaderBtnsLayout, 300);
+});
 // 由於頁面加載時可能 init 已執行，但按鈕可能還未添加，所以使用 DOMContentLoaded 確保。
 // 但 init 在腳本中直接執行，所以需在 init 之後執行此綁定，但可用 setTimeout 保證。
 setTimeout(function() {
@@ -5844,6 +6095,10 @@ function switchTool2(tool) {
     else if (tool === "logs") renderForPanel2(renderLogsContent);
     else if (tool === "search") renderForPanel2(renderSearchContent);
     else if (tool === "novnc") renderForPanel2(renderNovncContent);
+    else if (tool === "moneymaker") document.getElementById("toolsContent2").innerHTML = '<iframe src="/report/賺錢王/index.html" style="width:100%; height:100%; border:none; border-radius:8px;"></iframe>';
+    else if (tool === "eml") renderForPanel2(renderEmlContent);
+    else if (tool === "ml3") renderForPanel2(renderMl3Content);
+    else if (tool === "room") renderForPanel2(renderRoomContent);
 }
 
 (function() {
@@ -6017,3 +6272,379 @@ function switchTool2(tool) {
 
 
 
+
+// ===== 🏠 房間：只顯示目前侍女自己房間（~/.mok/agent/<agent>）的文件樹 =====
+async function renderRoomContent() {
+    const agent = (typeof currentAgent !== 'undefined' && currentAgent) ? currentAgent : '';
+    const container = document.getElementById('toolsContent');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const outer = document.createElement('div');
+    outer.style.cssText = 'height:100%;display:flex;flex-direction:column;overflow:hidden;';
+
+    const head = document.createElement('div');
+    head.style.cssText = 'padding:5px 10px;background:#252526;border-bottom:1px solid #3e3e42;font-size:0.8rem;color:#ffd479;display:flex;align-items:center;gap:6px;flex-shrink:0;';
+    head.textContent = agent ? ('🏠 ' + agent + ' 的房間') : '🏠 房間';
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'flex:0 0 46%;min-height:70px;overflow:auto;padding:6px 4px;border-bottom:1px solid #3e3e42;';
+    const rootEl = document.createElement('div');
+    wrap.appendChild(rootEl);
+
+    // ---- 文件樹與檢視區之間的拖曳分隔線（可拖曳調整高度）----
+    const edHandle = document.createElement('div');
+    edHandle.id = 'room-resize-handle';
+    edHandle.style.cssText = 'flex-shrink:0;height:8px;cursor:row-resize;display:none;background:#333338;border-top:1px solid #4a4a50;border-bottom:1px solid #252526;box-shadow:0 0 3px rgba(0,0,0,.4);touch-action:none;';
+    edHandle.title = '⇕ 拖曳調整 文件樹／檢視區 高度';
+    edHandle.addEventListener('mouseenter', function () { edHandle.style.background = '#4ec9b0'; });
+    edHandle.addEventListener('mouseleave', function () { edHandle.style.background = '#2f2f33'; });
+    let roomDrag = null;
+    function roomDragMove(e) {
+        if (!roomDrag) return;
+        const y = (e.touches && e.touches.length) ? e.touches[0].clientY : e.clientY;
+        const dh = y - roomDrag.startY;
+        const ch = container.clientHeight || 400;
+        const minH = 70;
+        const maxH = Math.max(minH + 40, ch - 80);
+        let h = Math.round(roomDrag.startH + dh);
+        if (h < minH) h = minH;
+        if (h > maxH) h = maxH;
+        wrap.style.flex = '0 0 auto';
+        wrap.style.height = h + 'px';
+    }
+    function roomDragEnd() {
+        if (!roomDrag) return;
+        roomDrag = null;
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        document.removeEventListener('mousemove', roomDragMove);
+        document.removeEventListener('mouseup', roomDragEnd);
+        document.removeEventListener('touchmove', roomDragMove);
+        document.removeEventListener('touchend', roomDragEnd);
+        document.removeEventListener('touchcancel', roomDragEnd);
+    }
+    edHandle.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        roomDrag = { startY: e.clientY, startH: wrap.offsetHeight };
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'row-resize';
+        document.addEventListener('mousemove', roomDragMove);
+        document.addEventListener('mouseup', roomDragEnd);
+    });
+    edHandle.addEventListener('touchstart', function (e) {
+        e.preventDefault();
+        const t = e.touches[0];
+        roomDrag = { startY: t.clientY, startH: wrap.offsetHeight };
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'row-resize';
+        document.addEventListener('touchmove', roomDragMove, { passive: false });
+        document.addEventListener('touchend', roomDragEnd);
+        document.addEventListener('touchcancel', roomDragEnd);
+    });
+
+    // ---- 文件樹下方的 editor-area（看文件，機制同主機文件樹）----
+    const edWrap = document.createElement('div');
+    edWrap.id = 'editor-area';
+    edWrap.style.cssText = 'flex:1;min-height:0;display:none;flex-direction:column;overflow:hidden;';
+    const edBar = document.createElement('div');
+    edBar.style.cssText = 'flex-shrink:0;display:flex;align-items:center;gap:6px;padding:3px 8px;background:#252526;border-bottom:1px solid #3e3e42;font-size:0.75rem;';
+    const edName = document.createElement('span');
+    edName.style.cssText = 'color:#ffd479;font-weight:bold;flex-shrink:0;';
+    const edRel = document.createElement('span');
+    edRel.style.cssText = 'color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;';
+    const edEdit = document.createElement('button');
+    edEdit.textContent = '✏️ 編輯';
+    edEdit.style.cssText = 'flex-shrink:0;display:none;background:#2d5b8a;color:#fff;border:none;border-radius:10px;padding:1px 10px;cursor:pointer;font-size:0.72rem;';
+    edEdit.title = '編輯此檔案（修改後可回存）';
+    const edSave = document.createElement('button');
+    edSave.textContent = '💾 儲存';
+    edSave.style.cssText = 'flex-shrink:0;display:none;background:#2f9e44;color:#fff;border:none;border-radius:10px;padding:1px 10px;cursor:pointer;font-size:0.72rem;';
+    edSave.title = '將修改寫回房間檔案';
+    const edStatus = document.createElement('span');
+    edStatus.style.cssText = 'color:#888;font-size:0.7rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;';
+    const edClose = document.createElement('button');
+    edClose.textContent = '✖';
+    edClose.style.cssText = 'flex-shrink:0;background:none;border:none;color:#888;cursor:pointer;font-size:0.85rem;';
+    edClose.title = '關閉';
+    edBar.appendChild(edName); edBar.appendChild(edRel); edBar.appendChild(edStatus);
+    const edSpacer = document.createElement('span'); edSpacer.style.cssText = 'flex:1;'; edBar.appendChild(edSpacer);
+    edBar.appendChild(edEdit); edBar.appendChild(edSave); edBar.appendChild(edClose);
+    const edBody = document.createElement('div');
+    edBody.style.cssText = 'flex:1;min-height:0;overflow:auto;padding:8px;background:#1e1e1e;';
+    edWrap.appendChild(edBar); edWrap.appendChild(edBody);
+
+    // ---- 房間檢視區的「✏️ 編輯＋💾 儲存」狀態（可回存修改，同主機文件樹）----
+    let curRoomPath = '';
+    let curRoomRel = '';
+    let curRoomText = '';
+    let curRoomEditing = false;
+    let curRoomBinary = false;   // 圖片/影片/音訊/過大檔 → 不提供文字編輯
+
+    function roomRenderText(txt) {
+        edBody.innerHTML = '';
+        edBody.style.padding = '8px';
+        edBody.style.display = '';
+        edBody.style.flexDirection = '';
+        const pre = document.createElement('pre');
+        pre.style.cssText = 'margin:0;white-space:pre-wrap;word-break:break-word;font-family:Consolas,Menlo,monospace;font-size:0.8rem;line-height:1.5;color:#d4d4d4;';
+        pre.textContent = txt;
+        edBody.appendChild(pre);
+    }
+    function roomShowPreview() {
+        roomRenderText(curRoomText);
+        edEdit.textContent = '✏️ 編輯';
+        edEdit.title = '編輯此檔案（修改後可回存）';
+        edSave.style.display = 'none';
+        edStatus.textContent = '';
+        edStatus.style.color = '#888';
+        curRoomEditing = false;
+    }
+    function roomEnterEdit() {
+        if (!curRoomPath || curRoomBinary) return;
+        const ta = document.createElement('textarea');
+        ta.style.cssText = 'flex:1;width:100%;min-height:0;resize:none;box-sizing:border-box;background:#1e1e1e;color:#d4d4d4;border:none;outline:none;font-family:Consolas,Menlo,monospace;font-size:0.8rem;line-height:1.5;padding:8px;white-space:pre;tab-size:4;';
+        ta.value = curRoomText;
+        ta.addEventListener('keydown', function (ev) {
+            if ((ev.ctrlKey || ev.metaKey) && (ev.key === 's' || ev.key === 'S')) {
+                ev.preventDefault();
+                roomSaveFile();
+            }
+        });
+        edBody.innerHTML = '';
+        edBody.style.padding = '0';
+        edBody.style.display = 'flex';
+        edBody.style.flexDirection = 'column';
+        edBody.appendChild(ta);
+        ta.focus();
+        curRoomEditing = true;
+        edEdit.textContent = '👁 預覽';
+        edEdit.title = '結束編輯，回到唯讀預覽';
+        edSave.style.display = 'inline-block';
+        edStatus.textContent = '✏️ 編輯中… 可 Ctrl+S 快速儲存';
+        edStatus.style.color = '#ffd479';
+    }
+    function roomExitEdit() {
+        if (!curRoomPath || curRoomBinary) return;
+        roomShowPreview();
+    }
+    async function roomSaveFile() {
+        if (!curRoomPath || !curRoomEditing) return;
+        const ta = edBody.querySelector('textarea');
+        if (!ta) return;
+        const newText = ta.value;
+        edStatus.textContent = '⏳ 儲存中…';
+        edStatus.style.color = '#ffd479';
+        try {
+            const res = await fetch('/api/create_file', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: curRoomPath, content: newText })
+            });
+            const data = await res.json();
+            if (data.status !== 'ok') throw new Error(data.error || ('HTTP ' + res.status));
+            curRoomText = newText;
+            roomShowPreview();
+            edStatus.textContent = '✅ 已儲存 → ' + curRoomRel;
+            edStatus.style.color = '#69db7c';
+            setTimeout(function () {
+                if (edStatus.textContent.indexOf('已儲存') === 0) { edStatus.textContent = ''; edStatus.style.color = '#888'; }
+            }, 2500);
+        } catch (err) {
+            edStatus.textContent = '❌ 儲存失敗：' + (err.message || err);
+            edStatus.style.color = '#ff6b6b';
+        }
+    }
+    edEdit.addEventListener('click', function () { if (curRoomEditing) roomExitEdit(); else roomEnterEdit(); });
+    edSave.addEventListener('click', roomSaveFile);
+
+    outer.appendChild(head);
+    outer.appendChild(wrap);
+    outer.appendChild(edHandle);
+    outer.appendChild(edWrap);
+    container.appendChild(outer);
+
+    edClose.addEventListener('click', function () {
+        roomShowEmptyHint();
+    });
+
+    function roomShowEmptyHint() {
+        curRoomPath = ''; curRoomRel = ''; curRoomText = ''; curRoomEditing = false; curRoomBinary = false;
+        edName.textContent = '檢視區';
+        edRel.textContent = '';
+        edEdit.style.display = 'none';
+        edSave.style.display = 'none';
+        edStatus.textContent = '';
+        edStatus.style.color = '#888';
+        edBody.innerHTML = '<div style="color:#888;text-align:center;font-size:0.82rem;line-height:2;padding:26px 14px;">⬆️ 點選上方文件樹的檔案<br>即可在此檢視內容、✏️ 編輯並 💾 回存</div>';
+        edBody.style.padding = '8px';
+    }
+
+    // 樹(上) ⇕ 檢視區(下)：選中 agent 後版面恆常顯示，分隔條隨時可拖曳調整高度
+    if (agent) {
+        edHandle.style.display = 'block';
+        edWrap.style.display = 'flex';
+        roomShowEmptyHint();
+    } else {
+        wrap.style.flex = '1 1 auto';
+    }
+
+    // 開啟房間檔案：與主機文件樹一樣，用 /api/file、/api/raw 讀取顯示
+    window._roomOpenFile = async function (node) {
+        const rel = node.rel || node.name;
+        const roomPath = '.mok/agent/' + agent + '/' + rel;
+        const rawUrl = '/api/raw/' + encodeURIComponent(roomPath);
+        edName.textContent = node.name;
+        edRel.textContent = '📄 ' + rel;
+        edBody.innerHTML = '';
+        // 重置檢視/編輯狀態（圖片/影片/音訊/過大檔預設不可編輯）
+        curRoomPath = roomPath;
+        curRoomRel = rel;
+        curRoomBinary = true;
+        curRoomEditing = false;
+        edEdit.style.display = 'none';
+        edSave.style.display = 'none';
+        edStatus.textContent = '';
+        edStatus.style.color = '#888';
+        const ext = (node.name.split('.').pop() || '').toLowerCase();
+        const imgExt = ['png','jpg','jpeg','gif','webp','bmp','svg','ico'];
+        const vidExt = ['mp4','webm','mov','mkv','avi','ogv','m4v'];
+        const audExt = ['mp3','wav','m4a','aac','ogg','opus','flac','oga','weba'];
+        try {
+            if (imgExt.indexOf(ext) >= 0) {
+                const img = document.createElement('img');
+                img.style.cssText = 'max-width:100%;height:auto;';
+                img.src = rawUrl;
+                edBody.appendChild(img);
+            } else if (vidExt.indexOf(ext) >= 0) {
+                const v = document.createElement('video');
+                v.controls = true;
+                v.style.cssText = 'max-width:100%;';
+                v.src = rawUrl;
+                edBody.appendChild(v);
+            } else if (audExt.indexOf(ext) >= 0) {
+                const a = document.createElement('audio');
+                a.controls = true;
+                a.style.cssText = 'width:100%;';
+                a.src = rawUrl;
+                edBody.appendChild(a);
+            } else {
+                const res = await fetch('/api/file/' + encodeURIComponent(roomPath), { cache: 'no-store' });
+                const data = await res.json();
+                if (!res.ok || data.error) { throw new Error(data.error || ('HTTP ' + res.status)); }
+                const fullTxt = data.content || '';
+                curRoomText = fullTxt;
+                if (fullTxt.length > 500000) {
+                    // 過大檔案：唯讀顯示前段，不開放編輯（避免截斷回存造成資料遺失）
+                    curRoomBinary = true;
+                    edEdit.style.display = 'none';
+                    edSave.style.display = 'none';
+                    edStatus.textContent = '⚠️ 檔案過大（>50萬字元），僅供預覽，不開放編輯以免截斷回存';
+                    edStatus.style.color = '#ffd479';
+                    roomRenderText(fullTxt.slice(0, 500000) + '\n…（檔案過大，僅顯示前 50 萬字元，不開放編輯）');
+                } else {
+                    curRoomBinary = false;
+                    edEdit.style.display = 'inline-block';
+                    edSave.style.display = 'none';
+                    roomShowPreview();
+                }
+            }
+        } catch (err) {
+            edBody.innerHTML = '';
+            const d = document.createElement('div');
+            d.style.cssText = 'color:#f88;padding:8px;';
+            d.textContent = '讀取失敗：' + (err && err.message ? err.message : err);
+            edBody.appendChild(d);
+        }
+        edWrap.style.display = 'flex';
+        edHandle.style.display = 'block';
+    };
+
+    if (!agent) {
+        rootEl.innerHTML = '<div style="color:#999;padding:8px;">尚未選擇任何侍女，請先在左側點選一位。</div>';
+        return;
+    }
+    try {
+        const res = await fetch('/api/room_tree?agent=' + encodeURIComponent(agent), { cache: 'no-store' });
+        const data = await res.json();
+        if (!data || !Array.isArray(data.tree)) {
+            rootEl.innerHTML = '<div style="color:#f88;padding:8px;">讀取失敗：' + ((data && data.error) || res.status) + '</div>';
+            return;
+        }
+        if (!data.tree.length) {
+            rootEl.innerHTML = '<div style="color:#999;padding:8px;">（這個房間是空的）</div>';
+            return;
+        }
+        const ul = document.createElement('ul');
+        ul.style.cssText = 'list-style:none;margin:0;padding:0;';
+        rootEl.appendChild(ul);
+        data.tree.forEach(function (node) { addRoomNode(node, agent, ul, 0); });
+    } catch (err) {
+        rootEl.innerHTML = '<div style="color:#f88;padding:8px;">載入失敗：' + err + '</div>';
+    }
+}
+
+function addRoomNode(node, agent, parentUl, depth) {
+    const li = document.createElement('li');
+    li.style.cssText = 'margin:0;padding:0;';
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:3px;padding:1px 4px;border-radius:4px;cursor:pointer;white-space:nowrap;';
+    row.title = node.is_dir ? ('📁 ' + node.rel + '/') : ('📄 ' + node.rel);
+
+    const pad = document.createElement('span');
+    pad.style.cssText = 'display:inline-block;width:' + (depth * 14) + 'px;flex-shrink:0;';
+    row.appendChild(pad);
+
+    if (node.is_dir) {
+        const arrow = document.createElement('span');
+        arrow.textContent = '▸';
+        arrow.style.cssText = 'width:13px;flex-shrink:0;color:#888;';
+        const ic = document.createElement('span'); ic.textContent = '📁';
+        const nm = document.createElement('span');
+        nm.textContent = node.name;
+        nm.style.cssText = 'color:#d8dee9;';
+        row.appendChild(arrow); row.appendChild(ic); row.appendChild(nm);
+
+        const childUl = document.createElement('ul');
+        childUl.style.cssText = 'list-style:none;margin:0;padding:0;display:none;';
+        li.appendChild(row); li.appendChild(childUl);
+
+        row.addEventListener('click', async function (e) {
+            e.stopPropagation();
+            if (childUl.style.display === 'none') {
+                childUl.style.display = '';
+                arrow.textContent = '▾';
+                if (!childUl.dataset.loaded && !childUl.dataset.loading) {
+                    childUl.dataset.loading = '1';
+                    try {
+                        const res = await fetch('/api/room_tree?agent=' + encodeURIComponent(agent) + '&path=' + encodeURIComponent(node.rel), { cache: 'no-store' });
+                        const data = await res.json();
+                        (data && Array.isArray(data.tree) ? data.tree : []).forEach(function (c) { addRoomNode(c, agent, childUl, depth + 1); });
+                        childUl.dataset.loaded = '1';
+                    } catch (err) {
+                        const li2 = document.createElement('li');
+                        li2.textContent = '讀取失敗';
+                        li2.style.cssText = 'color:#f88;padding-left:' + ((depth + 1) * 14 + 20) + 'px;';
+                        childUl.appendChild(li2);
+                    } finally {
+                        delete childUl.dataset.loading;
+                    }
+                }
+            } else {
+                childUl.style.display = 'none';
+                arrow.textContent = '▸';
+            }
+        });
+    } else {
+        const sp = document.createElement('span');
+        sp.style.cssText = 'width:13px;flex-shrink:0;';
+        const ic = document.createElement('span'); ic.textContent = '📄';
+        const nm = document.createElement('span');
+        nm.textContent = node.name;
+        nm.style.cssText = 'color:#9cdcfe;';
+        row.appendChild(sp); row.appendChild(ic); row.appendChild(nm);
+        row.addEventListener('click', function (e) { e.stopPropagation(); if (window._roomOpenFile) window._roomOpenFile(node); });
+        li.appendChild(row);
+    }
+    parentUl.appendChild(li);
+}

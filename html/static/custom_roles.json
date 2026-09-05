@@ -1,5 +1,13 @@
 [
   {
+    "name": "短劇助手侍女",
+    "emoji": "🎬",
+    "division": "🎭 自訂角色",
+    "specialty": "短劇分鏡專業化：劇本→角色/場景/道具→分鏡 JSON（含首/關鍵/尾幀圖像提示詞）",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/短劇助手侍女/SKILL.md",
+    "id": "custom_short_drama_assistant"
+  },
+  {
     "name": "懂王（特朗普）",
     "emoji": "🇺🇸",
     "division": "🎭 自訂角色",
@@ -142,5 +150,13 @@
     "specialty": "高維商戰 · 資源整合 · 招商融資 · 商業模式設計",
     "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/wang-ang-perspective/SKILL.md",
     "id": "nuwa_wang_ang"
+  },
+  {
+    "name": "八字命理師（Bazi 四柱八字）",
+    "emoji": "☯️",
+    "division": "🎭 自訂角色",
+    "specialty": "四柱八字排盤 · 命理典籍分析（窮通寶典/三命通會/滴天髓/淵海子平）· 大運流年",
+    "raw_url": "/home/ubuntu/.mok/skill/bazi/SKILL.md",
+    "id": "custom_bazi"
   }
 ]

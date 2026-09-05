@@ -210,6 +210,86 @@ def _parse_cron_lines(lines: list) -> list:
             })
     return tasks
 
+
+# ------------------------------------------------------------------------------------ #
+# 已知 cron 任務的人類可讀說明
+# 當 /cron list 列出的指令命中 CRON_TASK_DESCRIPTIONS 的關鍵字時，會自動附上說明，
+# 讓主人一眼看懂「這個排程在幹嘛、怎麼查看/刪除、有什麼風險」。
+# 新增排程後，可在這裡補一條說明。
+# ------------------------------------------------------------------------------------ #
+CRON_TASK_DESCRIPTIONS = {
+    "discover_topics.py": {
+        "title": "📦 短影音帶貨 · 主題自動發現（每天 02:40）",
+        "desc": (
+            "自動用種子關鍵字（config.json 的 discovery.seed_keywords）搜尋熱門帶貨話題，"
+            "把候選主題 + hashtags 寫回 config.json 的 products 商品池，供 pipeline 產片使用。"
+            "搜尋三層備援：Tavily → DuckDuckGo → 模板產生。"
+        ),
+        "view": (
+            "  • 今日候選：cat ~/.mok/work/短影音帶貨/topics/suggestions_*.json\n"
+            "  • 商品池　：cat ~/.mok/work/短影音帶貨/config.json\n"
+            "  • 執行日誌：tail -50 ~/.mok/work/短影音帶貨/logs/discover.log\n"
+            "  • 手動預覽：cd ~/.mok/work/短影音帶貨 && python3 scripts/discover_topics.py --dry-run --limit 10"
+        ),
+        "delete": "/cron delete 11（刪除後此任務不再自動執行）",
+        "install": (
+            "無需安裝套件。僅需 Tavily API Key（在 ~/.mok/.稚 設 TAVILY_API_KEY）啟用第一層搜尋；"
+            "缺 Key 時自動降級 DuckDuckGo，功能仍可用。"
+        ),
+        "risk": (
+            "⚠️ 高風險：--apply 會「直接覆寫」config.json 的 products 商品池（舊商品被覆蓋）。\n"
+            "若種子關鍵字太冷門或搜尋 API 異常，可能寫入不相關/重複主題，進而影響後續產片品質。\n"
+            "建議先 --dry-run 預覽再 apply；修改 config.json 前建議先備份。"
+        ),
+        "code": (
+            "scripts/discover_topics.py：讀 seed_keywords → 三層搜尋 → 去重 → 寫 topics/suggestions_*.json；\n"
+            "--apply 時額外寫回 config.json 的 products。"
+        ),
+        "mokagi": (
+            "mokagi說明：這是短影音帶貨流水線的「找題材」前置步驟；\n"
+            "每天 03:00 的 run_pipeline.sh（pipeline.py）會消費商品池產出影片並發佈。"
+            "兩者互補：discover 找題材 → pipeline 出片。"
+        ),
+    },
+}
+
+
+def _format_cron_description(info: dict) -> str:
+    """將任務說明字典格式化成人類可讀文字"""
+    title = info.get("title", "任務說明")
+    lines = [f"    ┌─ {title}"]
+
+    def _wrap(label: str, text: str) -> None:
+        parts = str(text).split(chr(10))
+        lines.append(f"    │ {label}{parts[0]}")
+        pad = " " * len(label)
+        for p in parts[1:]:
+            lines.append(f"    │ {pad}{p}")
+
+    if info.get("desc"):
+        _wrap("📌 用途：", info["desc"])
+    if info.get("view"):
+        _wrap("🔍 查看：", info["view"])
+    if info.get("delete"):
+        _wrap("🗑 刪除：", info["delete"])
+    if info.get("install"):
+        _wrap("📥 安裝：", info["install"])
+    if info.get("risk"):
+        _wrap("⚠️ 風險：", info["risk"])
+    if info.get("code"):
+        _wrap("💻 代碼：", info["code"])
+    if info.get("mokagi"):
+        _wrap("🤖 ", info["mokagi"])
+    lines.append("    └─")
+    return chr(10).join(lines) + chr(10)
+def _get_cron_description(command: str) -> str:
+    """依指令特徵字串查詢人類可讀說明；找不到回傳空字串"""
+    for key, info in CRON_TASK_DESCRIPTIONS.items():
+        if key in command:
+            return _format_cron_description(info)
+    return ""
+
+
 # ------------------ 公開函數（供 Agent 調用） ------------------
 
 async def confirm_cron_command(chat_id: str, token: str, agent_config: dict = None) -> tuple:
@@ -310,6 +390,10 @@ async def handle_cron(args, chat_id: str = None, agent_config: dict = None):
         result = "📋 **目前的 Cron 任務**\n\n"
         for t in tasks:
             result += f"`{t['number']}`. `{t['schedule']}` → `{t['command']}`\n"
+            # 附上人類可讀說明（若該指令命中 CRON_TASK_DESCRIPTIONS）
+            desc = _get_cron_description(t["command"])
+            if desc:
+                result += desc
         return result
 
     # ----- add (需確認) -----
@@ -333,6 +417,9 @@ async def handle_cron(args, chat_id: str = None, agent_config: dict = None):
         }
         _save_cron_pending()
         warning = f"⚠️ **新增 Cron 任務**\n`{rest}`"
+        _desc = _get_cron_description(rest)
+        if _desc:
+            warning += f"\n\n📖 任務說明：\n{_desc}"
         return f"CONFIRM_SPLIT:{warning}\n🔐 此確認碼用於授權執行上方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n請在 5 分鐘內發送確認碼以執行：\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     # ----- delete (需確認) -----
@@ -360,6 +447,9 @@ async def handle_cron(args, chat_id: str = None, agent_config: dict = None):
         }
         _save_cron_pending()
         warning = f"⚠️ **刪除 Cron 任務**\n`{target_line}`"
+        _desc = _get_cron_description(target_line)
+        if _desc:
+            warning += f"\n\n📖 任務說明：\n{_desc}"
         return f"CONFIRM_SPLIT:{warning}\n🔐 此確認碼用於授權執行上方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n請在 5 分鐘內發送確認碼以執行：\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     # ----- log -----

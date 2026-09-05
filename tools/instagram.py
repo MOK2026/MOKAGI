@@ -9,8 +9,9 @@
 #
 # 依賴: instagrapi (pip install instagrapi)
 #
-# 配置檔: ~/.mok/agent/衍/instagram_config.json
-#   儲存 IG 帳號、session、排程任務等
+# 配置檔: ~/.mok/agent/<agent>/instagram_config.json
+#   儲存 IG 帳號、session、排程任務等（<agent> 為當前 agent，動態取得）
+# 帳號密碼來源: ~/.mok/agent/<agent>/.<agent> 中的 MOK_instagram_ac / MOK_instagram_pw
 #
 # 更新記錄:
 #   20260727 - 初版，支援登入、發圖片貼文、狀態查詢
@@ -35,30 +36,80 @@ except ImportError:
     HAS_INSTAGRAPI = False
 
 # ---------- 配置路徑 ----------
-AGENT_DIR = Path(os.path.expanduser("~/.mok/agent/衍"))
-CONFIG_PATH = AGENT_DIR / "instagram_config.json"
-SESSION_DIR = AGENT_DIR / "instagram_sessions"
-SESSION_DIR.mkdir(parents=True, exist_ok=True)
+# 動態取得當前 agent 目錄（~/.mok/agent/<agent>/），不再硬編碼單一 agent。
+# 由 handle_instagram 進入時設置 _AGENT_CONFIG（agent_config），
+# IG 帳號密碼從 ~/.mok/agent/<agent>/.<agent> 讀取 MOK_instagram_ac / MOK_instagram_pw。
+_AGENT_CONFIG = {}
+
+
+def _get_agent_name():
+    """取得當前 agent 名稱"""
+    if _AGENT_CONFIG:
+        name = _AGENT_CONFIG.get("MOK_AGENT_NAME")
+        if name:
+            return name
+    return os.environ.get("MOK_AGENT_NAME", "衍")
+
+
+def _get_agent_dir():
+    """動態取得當前 agent 的目錄（如 ~/.mok/agent/懂王）"""
+    return Path(os.path.expanduser(f"~/.mok/agent/{_get_agent_name()}"))
+
+
+def _get_config_path():
+    """當前 agent 的 instagram 配置檔路徑"""
+    return _get_agent_dir() / "instagram_config.json"
+
+
+def _get_session_dir():
+    """當前 agent 的 session 目錄（不存在則建立）"""
+    session_dir = _get_agent_dir() / "instagram_sessions"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    return session_dir
+
+
+def _load_agent_env():
+    """從 ~/.mok/agent/<agent>/.<agent> 讀取環境配置（鍵=值格式，跳過 # 註解與空行）"""
+    config_file = _get_agent_dir() / f".{_get_agent_name()}"
+    env = {}
+    if config_file.exists():
+        with open(config_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip()
+    return env
+
+
+def _get_default_credentials():
+    """從 agent 配置文件讀取默認 IG 帳號密碼（MOK_instagram_ac / MOK_instagram_pw）"""
+    env = _load_agent_env()
+    return env.get("MOK_instagram_ac"), env.get("MOK_instagram_pw")
 
 
 def _load_config():
-    """載入配置"""
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    """載入配置（使用當前 agent 目錄下的 instagram_config.json）"""
+    config_path = _get_config_path()
+    if config_path.exists():
+        with open(config_path, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"accounts": {}, "scheduled_posts": [], "post_history": []}
 
 
 def _save_config(config):
-    """儲存配置"""
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    """儲存配置（到當前 agent 目錄）"""
+    config_path = _get_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
 
 
 def _get_session_path(username: str) -> Path:
     """取得 session 檔案路徑（用 hash 避免特殊字元）"""
     h = hashlib.md5(username.encode()).hexdigest()[:12]
-    return SESSION_DIR / f"session_{h}.json"
+    return _get_session_dir() / f"session_{h}.json"
 
 
 # ---------- Client 管理 ----------
@@ -93,11 +144,17 @@ def _action_login(args: dict, config: dict) -> dict:
     password = args.get("password")
     
     if not username or not password:
-        # 嘗試從 config 讀取
+        # 優先從 agent 配置文件讀取默認帳號密碼（.mok/agent/<agent>/.<agent> 的 MOK_instagram_ac / MOK_instagram_pw）
+        env_ac, env_pw = _get_default_credentials()
+        username = username or env_ac
+        password = password or env_pw
+    
+    if not username or not password:
+        # 再嘗試從 config 讀取
         if username and username in config.get("accounts", {}):
             password = config["accounts"][username].get("password")
         else:
-            return {"success": False, "error": "請提供 username 和 password"}
+            return {"success": False, "error": "請提供 username 和 password（或檢查 agent 配置 MOK_instagram_ac / MOK_instagram_pw）"}
     
     try:
         cl = _create_client()
@@ -135,6 +192,11 @@ def _action_post(args: dict, config: dict) -> dict:
     username = args.get("username") or args.get("account")
     image_path = args.get("image") or args.get("image_path") or args.get("photo")
     caption = args.get("caption") or ""
+    
+    if not username:
+        # 使用 agent 配置文件中的默認帳號（MOK_instagram_ac）
+        env_ac, _ = _get_default_credentials()
+        username = env_ac
     
     if not username:
         return {"success": False, "error": "請提供 username（IG 帳號）"}
@@ -178,11 +240,20 @@ def _action_post(args: dict, config: dict) -> dict:
             else:
                 return {"success": False, "error": f"找不到帳號 {username}，請先 /instagram login"}
         
-        # 上傳圖片
-        media = cl.photo_upload(
-            path=str(img),
-            caption=caption,
-        )
+        # 判斷檔案類型：影片（Reels）或圖片
+        is_video = str(img).lower().endswith(('.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi'))
+        if is_video:
+            # 上傳為 Reels（clip_upload）
+            media = cl.clip_upload(
+                path=str(img),
+                caption=caption,
+            )
+        else:
+            # 上傳圖片
+            media = cl.photo_upload(
+                path=str(img),
+                caption=caption,
+            )
         
         # 記錄發帖歷史
         if "post_history" not in config:
@@ -261,6 +332,9 @@ def _action_status(args: dict, config: dict) -> dict:
 def _action_logout(args: dict, config: dict) -> dict:
     """登出"""
     username = args.get("username") or args.get("account")
+    if not username:
+        env_ac, _ = _get_default_credentials()
+        username = env_ac
     if not username:
         return {"success": False, "error": "請提供 username"}
     
@@ -360,7 +434,14 @@ def handle_instagram(args, chat_id=None, agent_config=None):
         - dict: {"action": "login", "username": "...", "password": "..."}
         - str: JSON string
         - str: 純文字命令（如 "/instagram login"）
+    
+    agent_config: 當前 agent 的配置 dict（含 MOK_AGENT_NAME），
+                  用於動態定位 ~/.mok/agent/<agent>/ 並讀取 MOK_instagram_ac / MOK_instagram_pw。
     """
+    global _AGENT_CONFIG
+    if agent_config:
+        _AGENT_CONFIG = agent_config
+    
     if not HAS_INSTAGRAPI:
         return json.dumps({
             "success": False,
