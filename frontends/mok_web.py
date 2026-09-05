@@ -4100,6 +4100,18 @@ def serve_bookmark_page():
 
 
 # ---------- 啟動 ----------
+# ========== 短劇王操作台（影片女 jobs/短劇王，2026-09-06 新增） ==========
+try:
+    import sys as _sys
+    _SD = "/home/ubuntu/.mok/agent/影片女/jobs/短劇王"
+    if _SD not in _sys.path:
+        _sys.path.insert(0, _SD)
+    from shortdrama_bp import bp as _shortdrama_bp
+    app.register_blueprint(_shortdrama_bp, url_prefix="/shortdrama")
+    print("[shortdrama] 操作台已掛載 http://<host>/shortdrama/")
+except Exception as _e:
+    print("[shortdrama] 掛載失敗（不影響主服務）:", _e)
+
 if __name__ == '__main__':
     # 同步初始配置到 mokagi
     reload_config(CURRENT_ENV_PATH)  # 確保 mokagi 配置與網頁一致
