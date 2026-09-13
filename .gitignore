@@ -1,0 +1,37 @@
+# ============================================================
+# MOKAGI 備份包  .gitignore
+# 用途：本資料夾（備份包）可直接 git push 到 MOK2026/MOKAGI
+#       內容僅含安全、可公開的程式碼（core/ 與 tools/ 共 74 檔）
+# ============================================================
+
+# --- 密鑰 / 憑證（絕不上傳）---
+.github
+.env
+env.env
+*.env
+*.pem
+*.key
+*.token
+credential
+.git-credentials
+.netrc
+
+# --- 備份 / 暫存 / 快取 ---
+*.bak
+*.orig
+*.rej
+__pycache__/
+*.py[cod]
+*.pyo
+_tmp_backups/
+*.tmp
+
+# --- 日誌 ---
+*.log
+
+# --- 系統 / 編輯器 ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
