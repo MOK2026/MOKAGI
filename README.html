@@ -1,1 +1,114 @@
-PLACEHOLDER_RE
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MOKAGI 備份包 — 建置報告</title>
+<style>
+  :root{--bg:#0f1115;--card:#171a21;--fg:#e6e6e6;--mut:#9aa4b2;--acc:#4ec9b0;--warn:#e5c07b;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 -apple-system,"Noto Sans TC",Segoe UI,Roboto,sans-serif;padding:28px}
+  .wrap{max-width:920px;margin:0 auto}
+  h1{font-size:24px;border-left:4px solid var(--acc);padding-left:12px;margin:0 0 6px}
+  .sub{color:var(--mut);margin-bottom:22px}
+  .card{background:var(--card);border:1px solid #23262e;border-radius:12px;padding:18px 20px;margin:14px 0}
+  h2{font-size:17px;color:var(--acc);margin:0 0 10px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{border-bottom:1px solid #262a33;padding:7px 8px;text-align:left;vertical-align:top}
+  th{color:var(--mut);font-weight:600}
+  code,pre{background:#0b0d11;border:1px solid #23262e;border-radius:6px}
+  code{padding:1px 6px;color:var(--acc)}
+  pre{padding:12px;overflow:auto;font-size:12.5px;line-height:1.55}
+  .ok{color:var(--acc);font-weight:700}
+  .warn{color:var(--warn);font-weight:700}
+  ul{margin:6px 0 0;padding-left:20px}
+  li{margin:2px 0}
+  .pill{display:inline-block;background:#20242c;border:1px solid #2c313b;border-radius:999px;padding:2px 10px;margin:2px 4px 2px 0;font-size:12.5px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MOKAGI 備份包 — 建置報告</h1>
+  <div class="sub">github agent（g）· 建置於 2026-09-14 01:48 · 目標目錄 <code>~/.mok/agent/github/jobs/260914-014845_MOKAGI備份包/</code></div>
+
+  <div class="card">
+    <h2>一、任務</h2>
+    <ul>
+      <li>建好 <code>~/.mok/agent/github/.gitignore</code>（房間根）</li>
+      <li>把 <b>74 個</b>隱私檢查通過的檔案，整理成一份<b>可直接 <code>git push</code> 到 MOK2026/MOKAGI</b> 的備份包</li>
+      <li><code>統一計費說明.md</code> 的價格對齊：安裝費 HK$5,000、使用費 HK$68／百萬 token</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>二、產出</h2>
+    <table>
+      <tr><th>項目</th><th>內容</th></tr>
+      <tr><td>備份包</td><td><code>jobs/260914-014845_MOKAGI備份包/</code>（core/ 37 檔 + tools/ 37 檔 = <b>74 檔</b>）</td></tr>
+      <tr><td>Git</td><td>已 <code>git init</code>（branch <code>main</code>）、remote <code>origin → https://github.com/MOK2026/MOKAGI</code>、已 commit（77 個 tracked）</td></tr>
+      <tr><td>.gitignore</td><td>備份包內 1 份 + 房間根 1 份</td></tr>
+      <tr><td>推送腳本</td><td><code>PUSH.sh</code>（一鍵推送，預設推 <code>backup</code> 分支，不覆蓋 main）</td></tr>
+      <tr><td>報告</td><td>本檔 <code>README.html</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>三、隱私掃描結果 <span class="ok">✔ 通過</span></h2>
+    <ul>
+      <li>無硬編碼密鑰（掃描 <code>sk-</code> / Telegram token / <code>github_pat_</code> / <code>ghp_</code> / <code>tvly-</code>：僅命中「偵測用正則」與 <code>tvly-你的key</code> 佔位符）</li>
+      <li>已排除：<span class="pill">backups/</span><span class="pill">__pycache__</span><span class="pill">*.bak / *.orig</span><span class="pill">*.log</span><span class="pill">_archive/</span></li>
+      <li>密鑰檔（<code>env.env</code>、<code>.github</code>、<code>.稚</code>、<code>.git-credentials</code>）<b>一律不進備份包</b>，並寫入 .gitignore</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>四、價格對齊</h2>
+    <table>
+      <tr><th>檔案</th><th>修改前</th><th>修改後</th></tr>
+      <tr><td><code>~/.mok/README.md</code></td><td>安裝費 $ 5,000 / $18.00 hkd</td><td>安裝費 HK$5,000（一次性）/ HK$68.00 (每百萬 tokens)</td></tr>
+      <tr><td><code>~/MOKAGI-publish/README.md</code></td><td>同上</td><td>同上</td></tr>
+      <tr><td><code>core/mok_price.py</code></td><td>已是 68 / 5000</td><td>唯一價格源，全站自動同步（未改）</td></tr>
+    </table>
+    <div class="sub" style="margin:8px 0 0">※ <code>core/docs/統一計費說明.md</code> 原本即為 HK$68 / HK$5,000，已隨備份包一起收錄。</div>
+  </div>
+
+  <div class="card">
+    <h2>五、如何推送</h2>
+    <pre>cd ~/.mok/agent/github/jobs/260914-014845_MOKAGI備份包
+bash PUSH.sh            # 推到 backup 分支（安全，不動 main）
+bash PUSH.sh main --force   # 若要覆蓋 main（請先自行確認）</pre>
+    <div class="sub" style="margin:8px 0 0">remote 已設好；因遠端 main 已有其他檔案，直接推 main 會非快進被拒，故預設走 <code>backup</code> 分支。</div>
+  </div>
+
+  <div class="card">
+    <h2>六、檔案清單（74）</h2>
+    <b>core/（37）</b>
+    <pre>502補丁/{README.md,__init__.py,patch_502.py}
+README.md, app_loop.py, autofix2.py, config.py, docs/統一計費說明.md,
+editlock_hook.py, experience_learner.py, file_cache.py, girl_engine.py,
+girl_gate.py, girl_switch.py, gpu_billing.py, history_manager.py, launcher.py,
+logger.py, mok_price.py, mok_token.py, mokagi.py, prompt_manager.py,
+recovery.py, semantic_searcher.py, shared.py, tool_handler.py, vnc_proxy.py
+warden/{README.md,warden.html,warden.json,warden.py}
+插話補丁/{README.md,__init__.py,interject_patch.py}
+暫停補丁/{README.md,__init__.py,pause_patch.py}</pre>
+    <b>tools/（37）</b>
+    <pre>README.md, admin.py, associate.py, autofix.py, backup.py, browser.py,
+clean_trash.sh, code_index.py, comic.py, crash_handler.py, cron_tool.py,
+experience.py, graphify.py, gui_agent.py, heart.py, instagram.py, intent.py,
+job.py, memory.py, money.py, patch_conv_id.py, repair_server.py,
+replace_in_file.py, skill.py, speech.py, stt.py, task.py, trash.sh, tts.py,
+vision.py, web_fetch.py, web_search.py
+scripts/{backup.sh,check_sync_handlers.py,db_daily_backup.sh,patch_conv_id.py,rebuild_index.py}</pre>
+  </div>
+
+  <div class="card">
+    <h2>七、備註</h2>
+    <ul>
+      <li>全程未實際 push（避免污染公開 repo）；如需上線請執行 <code>PUSH.sh</code>。</li>
+      <li>未來可沿用 <code>jobs/github使用/auto_publish.sh</code> 的每小時自動同步機制。</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>
