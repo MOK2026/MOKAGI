@@ -35,3 +35,11 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# --- 資料庫 / 金鑰 / 存取紀錄（frontends 掃描後新增）---
+*.db
+*.sqlite
+*.sqlite3
+*admin_key*
+external_keys*
+external_access*

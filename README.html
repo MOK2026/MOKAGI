@@ -29,13 +29,14 @@
 <body>
 <div class="wrap">
   <h1>MOKAGI 備份包 — 建置報告</h1>
-  <div class="sub">github agent（g）· 建置於 2026-09-14 01:48 · 目標目錄 <code>~/.mok/agent/github/jobs/260914-014845_MOKAGI備份包/</code></div>
+  <div class="sub">github agent（g）· 建置於 2026-09-14 01:48（frontends 追加 02:10）· 目標目錄 <code>~/.mok/agent/github/jobs/260914-014845_MOKAGI備份包/</code></div>
 
   <div class="card">
     <h2>一、任務</h2>
     <ul>
       <li>建好 <code>~/.mok/agent/github/.gitignore</code>（房間根）</li>
       <li>把 <b>74 個</b>隱私檢查通過的檔案，整理成一份<b>可直接 <code>git push</code> 到 MOK2026/MOKAGI</b> 的備份包</li>
+      <li>追加 <code>frontends/</code>（mok_web.py、mok_tg.py、gunicorn_config.py、README.md、mok_web/**）：掃描後收錄 <b>24 個</b>安全檔</li>
       <li><code>統一計費說明.md</code> 的價格對齊：安裝費 HK$5,000、使用費 HK$68／百萬 token</li>
     </ul>
   </div>
@@ -44,7 +45,7 @@
     <h2>二、產出</h2>
     <table>
       <tr><th>項目</th><th>內容</th></tr>
-      <tr><td>備份包</td><td><code>jobs/260914-014845_MOKAGI備份包/</code>（core/ 37 檔 + tools/ 37 檔 = <b>74 檔</b>）</td></tr>
+      <tr><td>備份包</td><td><code>jobs/260914-014845_MOKAGI備份包/</code>（core/ 37 + tools/ 37 + frontends/ 24 = <b>98 檔</b>）</td></tr>
       <tr><td>Git</td><td>已 <code>git init</code>（branch <code>main</code>）、remote <code>origin → https://github.com/MOK2026/MOKAGI</code>、已 commit（77 個 tracked）</td></tr>
       <tr><td>.gitignore</td><td>備份包內 1 份 + 房間根 1 份</td></tr>
       <tr><td>推送腳本</td><td><code>PUSH.sh</code>（一鍵推送，預設推 <code>backup</code> 分支，不覆蓋 main）</td></tr>
