@@ -35,7 +35,7 @@ git -c user.name="moksurky" -c user.email="mok20260316ci@gmail.com" \
 
 # 3) 推送
 echo "→ 推送至 $REMOTE  ($BRANCH) $FORCE"
-git push $FORCE -u origin "$BRANCH"
+git push $FORCE -u origin "HEAD:$BRANCH"
 
 echo "✅ 完成"
 
