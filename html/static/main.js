@@ -1706,6 +1706,9 @@ function _restoreStreamState(agent) {
     const hasThink = (accumulatedThink[agent] || '') !== '';
     const hasReply = (accumulatedReply[agent] || '') !== '';
     const hasRounds = !!(rounds[agent] && rounds[agent].length);
+    // 去重(20260907 第1點): agent 仍在串流(未 done)而對話最尾係一條 assistant bubble(history 已畫咗進行中回合)時，先移除佢，
+    // 等 _renderRoundBlocks 只畫一個 live bubble → 根治「最尾一條回覆重複一次（歷史版+續流版）」
+    try { var _ml = document.getElementById('message-list') || document.getElementById('chatMessages'); if (_ml && !streamFinished[agent] && (hasThink || hasReply || hasRounds)) { var _cs = _ml.children; if (_cs.length) { var _le = _cs[_cs.length - 1]; if (_le.classList && _le.classList.contains('message') && _le.classList.contains('assistant')) { _le.remove(); } } } } catch (e) {}
     if (!hasThink && !hasReply && !hasRounds) {
         // 方案B(20260904)：底部 #stream-container 已整組收掉，此處無需清理
         return;
@@ -1719,6 +1722,8 @@ function _restoreStreamState(agent) {
 // 🔧 頁面刷新/切換後，自動恢復該 agent 進行中的串流（重放已發生的思考/工具/回答並繼續實時接收）
 async function resumeActiveSessionForAgent(agent) {
     if (!agent) return false;
+    // 🔧 防重連風暴：同一 agent 已有一條續流連線時不再重複開（避免「不停刷新」）
+    if (_activeEventSources[agent]) return true;
     try {
         const res = await fetch(`/api/chat/active?agent=${encodeURIComponent(agent)}`, { cache: 'no-store' });
         if (!res.ok) return false;
@@ -2332,6 +2337,49 @@ async function sendViaSSE(message, agent) {
     }
 }
 
+// probe marker A
+// ===== 補充輸入（插話補丁）：工作中輸入框仍可用，訊息併入當前工作輪 =====
+const _pendingInterject = {};   // {agent: 本輪插話次數}
+
+function _interjectListEl() {
+    var el = document.getElementById('chatMessages');
+    if (!el) el = document.getElementById('message-list');
+    return el;
+}
+
+async function sendInterjectWhileWorking(message, agent) {
+    try {
+        var res = await fetch('/api/chat/interject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agent: agent, message: message, user_id: (typeof userId !== 'undefined' ? userId : '') })
+        });
+        if (!res.ok) return false;
+        var data = await res.json();
+        if (data && data.mode === 'injected') {
+            _pendingInterject[agent] = (_pendingInterject[agent] ? _pendingInterject[agent] : 0) + 1;
+            return true;
+        }
+        return false;
+    } catch (err) {
+        console.warn('[interject] 插話失敗，改走正常發送', err);
+        return false;
+    }
+}
+
+function appendInterjectBubble(text) {
+    try {
+        var listEl = _interjectListEl();
+        if (!listEl) return;
+        var div = document.createElement('div');
+        div.className = 'message user interject-note';
+        var tt = new Date().toLocaleTimeString();
+        div.innerHTML = '<div class="round-blocks-container"><div class="message-bubble" style="flex:1;">[補充] ' + escapeHtml(text) + '</div></div><div class="message-meta">' + tt + ' · 工作中補充</div>';
+        listEl.appendChild(div);
+        listEl.scrollTop = listEl.scrollHeight;
+    } catch (e) { console.warn('[interject] bubble fail', e); }
+}
+
 async function sendUserMessage(content) {
     if (!currentAgent) {
         alert('請稍等，正在加載 Agent...');
@@ -2357,6 +2405,15 @@ async function sendUserMessage(content) {
         });
         attachments = [];
         updateAttachmentsUI();
+    }
+    // 🔧 補充輸入（插話補丁）：當前 agent 正在工作 → 把訊息併入本輪參考，不重開一輪
+    if (agentStates[currentAgent] && agentStates[currentAgent].isRunning) {
+        const _injOk = await sendInterjectWhileWorking(finalMessage, currentAgent);
+        if (_injOk) {
+            appendInterjectBubble(content);
+            try { showQuoteToast('[補充] 已併入本輪參考（工作中補充）'); } catch (e) {}
+            return;
+        }
     }
     // 🔧 僅清除當前 agent 的舊流式佔位（保留其他 agent 的背景工作中訊息）
     document.querySelectorAll('.message.assistant').forEach(el => {
@@ -2517,7 +2574,16 @@ function showWorkingIndicator() {
     const indicator = document.getElementById('workingIndicator');
     const inputWrapper = document.getElementById('chatInputWrapper');
     if (indicator) indicator.style.setProperty("display", "flex", "important");
-    if (inputWrapper) inputWrapper.style.setProperty("display", "none", "important");
+    // 🔧 補充輸入（插話補丁）：工作中輸入框保持可用，訊息會併入本輪
+    if (inputWrapper && !_waitingForUserState.visible) inputWrapper.style.setProperty("display", "block", "important");
+    try {
+        const _taWork = document.getElementById('chatInput');
+        if (_taWork && !_taWork.dataset.workHintSaved) {
+            _taWork.dataset.workHintPrev = _taWork.placeholder ? _taWork.placeholder : '';
+            _taWork.dataset.workHintSaved = '1';
+            _taWork.placeholder = '工作中…可直接輸入補充（Enter 換行，Shift+Enter 送出）';
+        }
+    } catch (e) {}
     hideWaitingForUserPanel();
     // 更新 3D 角色頭部 icon 為當前 agent
     const headIcon = document.getElementById('workHeadIcon');
@@ -2545,6 +2611,15 @@ function hideWorkingIndicator() {
     if (inputWrapper && !_waitingForUserState.visible) {
         inputWrapper.style.setProperty("display", "block", "important");
     }
+    // 🔧 補充輸入：還原輸入框提示文字
+    try {
+        const _taHide = document.getElementById('chatInput');
+        if (_taHide && _taHide.dataset.workHintSaved) {
+            _taHide.placeholder = _taHide.dataset.workHintPrev ? _taHide.dataset.workHintPrev : '(Enter換行，Shift+Enter發送 · 可Ctrl+V貼截圖)';
+            _taHide.removeAttribute('data-work-hint-saved');
+            _taHide.removeAttribute('data-work-hint-prev');
+        }
+    } catch (e) {}
     // 🔧 清除超時計時器
     if (_workingTimer) {
         clearTimeout(_workingTimer);
@@ -4231,7 +4306,7 @@ async function createFromPath() {
         if (!container) return;
         var html = '';
         var arr = rounds[agent];
-        var collapseCount = 0;
+        var collapseCount = 0; if (!finalize) { var _actIdx = (typeof currentRoundIdx[agent] === 'number') ? currentRoundIdx[agent] : -1; if (_actIdx > 0) collapseCount = _actIdx; }
         if (finalize) {
             var _lri = _findLastReplyIdx(arr);
             collapseCount = _lri > 0 ? _lri : 0;
@@ -4764,10 +4839,14 @@ socket.on('log_line', function(data) {
         const agent = agentLabel ? agentLabel.innerText.trim() : '';
         const role = msgDiv && msgDiv.classList.contains('user') ? 'user' : 'assistant';
 
+        // 加入書籤時可先設定/編輯書籤標題（可留空；之後也可在 📑 書籤列表的卡片中 ✏️ 編輯標題）
+        const bmTitle = prompt('📌 編輯書籤標題（可留空，之後仍可在書籤頁修改）', '');
+        if (bmTitle === null) return; // 按「取消」＝不加入書籤
+
         fetch('/api/bookmark/add', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conv_id: convId, snippet: snippet, agent: agent, role: role, timestamp: Date.now()/1000 })
+            body: JSON.stringify({ conv_id: convId, snippet: snippet, agent: agent, role: role, title: bmTitle.trim(), timestamp: Date.now()/1000 })
         })
         .then(r => r.json())
         .then(data => {
@@ -6648,3 +6727,67 @@ function addRoomNode(node, agent, parentUl, depth) {
     }
     parentUl.appendChild(li);
 }
+
+
+/* ===== MOKAGI perf mode: auto-throttle for multi-agent parallel / background tab ===== */
+
+(function () {
+    if (window.mokPerf) return;
+    var _manual = null;
+    function _countRunning() {
+        var a = document.querySelectorAll('.agent-item.running').length;
+        var b = document.querySelectorAll('.working-indicator').length;
+        return Math.max(a, b);
+    }
+    function _apply() {
+        var n = _countRunning();
+        var lite = (_manual === '1') ? true : (_manual === '0') ? false : (n >= 2);
+        if (document.body) document.body.classList.toggle('perf-lite', !!lite);
+    }
+
+    function _pauseAll(p) {
+        try {
+            var anims = (document.getAnimations ? document.getAnimations() : []) || [];
+            for (var i = 0; i < anims.length; i++) {
+                try { p ? anims[i].pause() : anims[i].play(); } catch (e) {}
+            }
+        } catch (e) {}
+    }
+
+    function _onVis() {
+        var hidden = !!document.hidden;
+        if (document.body) document.body.classList.toggle('tab-hidden', hidden);
+        _pauseAll(hidden);
+    }
+
+    window.mokPerf = {
+        update: _apply,
+        status: function () {
+            return { lite: !!(document.body && document.body.classList.contains('perf-lite')), running: _countRunning() };
+        },
+        set: function (mode) {
+            _manual = (mode === 1 || mode === '1') ? '1' : (mode === 0 || mode === '0') ? '0' : null;
+            try { localStorage.setItem('mok_perf_lite', _manual === null ? '' : _manual); } catch (e) {}
+            _apply();
+            return this.status();
+        }
+    };
+
+    var _t = null;
+    function _debounced() { if (_t) clearTimeout(_t); _t = setTimeout(_apply, 250); }
+
+    function _start() {
+        _apply();
+        _onVis();
+        try {
+            var target = document.getElementById('agentList') || document.body;
+            if (target && window.MutationObserver) {
+                new MutationObserver(_debounced).observe(target, { subtree: true, attributes: true, attributeFilter: ['class'] });
+            }
+        } catch (e) {}
+        setInterval(_apply, 3000);
+        document.addEventListener('visibilitychange', _onVis);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _start);
+    else _start();
+})();

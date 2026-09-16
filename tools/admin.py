@@ -744,7 +744,7 @@ async def confirm_command(chat_id: str, token: str, agent_config: dict = None) -
     elif cmd_type == "pip_install":
         success, result = execute_pip_install(args)
     elif cmd_type == "shell_exec":
-        success, result = execute_shell_command(args)
+        success, result = execute_shell_command(args, agent_config)
     elif cmd_type == "autofix_exec":
         from autofix import execute_code_safely
         success, out, err = await execute_code_safely(args)
@@ -1159,7 +1159,17 @@ def execute_pip_install(rest: str) -> tuple:
 # 返回:
 #   tuple (成功標誌, 結果訊息)
 # ------------------------------------------------------------------------------------ #
-def execute_shell_command(command: str) -> tuple:
+def execute_shell_command(command: str, agent_config=None) -> tuple:
+    # 編輯登記鎖鉤子：命令若會寫入 ~/.mok 內檔案，必須先登記；沒登記就擋下
+    try:
+        import editlock_hook
+        _hok, _hmsg = editlock_hook.guard_command(command, agent_config=agent_config)
+        if not _hok:
+            return False, _hmsg
+    except ImportError:
+        pass
+    except Exception as _e:
+        logging.getLogger(__name__).warning("editlock_hook 檢查異常，放行：%s", _e)
 	# 強制禁用 Docker 沙箱，直接使用宿主機 shell
     os.environ.pop('MOK_USE_DOCKER_SANDBOX', None)
     try:
@@ -1870,7 +1880,7 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
             if use_docker:
                 success, result = execute_docker_sandboxed(rest)
             else:
-                success, result = execute_shell_command(rest)
+                success, result = execute_shell_command(rest, agent_config)
             return result if success else f"❌ 執行失敗: {result}"
             
         # auto_approve: env -> agent_config -> direct file read
@@ -1881,7 +1891,7 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
             if use_docker:
                 success, result = execute_docker_sandboxed(rest)
             else:
-                success, result = execute_shell_command(rest)
+                success, result = execute_shell_command(rest, agent_config)
             return result if success else f"❌ 執行失敗: {result}"
         token = generate_token(chat_id, "shell_exec", rest)
         _store_pending(token, "shell_exec", rest, chat_id)

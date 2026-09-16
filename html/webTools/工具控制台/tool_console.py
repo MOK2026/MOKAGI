@@ -17,8 +17,10 @@ tool_handler.load_tools()
 app = Flask(__name__, template_folder='~/.mok/html')
 app.config['SECRET_KEY'] = 'dev_key'
 
-# 默認用戶 ID（可從環境變量或配置讀取）
-DEFAULT_USER_ID = _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+# 多用戶隔離：不再回退到全域 ADMIN_CHAT_ID（會讓所有匿名訪客共用同一 user_key）。
+# 改為每請求生成帶隨機後綴的臨時 id。
+def _gen_guest_id():
+    return "web_guest_" + os.urandom(4).hex()
 
 @app.route('/')
 def index():
@@ -62,7 +64,7 @@ def execute_tool():
     data = request.get_json()
     tool_name = data.get('name')
     arguments = data.get('arguments', {})
-    user_id = data.get('user_id', DEFAULT_USER_ID)
+    user_id = data.get('user_id') or _gen_guest_id()
     if not tool_name:
         return jsonify({'error': 'Missing tool name'}), 400
 

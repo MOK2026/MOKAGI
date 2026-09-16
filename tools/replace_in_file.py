@@ -107,6 +107,18 @@ async def handle_replace(args, chat_id: str = None, agent_config: Optional[Dict]
     if not os.path.isfile(real_path):
         return f"❌ 檔案不存在或不是普通檔案：{real_path}"
 
+    # 3.5 編輯登記鎖鉤子：對 ~/.mok 內檔案的寫入，必須先登記（且已自動備份）；沒登記就擋下
+    try:
+        import editlock_hook
+        _agent = (agent_config or {}).get("MOK_AGENT_NAME") or (agent_config or {}).get("AGENT_NAME") or "unknown"
+        _ok, _hook_msg = editlock_hook.guard(real_path, _agent, agent_config, purpose="replace_in_file")
+        if not _ok:
+            return _hook_msg
+    except ImportError:
+        pass
+    except Exception as _e:
+        logging.getLogger(__name__).warning("editlock_hook 檢查異常，放行：%s", _e)
+
     # 4. 讀取檔案內容
     try:
         with open(real_path, 'r', encoding='utf-8') as f:

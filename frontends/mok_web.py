@@ -200,6 +200,20 @@ except Exception as e:
 # ===== 工作中侍女追蹤：記錄哪些 agent 正在處理訊息 =====
 _running_agents = set()  # {agent_name, ...}
 
+# ===== 插話補丁（interject_patch）：工作中輸入框仍可用，訊息併入當前工作輪（9/13 的「補充輸入」） =====
+try:
+    import sys as _ij_sys
+    import os as _ij_os
+    _ij_dir = _ij_os.path.join(_ij_os.path.dirname(_ij_os.path.dirname(_ij_os.path.abspath(__file__))), 'core', '插話補丁')
+    if _ij_os.path.isdir(_ij_dir) and _ij_dir not in _ij_sys.path:
+        _ij_sys.path.insert(0, _ij_dir)
+    import interject_patch
+    interject_patch.install_call_llm_hook()
+    interject_patch.register_routes(app, is_running_fn=lambda a: (a in _running_agents) or _agent_has_live_session(a))
+    print("[interject_patch] 已載入：工作中可補充輸入 /api/chat/interject")
+except Exception as _ij_e:
+    print(f"[interject_patch] 載入失敗（不影響主服務）: {_ij_e}")
+
 # ===== SSE 串流隊列（HTTP 串流備援，當 Socket.IO 不可用時） =====
 import uuid as _uuid
 import queue as _queue
@@ -211,6 +225,21 @@ _sse_buffers = {}  # {session_id: [event,...]} 事件緩衝（權威來源，供
 _sse_done = {}     # {session_id: bool}         該 session 是否已結束（done/error）
 _sse_agg = {}      # {session_id: {rounds,think,reply,n}} 聚合快照（供刷新後一鍵重建 + 只續流尾巴）
 _sse_agg_last = {} # {session_id: float} 上次聚合快照時間（節流 0.5s）
+_sse_users = {}    # {session_id: user_id}  同一 (agent,user) 開新一輪時用來收掉舊輪
+
+
+def _agent_has_live_session(agent_name):
+    """該 agent 是否仍有「未結束」的 SSE session（多用戶/多輪並行下比 _running_agents 更準）。"""
+    if not agent_name:
+        return False
+    try:
+        with _sse_lock:
+            for _sid, _ag in _sse_agents.items():
+                if _ag == agent_name and not _sse_done.get(_sid, False):
+                    return True
+    except Exception:
+        pass
+    return False
 
 def _schedule_sse_cleanup(session_id, delay_sec=180):
     """延遲清理 SSE session，給前端斷線後續流留出時間。"""
@@ -230,6 +259,7 @@ def _schedule_sse_cleanup(session_id, delay_sec=180):
             _sse_done.pop(session_id, None)
             _sse_agg.pop(session_id, None)
             _sse_agg_last.pop(session_id, None)
+            _sse_users.pop(session_id, None)
             _sse_cleanup_timers.pop(session_id, None)
         print(f"[SSE cleanup] session={session_id} removed")
 
@@ -358,7 +388,7 @@ def get_file_tree(path, depth=0):
 DB_PATH = os.path.expanduser(f"~/.{MOKAGI_home}/.memory/chat_history.db")
 
 def init_db():
-    with closing(sqlite3.connect(DB_PATH)) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS chat_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -407,7 +437,7 @@ init_db()
 def _save_rounds_to_db(msg_id, rounds):
     """把輪次結構（思考/工具/回覆）以 JSON 持久化到 chat_history.rounds 欄位"""
     try:
-        with closing(sqlite3.connect(DB_PATH)) as conn:
+        with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
             conn.execute('UPDATE chat_history SET rounds = ? WHERE id = ?', (json.dumps(rounds, ensure_ascii=False), msg_id))
             conn.commit()
     except Exception as _e:
@@ -657,6 +687,32 @@ def _start_sse_chat_session(data):
         _sse_done[session_id] = False
         _sse_agg[session_id] = {"rounds": [], "think": "", "reply": "", "n": 0}
         _sse_agg_last[session_id] = 0.0
+        _sse_users[session_id] = user_id
+    # 🔧 同一 (agent,user) 開新一輪前，先收掉上一條「未完成」的舊 session：
+    #    否則舊輪殘留會令前端重播/重連（看起來像「不停刷新」），且兩輪並寫同一對話會報錯。
+    #    注意：只收「同一使用者的同一 agent」，不同使用者對同一 agent 仍可真正並行。
+    try:
+        _sup_ev = {"type": "done", "agent": agent_name, "superseded": True}
+        with _sse_lock:
+            _old_sids = [s for s, a in _sse_agents.items()
+                         if s != session_id and a == agent_name
+                         and _sse_users.get(s) == user_id
+                         and not _sse_done.get(s, False)]
+            for _os_ in _old_sids:
+                _sse_done[_os_] = True
+                _ob = _sse_buffers.get(_os_)
+                if _ob is not None:
+                    _ob.append(dict(_sup_ev))
+                _oq = _sse_queues.get(_os_)
+                if _oq is not None:
+                    try:
+                        _oq.put(dict(_sup_ev))
+                    except Exception:
+                        pass
+        for _os_ in _old_sids:
+            print(f"[SSE] supersede old session={_os_} agent={agent_name} user={user_id}")
+    except Exception as _sup_e:
+        print(f"[SSE] supersede failed: {_sup_e}")
     print(f"[SSE start] session={session_id} agent={agent_name} msg={user_msg[:50]}...")
 
     def _sse_bg_worker():
@@ -667,7 +723,7 @@ def _start_sse_chat_session(data):
         agg_rounds = []   # 聚合輪次（鏡像 mokagi accumulated_rounds），供刷新後一鍵重建
 
         def update_assistant_in_db(msg_id, content, think_content):
-            with closing(sqlite3.connect(DB_PATH)) as conn:
+            with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                 conn.execute('UPDATE chat_history SET content = ?, think_content = ? WHERE id = ?', (content, think_content, msg_id))
                 conn.commit()
 
@@ -727,7 +783,7 @@ def _start_sse_chat_session(data):
             if event["type"] == "think":
                 accumulated_think += event["content"]
                 if assistant_msg_id is None:
-                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                         cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time()))
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
@@ -737,7 +793,7 @@ def _start_sse_chat_session(data):
                     return
                 accumulated_reply += event["content"]
                 if assistant_msg_id is None:
-                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                         cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time()))
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
@@ -747,7 +803,7 @@ def _start_sse_chat_session(data):
                 if event.get("final_reply"):
                     accumulated_reply = event["final_reply"]
                 if assistant_msg_id is None:
-                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                         cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", accumulated_reply, accumulated_think, time.time()))
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
@@ -756,14 +812,14 @@ def _start_sse_chat_session(data):
                     _save_rounds_to_db(assistant_msg_id, event["rounds"])
                 conv_id = event.get("conv_id")
                 if conv_id:
-                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                         conn.execute("UPDATE chat_history SET conv_id = ? WHERE id = ?", (conv_id, assistant_msg_id))
                         conn.commit()
                 if conv_id:
                     _update_user_message_conv_id(agent_name, conv_id, user_msg_id, user_id)
 
         try:
-            with closing(sqlite3.connect(DB_PATH)) as conn:
+            with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                 cursor = conn.execute('INSERT INTO chat_history (agent, role, content, timestamp) VALUES (?, ?, ?, ?)', (agent_name, 'user', user_msg, time.time()))
                 user_msg_id = cursor.lastrowid
                 conn.commit()
@@ -775,7 +831,7 @@ def _start_sse_chat_session(data):
         try:
             async def _bg_coro():
                 async def async_stream_cb(event):
-                    print(f"[SSE cb] type={event.get('type')} len={len(event.get('content', ''))}")
+                    pass  # [log精簡] 原每 SSE chunk 印 log，曾使日誌漲到 856MB，已移除
                     stream_emit(event)
                 agent_config = await mokagi.get_agent_config(agent_name)
                 from autofix2 import autofix_run
@@ -804,6 +860,13 @@ def _start_sse_chat_session(data):
                 _sse_done[session_id] = True
             # 🔧 agent 已結束：排定延遲清理，給最後一次重放 / DB 落盤留時間
             _schedule_sse_cleanup(session_id, delay_sec=120)
+            # ===== 補充輸入（插話補丁）：本輪結束仍有未消費的插話 → 保留待下一輪併入 =====
+            try:
+                _ij_left = interject_patch.peek_count(agent_name)
+                if _ij_left:
+                    print(f"[interject_patch] leftover {_ij_left} kept for {agent_name} (no new conversation)")
+            except Exception as _ij_le:
+                print("[interject_patch] leftover check failed:", _ij_le)
 
     threading.Thread(target=_sse_bg_worker, daemon=True).start()
     return {"session_id": session_id, "agent_name": agent_name, "queue": q}
@@ -890,7 +953,21 @@ def api_chat_stream_sse(session_id):
     with _sse_lock:
         q = _sse_queues.get(session_id)
     if q is None:
-        return jsonify({"error": "session not found or expired"}), 404
+        # 🔧 未知/已過期的 session 不再回 404：404 會令前端 EventSource 反覆重連 → 像「不停刷新」。
+        #    改為回一個「立即結束」的 SSE 串流，讓前端乾淨收尾（收起工作中動畫）。
+        def _expired_stream():
+            yield ": stream-open\n\n"
+            yield f"data: {json.dumps({'type': 'stream_meta', 'sse_session_id': session_id, 'expired': True}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'sse_session_id': session_id, 'expired': True}, ensure_ascii=False)}\n\n"
+        return Response(stream_with_context(_expired_stream()), mimetype='text/event-stream', headers={
+            'Cache-Control': 'no-cache, no-store, must-revalidate, no-transform',
+            'X-Accel-Buffering': 'no',
+            'Alt-Svc': 'clear',
+            'Connection': 'close',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Expose-Headers': '*',
+            'Content-Type': 'text/event-stream; charset=utf-8'
+        })
 
     def generate_sse():
         heartbeat_count = 0
@@ -1062,7 +1139,7 @@ def handle_chat_message(data):
 
     # 立即儲存使用者訊息（保證順序）
     import time
-    with closing(sqlite3.connect(DB_PATH)) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         cursor = conn.execute(
             'INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)',
             (agent_name, 'user', user_msg, None, time.time())
@@ -1091,7 +1168,7 @@ def handle_chat_message(data):
         _sse_session_sent = False  # 只在第一次 stream_emit 時通知客戶端
 
         def update_assistant_in_db(msg_id, content, think_content):
-            with closing(sqlite3.connect(DB_PATH)) as conn:
+            with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                 conn.execute(
                     'UPDATE chat_history SET content = ?, think_content = ? WHERE id = ?',
                     (content, think_content, msg_id)
@@ -1132,7 +1209,7 @@ def handle_chat_message(data):
             if event["type"] == "think":
                 accumulated_think += event["content"]
                 if assistant_msg_id is None:
-                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                         cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time()))
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
@@ -1143,7 +1220,7 @@ def handle_chat_message(data):
                     return
                 accumulated_reply += event["content"]
                 if assistant_msg_id is None:
-                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                         cursor = conn.execute(
                             "INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)",
                             (agent_name, "assistant", "", "", time.time())
@@ -1158,7 +1235,7 @@ def handle_chat_message(data):
                 if event.get("final_reply"):
                     accumulated_reply = event["final_reply"]
                 if assistant_msg_id is None:
-                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                         cursor = conn.execute(
                             "INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)",
                             (agent_name, "assistant", accumulated_reply, accumulated_think, time.time())
@@ -1170,7 +1247,7 @@ def handle_chat_message(data):
                     _save_rounds_to_db(assistant_msg_id, event["rounds"])
                 conv_id = event.get("conv_id")
                 if conv_id:
-                    with closing(sqlite3.connect(DB_PATH)) as conn:
+                    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                         conn.execute(
                             "UPDATE chat_history SET conv_id = ? WHERE id = ?",
                             (conv_id, assistant_msg_id)
@@ -1296,7 +1373,7 @@ def _update_user_message_conv_id(agent, conv_id, user_msg_id, user_id=None):
     
     # 如果有 conv_id，更新 chat_history
     if conv_id is not None:
-        with closing(sqlite3.connect(DB_PATH)) as conn:
+        with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
             conn.execute(
                 'UPDATE chat_history SET conv_id = ? WHERE id = ?',
                 (conv_id, user_msg_id)
@@ -2375,7 +2452,7 @@ def get_env_files_api():
         # ----- 新增：查詢該 agent 最後一條消息的時間 -----
         last_active = 0
         try:
-            with closing(sqlite3.connect(DB_PATH)) as conn:
+            with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                 cursor = conn.execute(
                     'SELECT timestamp FROM chat_history WHERE agent = ? ORDER BY timestamp DESC LIMIT 1',
                     (agent_name,)
@@ -2984,7 +3061,7 @@ def token_stats():
         params.append(user)
     where = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
     
-    with closing(sqlite3.connect(DB_PATH)) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         conn.row_factory = sqlite3.Row
         
         # 總用量
@@ -3041,7 +3118,7 @@ def get_chat_history():
     if limit > 100:
         limit = 100  # 防止一次性取過多
 
-    with closing(sqlite3.connect(DB_PATH)) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         conn.row_factory = sqlite3.Row
         # 總記錄數（用於判斷是否有更多）
         total = conn.execute(
@@ -3089,7 +3166,7 @@ def post_chat_history():
     timestamp = data.get('timestamp', time.time())
     if not agent or not role:
         return {"error": "Missing required fields"}, 400
-    with closing(sqlite3.connect(DB_PATH)) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         conn.execute(
             'INSERT INTO chat_history (agent, role, content, think_content, conv_id, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
             (agent, role, content, think_content, conv_id, timestamp)
@@ -3102,7 +3179,7 @@ def delete_chat_history():
     agent = request.args.get('agent', '')
     if not agent:
         return {"error": "Missing agent parameter"}, 400
-    with closing(sqlite3.connect(DB_PATH)) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         conn.execute('DELETE FROM chat_history WHERE agent = ?', (agent,))
         conn.commit()
     # 同時清除 mokagi 內存中的歷史
@@ -3133,7 +3210,7 @@ def update_chat_history(msg_id):
     think_content = data.get('think_content')
     if content is None and think_content is None:
         return {"error": "No content to update"}, 400
-    with closing(sqlite3.connect(DB_PATH)) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         updates = []
         params = []
         if content is not None:
@@ -3911,7 +3988,7 @@ def search_all_conversations():
 
     # --- 搜尋 chat_history（Web 端對話） ---
     try:
-        with closing(sqlite3.connect(DB_PATH)) as conn:
+        with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """SELECT id, agent, role, content, timestamp
@@ -4009,6 +4086,7 @@ def bookmark_add():
         "snippet": data.get("snippet", "")[:200],
         "agent": data.get("agent", ""),
         "role": data.get("role", ""),
+        "title": (data.get("title") or "")[:60],
         "timestamp": data.get("timestamp", time.time())
     })
     if not _save_bookmarks(bookmarks):
@@ -4034,6 +4112,22 @@ def bookmark_delete():
         return {"success": True, "message": "已刪除"}
     return {"success": False, "error": "索引無效"}, 400
 
+@app.route("/api/bookmark/rename", methods=["POST"])
+def bookmark_rename():
+    """編輯書籤標題"""
+    data = request.get_json(silent=True) or {}
+    conv_id = str(data.get("conv_id", "")).strip()
+    title = str(data.get("title", "")).strip()[:60]
+    if not conv_id:
+        return {"success": False, "error": "缺少 conv_id"}, 400
+    bookmarks = _load_bookmarks()
+    for bm in bookmarks:
+        if str(bm.get("conv_id", "")) == conv_id:
+            bm["title"] = title
+            _save_bookmarks(bookmarks)
+            return {"success": True, "message": "已更新書籤標題"}
+    return {"success": False, "error": "找不到該書籤"}, 404
+
 @app.route("/api/bookmark/conversation", methods=["GET"])
 def bookmark_conversation():
     """根據 conv_id 取得完整對話"""
@@ -4044,7 +4138,7 @@ def bookmark_conversation():
     messages = []
     # 搜尋 chat_history
     try:
-        with closing(sqlite3.connect(DB_PATH)) as conn:
+        with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT role, content, think_content, timestamp FROM chat_history WHERE CAST(conv_id AS TEXT) = ? ORDER BY timestamp ASC",

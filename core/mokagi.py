@@ -628,7 +628,7 @@ async def _generate_conversation_summary(user_msg: str, assistant_reply: str, ag
             temperature=0.3,
             agent_config=agent_config,
             include_soul=False,
-            num_predict=80
+            num_predict=512
         )
         text = result if isinstance(result, str) else result.get("content", "")
         lines = [l.strip() for l in text.strip().split('\n') if l.strip()]
@@ -2203,7 +2203,7 @@ def log_experience(
                 temperature=0.3,
                 agent_config=agent_config,
                 include_soul=False,
-                num_predict=80
+                num_predict=512
             ))
         finally:
             loop.close()
