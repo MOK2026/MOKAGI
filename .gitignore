@@ -1,0 +1,17 @@
+# github agent auto-added: protect secrets, db, logs
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.sqlite
+*.sqlite3
+*admin_key*
+external_keys*
+external_access*
+member.db
+*.log
+*.orig
+*.bak
+*.rej
+env.env
+.github

@@ -1,0 +1,56 @@
+{
+  "matrix_version": "1.0",
+  "schema": "病毒引擎 v1 建議稿｜凜(權限女) 可覆寫；凜矩陣定案後以同 schema 產出即自動生效",
+  "updated_at": "2026-09-07",
+  "levels": {
+    "admin": {
+      "desc": "主人 / 金鑰持有者（ADMIN_USERS）｜全功能",
+      "agents": "*",
+      "tools": "*",
+      "endpoints": "*",
+      "chat": true
+    },
+    "member": {
+      "desc": "受信會員｜依凜 member.db plan：free/pro/vip（free 僅基礎 agent；pro/vip=*）",
+      "agents": "@plan",
+      "tools": "@plan",
+      "endpoints": ["/api/chat", "/api/chat/start", "/api/chat/stream", "/api/chat/active", "/api/build_info", "/api/health", "/api/price", "/api/models", "/api/current_model", "/api/tools", "/api/heart/status", "/api/system/cpu", "/api/system/top", "/api/system/meminfo", "/api/config", "/api/token_stats", "/api/chat_history"],
+      "chat": true
+    },
+    "guest": {
+      "desc": "外部匿名 web_guest_xxx｜最小權限唯讀，不可聊天(凜 ALLOW_GUEST_CHAT=False)",
+      "agents": [],
+      "tools": [],
+      "endpoints": ["/api/build_info", "/api/health", "/api/price", "/api/models", "/api/current_model", "/api/heart/status", "/api/system/cpu", "/api/system/meminfo"],
+      "chat": false
+    }
+  },
+  "admin_only_tools": [
+    "admin_exec", "admin_read_file", "admin_read_room", "admin_pip", "admin_ollama_rm",
+    "admin_set_model", "admin_mode", "admin_logs", "admin_htop", "admin_cpu",
+    "cron", "backup", "job", "task", "crash_handler", "admin", "heart_scan"
+  ],
+  "admin_only_agents": [
+    "凜", "病毒引擎", "莫氏大魔王", "MOKAGI始祖", "AI接入大魔王", "FBI",
+    "API平台工程師", "MokCs", "懂王", "策略顧問"
+  ],
+  "admin_only_endpoints": [
+    "/api/backup", "/api/file", "/api/repair", "/api/save_file", "/api/create_file",
+    "/api/create_folder", "/api/upload_image", "/api/upload_text", "/api/upload_audio",
+    "/api/raw", "/api/eml", "/api/ml3", "/api/env_files", "/api/wa_auto_status",
+    "/api/clear_all_jobs", "/api/create_agent", "/api/set_env", "/api/mok_config",
+    "/api/set_model", "/api/tree", "/api/room_tree", "/api/search_all_conversations",
+    "/api/bookmark", "/api/llm_bridge", "/api/posts", "/api/chat_history/delete",
+    "/api/scrape", "/api/track", "/api/pending_tasks", "/api/search", "/api/agent_pets",
+    "/api/agent_voice", "/api/agency_roles"
+  ],
+  "member_only_endpoints": [
+    "/api/chat", "/api/chat/start", "/api/chat/stream", "/api/chat/active",
+    "/api/config", "/api/token_stats", "/api/chat_history"
+  ],
+  "guest_allowed_endpoints": [
+    "/api/build_info", "/api/health", "/api/price", "/api/models",
+    "/api/current_model", "/api/heart/status", "/api/system/cpu", "/api/system/meminfo"
+  ],
+  "note": "凜矩陣定案後請覆寫本檔或指定 MATRIX_ALT_PATH；admin_* 工具/端點一律僅 admin，guest 不可喚醒高權限 agent。"
+}
