@@ -3333,9 +3333,37 @@ def set_env():
     reload_config(new_path)
     return {"status": "ok", "current": filename, "models": AVAILABLE_MODELS, "options": OLLAMA_OPTIONS}
 
+# ===== /api/mok_config 資安加固（2026-09-26 by 泠）=====
+# 1) admin 閘：僅特權 session 可讀
+# 2) 白名單輸出：只回非機密 UI 設定，杜絕 MOK_TG_TOKEN / MOK_MODEL_token* / MOK_ALLOWED_USERS 外洩
+_MOK_CONFIG_WHITELIST_PREFIXES = (
+    'MOK_AGENT_', 'MOK_ADMIN_NAME', 'MOK_ADMIN_TIME_ZONE',
+    'MOK_CURRENT_MODEL', 'MOK_MAX_HISTORY_ROUNDS', 'MOK_MEMORY_RECALL_COUNT',
+    'MOK_MODEL_NAME', 'MOK_MODEL_url', 'MOK_NUM_THREADS',
+    'MOK_temperature', 'MOK_top_p', 'MOK_top_k', 'MOK_num_predict', 'MOK_num_ctx',
+    'MOK_repeat_penalty', 'MOK_presence_penalty', 'MOK_frequency_penalty',
+    'MOK_max_iterations', 'MOK_max_tack_rounds', 'MOK_dream_EXP', 'MOK_DEMO_',
+)
+_MOK_CONFIG_DENY_SUBSTR = ('token', 'secret', 'key', 'password', 'passwd', 'users', 'chat_id')
+
+
+def _safe_mok_config():
+    _out = {}
+    for _k, _v in (MOK_CONFIG or {}).items():
+        _ks = str(_k)
+        _low = _ks.lower()
+        if any(_b in _low for _b in _MOK_CONFIG_DENY_SUBSTR):
+            continue
+        if any(_ks.startswith(_p) for _p in _MOK_CONFIG_WHITELIST_PREFIXES):
+            _out[_ks] = _v
+    return _out
+
+
 @app.route('/api/mok_config')
 def get_mok_config():
-    return MOK_CONFIG
+    if not _is_privileged_session():
+        return jsonify({'success': False, 'error': 'forbidden: admin only'}), 403
+    return jsonify(_safe_mok_config())
 
 @app.route('/api/models')
 def get_models():
@@ -4098,6 +4126,10 @@ def handle_get_agent_logs(data):
 # ========== 🌸 Agent Settings 面板 ==========
 @socketio.on('get_agent_settings')
 def handle_get_agent_settings(data):
+    # admin-only（2026-09-26 by 泠）：agent 設定檔含環境變數/金鑰，僅特權 session 可讀。
+    if not _is_privileged_session():
+        socketio.emit('agent_settings_result', {'error': 'forbidden: admin only'}, room=request.sid)
+        return
     agent_name = data.get('agent', '')
     if not agent_name:
         socketio.emit('agent_settings_result', {'error': '未指定 Agent'}, room=request.sid)
@@ -4135,6 +4167,10 @@ def handle_get_agent_settings(data):
 
 @socketio.on('save_agent_settings')
 def handle_save_agent_settings(data):
+    # admin-only（2026-09-26 by 泠）：寫入 agent 設定檔（含金鑰）僅限特權 session。
+    if not _is_privileged_session():
+        socketio.emit('agent_settings_saved', {'error': 'forbidden: admin only'}, room=request.sid)
+        return
     agent_name = data.get('agent', '')
     content = data.get('content', '')
     if not agent_name:
