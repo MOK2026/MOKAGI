@@ -161,6 +161,33 @@ def check_deps():
 # 返回:
 #   dict: { success, title, content, url, rendered }
 # ------------------------------------------------------------------------------------ #
+def _strip_boilerplate(text: str) -> str:
+    """（B）過濾整頁 innerText 的樣板文字：版權、隱私權、語言切換、社群導覽等。"""
+    if not text:
+        return ""
+    _noise = (
+        "all rights reserved", "版權所有", "copyright", "©", "®",
+        "隱私權政策", "隱私政策", "服務條款", "使用條款", "免責聲明",
+        "語言", "lang", "language", "switch language", "選擇語言",
+        "follow us", "關注我們", "社群", "cookie", "回到頂部", "back to top",
+        "powered by", "mok group", "莫氏集團有限公司",
+    )
+    out, blank = [], False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            if not blank:
+                out.append("")
+                blank = True
+            continue
+        blank = False
+        low = line.lower()
+        if any(k in low or k in line for k in _noise):
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
+
+
 async def _render_with_browser(url: str, max_chars: int = 10000, wait_ms: int = 2500) -> dict:
     """用無頭瀏覽器渲染 JS 頁面並提取正文。"""
     try:
@@ -221,6 +248,7 @@ async def _render_with_browser(url: str, max_chars: int = 10000, wait_ms: int = 
 
             # 提取正文
             title = (await page.title()) or ""
+            rendered_html = await page.content()
             body_text = (await page.evaluate("document.body ? document.body.innerText : ''")) or ""
             meta_desc = ""
             try:
@@ -233,7 +261,31 @@ async def _render_with_browser(url: str, max_chars: int = 10000, wait_ms: int = 
 
             await browser.close()
 
-        content = (body_text or "").strip()
+        # ===== A：優先「渲染後 HTML + trafilatura」抽正文（濾除 nav/頁尾 boilerplate）=====
+        content = ""
+        if rendered_html:
+            try:
+                import trafilatura as _traf
+                from markdownify import markdownify as _md
+                _main_html = _traf.extract(
+                    rendered_html,
+                    include_formatting=True,
+                    include_links=True,
+                    include_images=False,
+                    output_format="html",
+                )
+                if _main_html:
+                    content = _md(_main_html, heading_style="ATX", bullets="-")
+                else:
+                    _main_text = _traf.extract(rendered_html, include_formatting=False)
+                    if _main_text:
+                        content = _main_text
+            except Exception:
+                content = ""
+        # ===== B：trafilatura 失效時，退回 innerText 並過濾樣板行 =====
+        if not content:
+            content = _strip_boilerplate(body_text)
+        content = (content or "").strip()
         if meta_desc:
             content = f"{meta_desc}\n\n{content}"
         # 清理空白
@@ -405,8 +457,10 @@ async def fetch_webpage(url: str, max_chars: int = 10000, mode: str = "auto") ->
         meaningful = len(re.sub(r"\s+", "", content))
         if mode == "render" or (mode == "auto" and meaningful < 200):
             rendered = await _render_with_browser(url, max_chars)
-            if rendered.get("success") and len(re.sub(r"\s+", "", rendered.get("content", ""))) > meaningful:
-                return rendered
+            if rendered.get("success"):
+                # render 模式為使用者明確指定 → 一律採用；auto 模式則需內容更完整才覆蓋
+                if mode == "render" or len(re.sub(r"\s+", "", rendered.get("content", ""))) > meaningful:
+                    return rendered
 
         return {
             "success": True,

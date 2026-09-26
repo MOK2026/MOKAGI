@@ -526,6 +526,11 @@ async def run_task(user_id: str, agent_name: str, continue_code: str, full_text:
         if event.get("type") == "done":
             done_event.set()
 
+    try:
+        from audit_layer import set_initiator as _set_ini
+        _set_ini("routine", "job:" + str(continue_code))
+    except Exception:
+        pass
     await mokagi.process_message(
         user_id=user_id,
         text=f"【任務執行】{continue_code}（僅限 Agent {agent_name}）",

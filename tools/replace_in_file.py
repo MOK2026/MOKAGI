@@ -104,6 +104,14 @@ async def handle_replace(args, chat_id: str = None, agent_config: Optional[Dict]
     if not real_path.startswith(mok_home + "/") and real_path != mok_home:
         return f"⛔ 安全拒絕：只能修改 {mok_home} 目錄內的檔案。"
 
+    # 3.4 機密檔保護（Step 4, 2026-09-25 by 凜）：.agent 等 dotfile 僅限主 admin 可寫
+    _base = os.path.basename(real_path)
+    if _base.startswith("."):
+        _adm_ids = {a.strip() for a in str((agent_config or {}).get("ADMIN_CHAT_ID", "")).replace(";", ",").split(",") if a.strip()}
+        _adm_ids.update({"admin", "root"})
+        if str(chat_id or "").strip() not in _adm_ids:
+            return "⛔ 權限拒絕：設定檔（. 開頭，如 .agent）僅限管理員（主人）修改。"
+
     if not os.path.isfile(real_path):
         return f"❌ 檔案不存在或不是普通檔案：{real_path}"
 

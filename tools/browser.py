@@ -54,12 +54,33 @@ _display_num = None      # 虛擬顯示器編號（鏡像）
 _persistent_dir = "/home/ubuntu/.mok/browser_profile2"  # 預設持久化設定檔目錄（相容舊版）
 _profiles_root = "/home/ubuntu/.mok/browser_profiles"   # 各 profile 獨立設定檔根目錄
 _active_profile = "default"                              # 最近活躍 profile 名稱
+_default_profile = "default"                             # 由呼叫端侍女推導出的預設 profile（未指定 profile= 時使用）
+_default_profile_agent = None                            # _default_profile 目前對應的侍女名稱
 
 # ==================== 多實例並行支援（profile 各自獨立瀏覽器，互不關閉） ====================
 # 每個 profile 擁有獨立的 Playwright/瀏覽器/頁面/Xvfb 顯示器，可同時並行運行。
 # 例：ws客服用 profile=wa、b侍女用 profile=b，兩者同時存在、互不干擾。
 _instances = {}          # profile -> {playwright, browser, context, page, xvfb_proc, display_num}
 _last_profile = "default"  # 未指定 profile 時的操作目標（最近一次使用的 profile）
+
+
+def _agent_profile_name(agent_config) -> str:
+    """由呼叫端侍女推導預設 profile 名稱（統一交由 mok_profile 模組，單一真相來源）。
+    沒有可用名稱時回退為 "default"（沿用舊版 browser_profile2）。"""
+    return mok_profile.agent_profile_name(agent_config)
+
+
+def _seed_profile_if_needed(profile_name: str, profile_dir: str) -> str:
+    """若侍女專屬 profile 尚未建立，則從 browser_profile2 複製一份種子。
+    複製邏輯統一交由 mok_profile 模組（單一真相來源）。"""
+    if profile_name == "default":
+        return ""
+    try:
+        if mok_profile.seed_profile(profile_dir):
+            return f"🌱 已從 {_persistent_dir} 複製種子，建立侍女專屬 profile：{profile_dir}"
+    except Exception as e:
+        return f"⚠️ 複製種子 profile 失敗（改用空白 profile 啟動）：{e}"
+    return ""
 
 
 import asyncio
@@ -71,7 +92,9 @@ import glob
 import random
 import subprocess
 import fcntl
+import re
 from typing import Optional, Dict, Union
+import mok_profile as mok_profile  # 全系統統一的 profile 推導（單一真相來源）
 
 # MOKAGI 沙箱：Chromium 存放在共享的 .mok/playwright-browsers
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/home/ubuntu/.mok/playwright-browsers")
@@ -233,11 +256,11 @@ def _stop_xvfb(profile: str = "default"):
 def _extract_profile(args):
     """從參數中提取 profile=xxx，返回 (clean_args, profile_or_None)。"""
     if isinstance(args, str) and "profile=" in args:
-        prof = "default"
+        prof = _default_profile
         rest = []
         for t in args.split():
             if t.startswith("profile="):
-                prof = t.split("=", 1)[1].strip() or "default"
+                prof = t.split("=", 1)[1].strip() or _default_profile
             else:
                 rest.append(t)
         return " ".join(rest), prof
@@ -277,8 +300,8 @@ async def _close_instance(profile: str):
                 errors.append(f"{name}: {e}")
     _stop_xvfb(profile)
     if _active_profile == profile:
-        _active_profile = "default"
-        _last_profile = "default"
+        _active_profile = _default_profile
+        _last_profile = _default_profile
         _page = None
         _context = None
         _browser = None
@@ -462,6 +485,14 @@ async def handle_browser(args: Union[str, dict], chat_id: str = None, agent_conf
     if agent_config and isinstance(agent_config, dict):
         agent_name = agent_config.get("MOK_AGENT_NAME") or agent_config.get("name") or "?"
     holder_info = f"agent={agent_name} pid={os.getpid()} chat={chat_id or chr(63)}"
+
+    # --- 依呼叫端侍女決定「預設 profile」；切換侍女時同步重置 _last_profile ---
+    global _default_profile, _default_profile_agent, _last_profile
+    _default_profile = _agent_profile_name(agent_config)
+    if _default_profile_agent != agent_name:
+        _default_profile_agent = agent_name
+        _last_profile = _default_profile
+
     lock_fd = await _acquire_browser_lock(holder_info)
     if lock_fd is None:
         return json.dumps({
@@ -638,15 +669,17 @@ async def _handle_install() -> str:
 async def _handle_launch(args: str) -> str:
     """啟動 Chromium 瀏覽器（支援 profile=xxx 指定獨立設定檔；多 profile 可並行共存，互不關閉）"""
     # --- 解析 profile 參數：/browser launch profile=wa ---
-    profile_name = "default"
+    # 未指定 profile= 時，採用呼叫端侍女的專屬 profile（不存在會自動種子複製）
+    profile_name = _default_profile
     clean_args = (args or "").strip()
     if "profile=" in clean_args:
         for token in clean_args.split():
             if token.startswith("profile="):
-                profile_name = token.split("=", 1)[1].strip() or "default"
+                profile_name = token.split("=", 1)[1].strip() or _default_profile
         # 從參數中移除 profile=xxx，避免影響 use_persistent 判斷
         clean_args = " ".join(t for t in clean_args.split() if not t.startswith("profile="))
-    profile_dir = os.path.join(_profiles_root, profile_name) if profile_name != "default" else _persistent_dir
+    # 統一推導：交由 mok_profile 模組（單一真相來源）；種子複製由下方 _seed_profile_if_needed 處理
+    profile_dir = mok_profile.resolve_profile_dir(explicit=profile_name, seed=False)
 
     # 目標 profile 已存在且頁面活著 → 直接切換為活躍實例；絕不關閉其他 profile
     inst = _instances.get(profile_name)
@@ -689,8 +722,10 @@ async def _handle_launch(args: str) -> str:
     chromium_path = _find_chromium_path()
     pw = await async_playwright().start()
 
+    seed_msg = ""
     try:
         if use_persistent:
+            seed_msg = _seed_profile_if_needed(profile_name, profile_dir)
             os.makedirs(profile_dir, exist_ok=True)
             context = await asyncio.wait_for(
                 pw.chromium.launch_persistent_context(
@@ -771,7 +806,7 @@ async def _handle_launch(args: str) -> str:
     return json.dumps({
         "success": True,
         "action": "launch",
-        "message": f"瀏覽器已啟動（profile: {profile_name}）",
+        "message": (f"瀏覽器已啟動（profile: {profile_name}）" + (f"\n{seed_msg}" if seed_msg else "")),
         "display": display,
         "persistent": use_persistent,
         "profile": profile_name,
@@ -781,7 +816,7 @@ async def _handle_launch(args: str) -> str:
 
 async def _ensure_page(profile: str = None):
     """確保指定 profile 的瀏覽器和頁面已就緒，否則拋出錯誤"""
-    target = profile or _last_profile or _active_profile
+    target = profile or _last_profile or _default_profile or _active_profile
     inst = _instances.get(target)
     if not inst or inst.get("page") is None:
         raise RuntimeError(f"瀏覽器尚未啟動（profile: {target}），請先執行 /browser launch profile={target}")

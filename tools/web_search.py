@@ -196,9 +196,12 @@ def check_search_deps(agent_config: Optional[Dict] = None) -> tuple[str | None, 
         missing.append("Tavily API Key 未配置")
 
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS  # 新版套件（duckduckgo_search 已改名為 ddgs）
     except ImportError:
-        missing.append("duckduckgo-search 未安裝")
+        try:
+            from duckduckgo_search import DDGS
+        except ImportError:
+            missing.append("ddgs 未安裝")
 
     if not missing:
         return None, api_key
@@ -209,8 +212,8 @@ def check_search_deps(agent_config: Optional[Dict] = None) -> tuple[str | None, 
             msg += "🔹 安裝 Tavily 庫：\n<pre>/admin pip install tavily-python</pre>\n\n"
         elif "Tavily API Key" in item:
             msg += "🔹 配置 Tavily API Key：\n在配置文件中新增：\n<pre>TAVILY_API_KEY=tvly-你的key</pre>\n\n"
-        elif "duckduckgo-search" in item:
-            msg += "🔹 安裝 DuckDuckGo 搜尋庫：\n<pre>/admin pip install duckduckgo-search</pre>\n\n"
+        elif "ddgs" in item or "duckduckgo-search" in item:
+            msg += "🔹 安裝 DuckDuckGo 搜尋庫（新版）：\n<pre>/admin pip install ddgs</pre>\n\n"
     msg += "完成後請 /reload 重新載入工具。"
     return msg, None
 
@@ -340,8 +343,15 @@ def _do_search_duckduckgo(params: dict, max_retries: int = 3) -> dict:
     """
     帶重試機制的搜尋執行器。
     處理 Rate Limit (HTTP 202/429) 和臨時性錯誤 (5xx)。
+    2026-09-22：套件已由 duckduckgo_search 改名為 ddgs（新版內建瀏覽器指紋偽裝，
+    可繞過 DDG html/lite 端點的 HTTP 202 反爬），優先用 ddgs，找不到才回退舊套件。
     """
-    from duckduckgo_search import DDGS
+    try:
+        from ddgs import DDGS
+        _ddg_new = True
+    except ImportError:
+        from duckduckgo_search import DDGS
+        _ddg_new = False
 
     query = params.get("query", "")
     if not query:
@@ -363,18 +373,19 @@ def _do_search_duckduckgo(params: dict, max_retries: int = 3) -> dict:
         else:
             region = 'wt-wt'   # 其他情況保持全球
 
+    def _text(ddgs_obj, kw, reg, tlimit):
+        """兼容新舊套件的參數名稱差異（ddgs: query / duckduckgo_search: keywords）。"""
+        if _ddg_new:
+            return list(ddgs_obj.text(kw, region=reg, timelimit=tlimit, max_results=5))
+        return list(ddgs_obj.text(keywords=kw, region=reg, timelimit=tlimit, max_results=5))
+
     logging.info(f"Web search JSON: {query}, timelimit: {tl}, region: {region}")
 
     last_error = None
     for attempt in range(max_retries):
         try:
             with DDGS() as ddgs:
-                results = list(ddgs.text(
-                    keywords=query,
-                    region=region,        # <--- 使用動態設定的 region
-                    timelimit=tl,
-                    max_results=5
-                ))
+                results = _text(ddgs, query, region, tl)
             
             # 搜尋成功，整理結果
             items = []
@@ -390,11 +401,7 @@ def _do_search_duckduckgo(params: dict, max_retries: int = 3) -> dict:
                 logging.info(f"結果少於3條，嘗試放寬時間限制重新搜尋")
                 # 直接以無時間限制再搜一次
                 with DDGS() as ddgs:
-                    results = list(ddgs.text(
-                        keywords=query,
-                        region=region,
-                        max_results=5
-                    ))
+                    results = _text(ddgs, query, region, None)
                 items = []
                 for res in results:
                     items.append({
@@ -402,6 +409,22 @@ def _do_search_duckduckgo(params: dict, max_retries: int = 3) -> dict:
                         "body": res.get("body", "")[:200],
                         "href": res.get("href", "")
                     })
+
+            # 2026-09-22：DDG 被限流（HTTP 202）時不會拋錯，而是靜默回傳 0 筆，
+            # 因此把「0 筆」視為可重試錯誤，避免對上層回報假成功。
+            if not items:
+                last_error = RuntimeError("DuckDuckGo 回傳 0 筆結果（可能被限流 HTTP 202）")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    logging.warning(f"DuckDuckGo 回傳 0 筆，{wait_time} 秒後重試（第 {attempt + 2} 次）")
+                    time.sleep(wait_time)
+                    continue
+                return {
+                    "success": False,
+                    "error": "DuckDuckGo 回傳 0 筆結果（可能被限流）",
+                    "total": 0,
+                    "results": []
+                }
 
             return {
                 "success": True,

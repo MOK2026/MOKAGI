@@ -1,0 +1,25 @@
+{
+  "host": "127.0.0.1",
+  "port": 5599,
+  "token": "",
+  "services": [
+    {"name": "mok_agi", "type": "pm2", "pm2_name": "mok_agi", "critical": true},
+    {"name": "mok_web", "type": "match", "pattern": "/home/ubuntu/.mok/frontends/mok_web.py", "critical": true},
+    {"name": "mok_bots", "type": "match", "pattern": "/home/ubuntu/.mok/frontends/mok_tg.py", "critical": true}
+  ],
+  "panic": {
+    "pm2_stop": ["mok_agi"],
+    "kill_patterns": [
+      "/home/ubuntu/.mok/frontends/mok_web.py",
+      "/home/ubuntu/.mok/frontends/mok_tg.py",
+      "/home/ubuntu/.mok/core/launcher.py"
+    ],
+    "grace_seconds": 3
+  },
+  "watchdog": {
+    "enabled": false,
+    "interval": 15,
+    "auto_restart": ["mok_web"]
+  }
+}
+

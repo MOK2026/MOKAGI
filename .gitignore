@@ -15,3 +15,7 @@ member.db
 *.rej
 env.env
 .github
+
+# 禁傳路徑（admin 2026-09-26 指定，勿移除）
+gateway/
+pgdata/

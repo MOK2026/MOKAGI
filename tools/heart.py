@@ -95,6 +95,11 @@ async def _async_scan():
 
         for handler, _ in heartbeat_handlers:
             try:
+                try:
+                    from audit_layer import set_initiator as _set_ini
+                    _set_ini("routine", "heart")
+                except Exception:
+                    pass
                 await handler(agent_name, agent_config)
             except Exception as e:
                 logger.exception(

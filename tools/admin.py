@@ -41,11 +41,11 @@ PLUGIN_INFO = {
         "name": "admin",
         "description": (
             "執行系統管理操作。支援以下動作：htop, cpu, mode, logs, read_file, set_model, ollama_rm, pip, exec。\n\n"
-            "【重要】高風險操作（ollama_rm, pip install, exec）需要二次確認。系統會返回以 CONFIRM_SPLIT: 開頭的警告消息，"
-            "LLM 必須將完整確認訊息（含操作內容與確認碼用途說明）原樣展示給用戶，不得刪減，並提示用戶發送 `/admin confirm <token>` 來確認執行。\n\n"
+            "【重要】高風險操作（ollama_rm, pip install, exec）需要二次確認。呼叫這類工具前，請先在回覆中把要對主人說的話「完整說完」（用句號收尾），不要在「：」後面就丟出工具呼叫。系統會自動把確認訊息轉成一則正常的助手訊息發給主人，你不需要（也不要）自行複製或改寫 CONFIRM_SPLIT 內容。\n\n"
+            "確認訊息會附上一行 `/admin confirm <token>`：請提醒主人回覆該確認碼即可執行。\n\n"
             "【返回格式】\n"
             "- 成功：返回人類可讀的字符串（或 JSON 包含 action 等字段）。\n"
-            "- 需要確認時：返回格式「CONFIRM_SPLIT:警告內容\\n---CONFIRM_SPLIT---\\n/admin confirm <token>」。\n"
+            "- 需要確認時：工具結果是「CONFIRM_SPLIT:...」字串（由系統處理並自動顯示給主人，你不必原樣輸出）。\n"
             "- 錯誤時返回 JSON：{\"success\": false, \"error_type\": \"...\", \"error_message\": \"...\"}。\n\n"
             "【權限】部分操作僅限管理員（`ADMIN_CHAT_ID` 配置的用戶），非管理員會返回權限錯誤。"
         ),
@@ -148,7 +148,7 @@ PLUGIN_INFO = {
                 "- `ls -la`\n"
                 "- `curl https://api.example.com`\n"
                 "- `df -h`\n\n"
-                "返回：系統會先返回確認碼（格式 `CONFIRM_SPLIT:...`），LLM 必須將完整確認訊息（含操作內容與確認碼用途說明）原樣展示給用戶，"
+                "返回：系統會先產生確認碼（工具結果為 `CONFIRM_SPLIT:...`，由系統自動轉成一則助手訊息顯示給主人），"
                 "等待用戶發送 `/admin confirm <token>` 後才會真正執行。\n\n"
                 "成功執行後返回命令的 stdout（前3000字符），失敗返回 stderr。\n"
                 "若命令風險等級為 `safe` 或 `low` 且環境變量 `MOK_AUTO_APPROVE_ADMIN=1`，則可能直接執行無需確認。"
@@ -525,28 +525,98 @@ def get_cron_task_explain(command: str = "") -> str:
 #       在「操作內容」之外，附上人類可讀的詳細說明（查看/刪除/安裝/風險/代碼操作），
 #       讓用戶在確認前能看懂這個操作在做什麼、有什麼風險。
 #       若命令命中 CRON_TASK_EXPLAIN（如短影音帶貨的 cron 任務），會自動附加完整說明。
+#       未命中時，改用 _human_explain_for_command() 依操作類型與指令特徵生成說明。
 # ------------------------------------------------------------------------------------ #
-def _build_confirm_warning(operation_desc: str, risk: str = "", command: str = "", agent_config: dict = None) -> str:
+_RISK_LEVEL_TEXT = {
+    "safe": "🟢 安全：唯讀操作，不改變系統狀態",
+    "low": "🟡 低：僅在允許目錄內讀寫，影響有限",
+    "medium": "🟠 中：會修改檔案或系統狀態，執行前請確認內容",
+    "high": "🔴 高：可能刪除/覆寫重要檔案、變更權限或執行高風險指令",
+    "blocked": "⛔ 已封鎖：風險過高，不允許執行",
+}
+
+
+def _human_explain_for_command(command: str, cmd_type: str = "exec") -> str:
+    """為任意 /admin confirm 操作生成人類可讀說明（這是什麼 / 做什麼 / 有何風險）。
+    優先回傳已建檔的 cron 任務說明；否則依操作類型與指令特徵做行為分析。
+    """
+    cmd = (command or "").strip()
+    c = cmd.lower()
+
+    try:
+        known = get_cron_task_explain(cmd)
+    except Exception:
+        known = ""
+    if known:
+        return known
+
+    lines = []
+    if cmd_type == "pip_install" or c.startswith("install "):
+        pkg = cmd[len("install"):].strip() if c.startswith("install ") else cmd
+        lines.append(f"🧩 類型：Python 套件安裝（pip）。會把 {pkg or cmd} 從套件庫下載並安裝到目前 Python 環境，可能連帶安裝相依套件。")
+    elif cmd_type == "ollama_rm":
+        lines.append(f"🧩 類型：本機 Ollama 模型刪除。會從 Ollama 移除模型 {cmd} 的檔案，刪除後需重新下載才能再用。")
+    else:
+        lines.append("🧩 類型：Shell 指令。會直接在本機（或在 Docker 沙箱內）以目前使用者身分執行，效果等同你在終端機手打這行。")
+
+    if cmd:
+        flags = []
+        if re.search(r"\brm\b|\brmdir\b|\bunlink\b", c):
+            flags.append("刪除檔案/目錄（rm/rmdir）")
+        if ">>" in cmd:
+            flags.append("以 >> 追加寫入檔案")
+        elif re.search(r"(^|[^>])>([^>]|$)", cmd):
+            flags.append("以 > 覆寫檔案（原內容會消失）")
+        if re.search(r"curl|wget", c) and re.search(r"\|\s*(bash|sh|zsh|python3?)", c):
+            flags.append("下載後直接執行網路腳本（curl|bash，高風險）")
+        if re.search(r"\bmv\b", c):
+            flags.append("移動/改名檔案")
+        elif re.search(r"\bcp\b", c):
+            flags.append("複製檔案")
+        if re.search(r"chmod|chown|chgrp", c):
+            flags.append("變更權限/擁有者")
+        if re.search(r"pip\s+install|apt(-get)?\s+install|npm\s+install|yum\s+install", c):
+            flags.append("安裝軟體套件")
+        if re.search(r"\bkill\b|pkill|systemctl|service\b|reboot|shutdown", c):
+            flags.append("控制行程/系統服務或重開機")
+        if re.search(r"git\s+(push|reset|clean|checkout)", c):
+            flags.append("git 推送/重置（可能影響遠端或覆蓋未提交變更）")
+        if re.search(r"crontab", c):
+            flags.append("修改定時任務")
+        if flags:
+            lines.append("🔍 偵測到的具體動作：" + "；".join(dict.fromkeys(flags)) + "。")
+        paths = re.findall(r"(/[\w./\-\u4e00-\u9fff]+)", cmd)
+        if paths:
+            uniq = list(dict.fromkeys(paths))
+            lines.append("📂 涉及路徑：" + "、".join(uniq[:6]))
+
+    lines.append("❓ 影響：執行後會修改系統狀態，多數無法自動回復；若不確定指令用途，請先別確認。")
+    return "\n".join(lines)
+
+
+def _build_confirm_warning(operation_desc: str, risk: str = "", command: str = "", agent_config: dict = None, cmd_type: str = "exec") -> str:
     lines = [
         "🔐 此確認碼用於授權執行下方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。",
         "⚠️ 需要確認的操作 ⚠️",
         f"📋 操作內容：{operation_desc}",
     ]
+    if command:
+        lines.append(f"💻 完整指令：{html.escape(command)}")
     if risk:
-        lines.append(f"⚠️ 風險等級：{risk}")
+        lines.append(f"⚠️ 風險：{_RISK_LEVEL_TEXT.get(risk, risk)}")
     explain = ""
     try:
-        explain = get_cron_task_explain(command)
+        explain = _human_explain_for_command(command, cmd_type)
     except Exception:
         explain = ""
-    if explain:
-        lines.append("")
-        lines.append("📖 此任務的人類可讀說明：")
-        lines.append(explain)
+    lines.append("")
+    lines.append("📖 操作說明（這是什麼 / 做什麼 / 有何風險）：")
+    lines.append(explain if explain else "此操作會修改系統狀態，執行後無法自動回復，請確認無誤再授權。")
+    _ttl = _get_confirm_ttl(agent_config)
+    if _ttl > 0:
+        lines.append(f"⏰ 請在 {_confirm_ttl_hint(_ttl)} 內發送確認碼以執行：")
     else:
-        lines.append("")
-        lines.append("📖 說明：此操作會修改系統狀態，執行後無法自動回復，請確認無誤再授權。")
-    lines.append("⏰ 請在 5 分鐘內發送確認碼以執行：")
+        lines.append("⏰ 本確認碼不設時間限制，準備好後再發送即可：")
     return "\n".join(lines)
 
 
@@ -626,15 +696,44 @@ def get_config_file_path(agent_name: str = None, agent_config: dict = None) -> s
 #方案 A：僅啟用自動批准（推薦）
 # 在您的 Agent 設定檔（例如 ~/.mok/.default）中加入：
 # MOK_AUTO_APPROVE_ADMIN=1
+#
+#方案 B：調整 /admin confirm 確認碼時限（預設 1800 秒 = 30 分鐘）
+# 在 Agent 設定檔中加入（秒）：MOK_CONFIRM_TTL=0
+# 0 = 不設時間限制；也可設 86400（1天）、3600（1小時）等；留空/未設定則維持 1800（30 分鐘）
+# 亦可透過環境變數 MOK_CONFIRM_TTL 覆寫（優先於設定檔）；舊鍵 MOK_ADMIN_CONFIRM_TTL 仍相容
 
 # ------------------------------------------------------------------------------------ #
+# 舊版目錄（僅保留相容；實際待確認檔已由 confirm_manager 統一管理於 .pending_confirm）
 PENDING_CONFIRM_DIR = os.path.join(MOKAGI_HOME, ".pending_admin_confirm")
-PENDING_CONFIRM_TTL = 300  # 5 分鐘有效
+# ===== 確認流程：統一使用 confirm_manager（admin 與 cron 共用「同一個實例」）=====
+import sys as _sys
+import importlib.util as _ilu
+if "mok_confirm_manager" not in _sys.modules:
+    _cm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "confirm_manager.py")
+    _spec = _ilu.spec_from_file_location("mok_confirm_manager", _cm_path)
+    _mcm = _ilu.module_from_spec(_spec)
+    _sys.modules["mok_confirm_manager"] = _mcm
+    _spec.loader.exec_module(_mcm)
+_cm = _sys.modules["mok_confirm_manager"]
+
+PENDING_CONFIRM_TTL = _cm.DEFAULT_TTL  # 預設 30 分鐘；可用 MOK_CONFIRM_TTL / MOK_ADMIN_CONFIRM_TTL 覆寫
+
+def _get_confirm_ttl(agent_config: dict = None) -> float:
+    """取得確認碼有效期限（秒）。0 或負值 = 不設時間限制。統一由 confirm_manager 決定。"""
+    return _cm.get_ttl(agent_config)
+
+def _confirm_expired(timestamp: float, ttl: float) -> bool:
+    """確認碼是否已過期；ttl <= 0 表示永不逾期。"""
+    return _cm.is_expired(timestamp, ttl)
+
+def _confirm_ttl_hint(ttl: float) -> str:
+    """產生給用戶看的時限提示文字。"""
+    return _cm.ttl_hint(ttl)
 
 def _pending_token_path(token: str) -> str:
     return os.path.join(PENDING_CONFIRM_DIR, f"{token}.json")
 
-def _load_pending_confirmations() -> dict:
+def _load_pending_confirmations(ttl: float = None) -> dict:
     """掃描磁碟，載入所有未過期的待確認命令（跨進程/重啟持久化）。"""
     result = {}
     try:
@@ -648,7 +747,7 @@ def _load_pending_confirmations() -> dict:
             try:
                 with open(p, "r", encoding="utf-8") as f:
                     item = json.load(f)
-                if isinstance(item, dict) and now - item.get("timestamp", 0) <= PENDING_CONFIRM_TTL:
+                if isinstance(item, dict) and not _confirm_expired(item.get("timestamp", 0), PENDING_CONFIRM_TTL if ttl is None else ttl):
                     result[fn[:-5]] = item
                 else:
                     try:
@@ -687,21 +786,14 @@ def _remove_pending_file(token: str) -> None:
         pass
 
 def _store_pending(token: str, cmd_type: str, args: str, chat_id: str, description: str = "") -> None:
-    """儲存待確認命令到記憶體與磁碟。"""
-    pending_confirmations[token] = {
-        "cmd": cmd_type,
-        "args": args,
-        "chat_id": str(chat_id),
-        "timestamp": time.time(),
-        "description": description,
-    }
-    _save_pending_confirmations()
+    """儲存待確認命令（統一寫入 confirm_manager 的待確認清單）。"""
+    _cm.register(token, "admin", cmd_type, args, chat_id, description=description)
 
-pending_confirmations = _load_pending_confirmations()
+pending_confirmations = _cm.pending_dict()
+
 def generate_token(chat_id: str, cmd: str, args: str) -> str:
-    """生成一次性確認 token"""
-    raw = f"{chat_id}_{cmd}_{args}_{time.time()}_{os.urandom(4).hex()}"
-    return hashlib.md5(raw.encode()).hexdigest()[:12]
+    """生成一次性確認 token（與 cron 共用同一套）。"""
+    return _cm.generate_token(chat_id, "admin", cmd, args)
 
 async def confirm_command(chat_id: str, token: str, agent_config: dict = None) -> tuple:
     """嘗試確認命令，返回 (成功標誌, 結果字串)"""
@@ -712,39 +804,25 @@ async def confirm_command(chat_id: str, token: str, agent_config: dict = None) -
     auto_approve_cfg = agent_config.get("MOK_AUTO_APPROVE_ADMIN")
     if auto_approve_env == "0" or auto_approve_cfg == "0" or auto_approve_cfg == 0:
         return False, "❌ 權限不足。"
-    # 原有確認邏輯（先合併磁碟持久化資料，避免重啟/多進程導致 token 遺失）
-    try:
-        disk_data = _load_pending_confirmations()
-        for k, v in disk_data.items():
-            pending_confirmations.setdefault(k, v)
-    except Exception:
-        pass
-    if token not in pending_confirmations:
-        # 先嘗試 cron 確認碼（cron 使用獨立字典，避免與 admin 衝突）
-        try:
-            from tools.cron_tool import confirm_cron_command, has_pending_cron_token
-            if has_pending_cron_token(token):
+    # ===== 統一確認流程：由 confirm_manager 判斷狀態（ok/expired/already_used/not_found）=====
+    status, info = _cm.redeem(chat_id, token, agent_config=agent_config)
+    if status != "ok":
+        # admin 找不到時，仍嘗試 cron 的確認路徑（相容性）
+        if status == "not_found":
+            try:
+                from tools.cron_tool import confirm_cron_command
                 return await confirm_cron_command(chat_id, token, agent_config)
-        except Exception:
-            pass
-        return False, "❌ 確認碼無效或已過期。請重新發送原命令。"
-    info = pending_confirmations[token]
-    if str(info["chat_id"]) != str(chat_id):
-        return False, "❌ 確認碼與用戶不匹配。"
-    if time.time() - info["timestamp"] > PENDING_CONFIRM_TTL:
-        del pending_confirmations[token]
-        _remove_pending_file(token)
-        return False, "❌ 確認碼已超時（5分鐘）。請重新發送原命令。"
-    cmd_type = info["cmd"]
-    args = info["args"]
-    del pending_confirmations[token]
-    _remove_pending_file(token)
+            except Exception:
+                pass
+        return False, _cm.status_message(status, info, agent_config=agent_config)
+    cmd_type = info.get("cmd")
+    args = info.get("args", "")
     if cmd_type == "ollama_rm":
         success, result = execute_ollama_rm(args)
     elif cmd_type == "pip_install":
         success, result = execute_pip_install(args)
     elif cmd_type == "shell_exec":
-        success, result = execute_shell_command(args, agent_config)
+        success, result = execute_shell_command(args)
     elif cmd_type == "autofix_exec":
         from autofix import execute_code_safely
         success, out, err = await execute_code_safely(args)
@@ -753,12 +831,14 @@ async def confirm_command(chat_id: str, token: str, agent_config: dict = None) -
             return True, result
         else:
             return False, f"❌ 執行修正程式碼時出錯：\n{err[:1000]}"
-    elif cmd_type == "cron_add":
-        from tools.cron_tool import confirm_cron_command
-        return await confirm_cron_command(chat_id, args, agent_config)
-    elif cmd_type == "cron_delete":
-        from tools.cron_tool import confirm_cron_command
-        return await confirm_cron_command(chat_id, args, agent_config)
+    elif cmd_type in ("cron_add", "cron_delete"):
+        from tools.cron_tool import _execute_cron_add, _execute_cron_delete
+        if cmd_type == "cron_add":
+            return _execute_cron_add(args)
+        try:
+            return _execute_cron_delete(int(str(args).strip()))
+        except Exception:
+            return False, "❌ 刪除失敗：無效的任務編號。"
     else:
         return False, "❌ 未知命令類型。"
     return success, result
@@ -776,7 +856,145 @@ def request_confirmation(chat_id: str, cmd_type: str, args: str, description: st
     _store_pending(token, cmd_type, args, chat_id, description)
     return token
 # 評估命令風險等級
+def _guard_self_kill(command: str):
+    """自殺防護：若命令試圖終止本進程或其祖先（web/bot/launcher），回傳原因字串；否則 None。"""
+    import re as _re
+    try:
+        prot = set()
+        pid = os.getpid()
+        for _ in range(40):
+            if pid <= 1:
+                break
+            prot.add(pid)
+            try:
+                with open("/proc/%d/stat" % pid, "r", encoding="utf-8", errors="replace") as f:
+                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+            except Exception:
+                break
+            pid = ppid
+        nums = set(int(x) for x in _re.findall(r"\b\d{2,7}\b", command))
+        hit = prot & nums
+        if hit:
+            return "試圖終止本進程或其父進程（PID %s）" % sorted(hit)
+        if _re.search(r"\b(pkill|killall)\b", command):
+            try:
+                with open("/proc/%d/cmdline" % os.getpid(), "rb") as f:
+                    myname = f.read().decode("utf-8", "replace").replace("\x00", " ").strip()
+            except Exception:
+                myname = ""
+            for tok in myname.split():
+                if ("/" in tok or tok.endswith(".py")) and tok in command:
+                    return "pkill/killall 指向本進程（%s）" % tok
+    except Exception:
+        return None
+    return None
+
+
+# ==== L1 核心保護（檔案層＋寫入偵測，不再只賭首字白名單）====
+_PROTECTED_TOOL_FILES = [
+    "tools/admin.py", "tools/replace_in_file.py", "tools/memory.py",
+    "core/mokagi.py", "core/config.py", "core/tool_handler.py",
+    "core/workflow.py", "MOKAGI.sh", "env.env",
+]
+def _protected_path_set():
+    base = os.path.expanduser("~/.%s" % mokagi_name)
+    s = set()
+    for rel in _PROTECTED_TOOL_FILES:
+        s.add(os.path.realpath(os.path.join(base, rel)))
+    return s
+_PROTECTED_WRITE_RE = re.compile(
+    r"(>>?(?!\s*(/dev/(null|stdout|stderr)\b|&))"
+    r"|\btee\b|\bsed\s+-i|\bperl\s+-i|\bcp\s|\bmv\s|\brm\s|\btruncate\s"
+    r"|\bdd\s|\bchmod\s|\bchown\s|\bchattr\s|\bln\s+-s|\bmkfifo\s"
+    r"|\bopen\s*\(|\bwrite_text\b|\bwritelines\b|\bto_json\b|\bshred\s"
+    r"|\bremove\s*\(|\bunlink\s*\(|\brmtree\s*\(|\brename\s*\(|\breplace\s*\(|\bwrite\s*\()")
+def _norm_cmd_text(command):
+    c = command.replace("\t", " ")
+    for q in ('"', "'", "`"):
+        c = c.replace(q, "")
+    _home = os.path.expanduser("~")
+    c = c.replace("${HOME}", _home).replace("$HOME", _home)
+    c = c.replace("${MOK}", _home + "/.mok").replace("$MOK", _home + "/.mok")
+    return re.sub(r"\s+", " ", c)
+def _extract_path_candidates(command):
+    text = _norm_cmd_text(command)
+    cands = set()
+    for m in re.finditer(r"(/[^\s|;&<>()]+)", text):
+        cands.add(m.group(1))
+    for m in re.finditer(r"(~/[^\s|;&<>()]+)", text):
+        cands.add(os.path.expanduser(m.group(1)))
+    return cands
+def _protected_write_guard(command):
+    """若命令對受保護核心檔構成任何寫入/刪除/連結，回傳描述字串；否則 None。
+    以「實際路徑(realpath)」比對，並額外攔 shell 變數字串(如 $X/admin.py)。"""
+    prot = _protected_path_set()
+    names = [os.path.basename(x) for x in prot]
+    text = _norm_cmd_text(command)
+    has_write = bool(_PROTECTED_WRITE_RE.search(text))
+    if not has_write:
+        return None
+    for cand in _extract_path_candidates(command):
+        try:
+            real = os.path.realpath(cand)
+        except Exception:
+            continue
+        if real in prot:
+            return "命令試圖以寫入/刪除方式碰觸受保護核心檔：%s" % real
+        try:
+            rdir = os.path.realpath(os.path.dirname(cand))
+            if os.path.isdir(rdir) and rdir in prot:
+                return "命令試圖寫入受保護核心目錄：%s" % rdir
+        except Exception:
+            pass
+    for nm in names:
+        if len(nm) >= 4 and re.search(r"(?:^|[^\w.])" + re.escape(nm) + r"(?!\w)", text):
+            return "命令字串指向受保護核心檔：%s" % nm
+    return None
+def _core_blocked(command):
+    return _protected_write_guard(command) is not None
+# ==== L1 核心保護結束 ====
+
+# ==== L1 刪除改寫：rm 一律改走回收站 trash.sh ====
+def _mok_trash_script():
+    return os.path.join(os.path.expanduser("~/.%s" % mokagi_name), "tools", "trash.sh")
+
+
+def rewrite_delete_to_trash(command):
+    """把單純 rm 命令改寫成呼叫 trash.sh，讓刪除一律進回收站。
+    回傳 (改寫後命令或原命令, 是否已改寫)。不安全目標不改寫，保留原命令由風險評估攔截。"""
+    try:
+        import shlex as _shlex
+        m = re.match(r'^rm\s+(.+)$', command.strip())
+        if not m:
+            return command, False
+        toks = _shlex.split(m.group(1))
+        paths = [t for t in toks if not t.startswith('-')]
+        if not paths:
+            return command, False
+        home = os.path.expanduser("~")
+        mok_root = os.path.expanduser("~/.%s" % mokagi_name)
+        for p in paths:
+            rp = os.path.realpath(os.path.expanduser(p))
+            if rp in ('/', home, mok_root):
+                return command, False
+        trash = _mok_trash_script()
+        def _q(x):
+            if ('*' in x or '?' in x) and ' ' not in x:
+                return x
+            return _shlex.quote(x)
+        safe = ' '.join(_q(x) for x in paths)
+        return 'bash %s %s' % (_shlex.quote(trash), safe), True
+    except Exception:
+        return command, False
+# ==== L1 刪除改寫結束 ====
+
+
 def assess_command_risk(command: str, agent_config: dict = None) -> str:
+    # L1：受保護核心檔一律先擋（不可寫、刪、連結），位置先於任何白名單。
+    if _protected_write_guard(command):
+        return 'blocked'
+    if _guard_self_kill(command):
+        return 'blocked'
     if agent_config is None:
         agent_config = mokagi._agent_config
     cmd_lower = command.lower().strip()
@@ -812,7 +1030,6 @@ def assess_command_risk(command: str, agent_config: dict = None) -> str:
     
     # ----- 解析命令中的路徑參數（簡易版）-----
     # 提取所有看起來像路徑的參數（以 / 或 ~ 開頭）
-    import re
     path_pattern = re.compile(r'(?:^|\s)(/[^\s]+|~[^\s]*)')
     paths = [p.strip() for p in path_pattern.findall(command)]
     
@@ -850,7 +1067,7 @@ def assess_command_risk(command: str, agent_config: dict = None) -> str:
     # 其他危險模式（如 chmod, chown, kill, dd, sh, eval 等）
     dangerous_patterns = [
         r'\bchmod\s', r'\bchown\s',
-        r'\bkilling\b', r'\bpkill\b', r'\bkillall\b', r'\bdd\s', r'\bmkfs\s',
+        r'\bkilling\b', r'\bpkill\b', r'\bkillall\b', r'\bkill\b', r'\bdd\s', r'\bmkfs\s',
         # === 系統關機/重啟/服務控制（絕對禁止）===
         r'\bshutdown\s', r'\breboot\s', r'\bhalt\s', r'\bpoweroff\s',
         r'\bsystemctl\s.*\b(stop|disable|mask|isolate|halt|poweroff|reboot|kexec)\b',
@@ -903,58 +1120,103 @@ def assess_command_risk(command: str, agent_config: dict = None) -> str:
 # ==============================================
 # Docker 沙盒執行器（可選，需安裝 docker）
 # ==============================================
-def execute_docker_sandboxed(command: str, timeout: int = 300) -> tuple:
-    """
-    在一次性 Docker 容器中安全執行命令（使用 sudo docker run）。
-    返回 (success, output)
-    """
-    # 1. 自動移除命令開頭的 sudo（容器內預設就是 root，不需要 sudo）
-    command = re.sub(r'^sudo\s+', '', command.strip())
-    
-    image_name = "ubuntu:latest"
+# ===== 侍女 exec Docker 沙盒（路線C：混合）=====
+_SANDBOX_DEFAULTS = {
+    "enabled": True,
+    "image": "mok-sandbox:latest",
+    "network": "bridge",
+    "memory": "1g",
+    "cpus": "1.0",
+    "mount_mok_readonly": True,
+    "exempt_admin": True,
+    "exempt_agents": [],
+}
 
-    # 定義一個內部函數來執行 docker run
-    def run_container(cmd):
-        docker_cmd = (
-            f"sudo docker run --rm "
-            f"--network none "
-            f"-v /home/ubuntu/.{mokagi_name}:/home/ubuntu/.{mokagi_name} "
-            f"-w /home/ubuntu/.{mokagi_name} "
-            f"--memory=512m "
-            f"--cpu-period=100000 --cpu-quota=50000 "
-            f"{image_name} sh -c {shlex.quote(cmd)}"
-        )
-        return subprocess.run(
+
+def get_sandbox_config() -> dict:
+    cfg = dict(_SANDBOX_DEFAULTS)
+    try:
+        p = os.path.expanduser("~/.%s/policy/sandbox_exec.json" % mokagi_name)
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+            cfg.update(data)
+    except Exception:
+        pass
+    return cfg
+
+
+def should_use_docker(chat_id=None, agent_config: dict = None) -> bool:
+    """路線C：非管理員的 agent，其純 exec 才送進沙盒。"""
+    cfg = get_sandbox_config()
+    if not cfg.get("enabled"):
+        return False
+    if agent_config is None:
+        agent_config = getattr(mokagi, "_agent_config", {}) or {}
+    if cfg.get("exempt_admin", True):
+        try:
+            if is_admin(chat_id, agent_config):
+                return False
+        except Exception:
+            pass
+    name = (agent_config.get("MOK_AGENT_NAME") or "").strip()
+    if name and name in (cfg.get("exempt_agents") or []):
+        return False
+    return True
+
+
+def execute_docker_sandboxed(command: str, timeout: int = 300, agent_config: dict = None) -> tuple:
+    """路線C 沙盒：預裝映像 + 保留網路 + 只掛她房間可寫，其餘唯讀。"""
+    cfg = get_sandbox_config()
+    command = re.sub(r'^sudo\s+', '', command.strip())
+    if agent_config is None:
+        agent_config = getattr(mokagi, "_agent_config", {}) or {}
+    mok_root = os.path.expanduser("~/.%s" % mokagi_name)
+    agent_name = (agent_config.get("MOK_AGENT_NAME") or "").strip()
+    room = os.path.join(mok_root, "agent", agent_name) if agent_name else mok_root
+    if not os.path.isdir(room):
+        room = mok_root
+    shared_tmp = os.path.join(mok_root, "_tmp")
+    mounts = []
+    if cfg.get("mount_mok_readonly", True):
+        mounts.append("-v %s:%s:ro" % (mok_root, mok_root))
+    mounts.append("-v %s:%s:rw" % (room, room))
+    if os.path.isdir(shared_tmp):
+        mounts.append("-v %s:%s:rw" % (shared_tmp, shared_tmp))
+    image_name = cfg.get("image", "mok-sandbox:latest")
+    docker_cmd = (
+        "sudo docker run --rm "
+        "-u %s:%s " % (os.getuid(), os.getgid())
+        + "--network %s " % cfg.get("network", "bridge")
+        + "--memory=%s --cpus=%s " % (cfg.get("memory", "1g"), cfg.get("cpus", "1.0"))
+        + "--pids-limit 512 "
+        + "-e HOME=%s -e LANG=C.UTF-8 -e PYTHONIOENCODING=utf-8 " % room
+        + " ".join(mounts) + " "
+        + "-w %s " % room
+        + "%s bash -c %s" % (image_name, shlex.quote(command))
+    )
+    try:
+        result = subprocess.run(
             docker_cmd,
             shell=True,
             capture_output=True,
             text=True,
-            timeout=timeout + 10,
+            timeout=timeout + 30,
             executable="/bin/bash"
         )
-
-    # 第一次嘗試執行
-    result = run_container(command)
-
-    # 2. 如果失敗原因是「找不到映像檔」，自動下載後重試
-    if result.returncode != 0 and "Unable to find image" in result.stderr:
-        # 下載 alpine 映像
-        pull_cmd = f"sudo docker pull {image_name}"
-        pull_result = subprocess.run(pull_cmd, shell=True, capture_output=True, text=True, timeout=120)
-        if pull_result.returncode == 0:
-            # 下載成功，重試執行命令
-            result = run_container(command)
-        else:
-            return False, f"❌ 無法自動下載 Docker 映像 {image_name}，請手動執行：sudo docker pull alpine"
-
-    # 處理執行結果
+    except subprocess.TimeoutExpired:
+        return False, "❌ 沙盒執行超時（%d 秒）" % (timeout + 30)
     stdout = result.stdout.strip()
     stderr = result.stderr.strip()
     if result.returncode == 0:
         return True, stdout if stdout else "命令執行成功（無輸出）"
-    else:
-        error_msg = stderr if stderr else stdout if stdout else "命令執行失敗（無錯誤訊息）"
-        return False, f"❌ {error_msg}"
+    blob = (stderr + " " + stdout)
+    if "Cannot connect to the Docker daemon" in blob or "permission denied while trying to connect" in blob:
+        return False, "❌ 沙盒無法啟動：Docker daemon 不可用，請管理員檢查 sudo docker info。"
+    if "Unable to find image" in blob:
+        return False, "❌ 沙盒映像不存在：請先建置 mok-sandbox 映像（見 ~/.mok/sandbox/）。"
+    error_msg = stderr if stderr else stdout if stdout else "命令執行失敗（無錯誤訊息）"
+    return False, "❌ %s" % error_msg
 '''
                                                                -.                 -:                
                                                               -@*                 @#.               
@@ -1159,17 +1421,7 @@ def execute_pip_install(rest: str) -> tuple:
 # 返回:
 #   tuple (成功標誌, 結果訊息)
 # ------------------------------------------------------------------------------------ #
-def execute_shell_command(command: str, agent_config=None) -> tuple:
-    # 編輯登記鎖鉤子：命令若會寫入 ~/.mok 內檔案，必須先登記；沒登記就擋下
-    try:
-        import editlock_hook
-        _hok, _hmsg = editlock_hook.guard_command(command, agent_config=agent_config)
-        if not _hok:
-            return False, _hmsg
-    except ImportError:
-        pass
-    except Exception as _e:
-        logging.getLogger(__name__).warning("editlock_hook 檢查異常，放行：%s", _e)
+def execute_shell_command(command: str) -> tuple:
 	# 強制禁用 Docker 沙箱，直接使用宿主機 shell
     os.environ.pop('MOK_USE_DOCKER_SANDBOX', None)
     try:
@@ -1835,7 +2087,7 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
             }, ensure_ascii=False)
         token = generate_token(chat_id, "ollama_rm", model_name)
         _store_pending(token, "ollama_rm", model_name, chat_id)
-        warning = _build_confirm_warning(f"刪除 Ollama 模型：{model_name}", "high", "", agent_config)
+        warning = _build_confirm_warning(f"刪除 Ollama 模型：{model_name}", "high", model_name, agent_config, cmd_type="ollama_rm")
         return f"CONFIRM_SPLIT:{warning}\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     if args.startswith("pip"):
@@ -1858,29 +2110,33 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
         else:
             token = generate_token(chat_id, "pip_install", rest)
             _store_pending(token, "pip_install", rest, chat_id)
-            warning = _build_confirm_warning(f"pip 安裝 Python 套件：{rest}", risk, "", agent_config)
+            warning = _build_confirm_warning(f"pip 安裝 Python 套件：{rest}", risk, rest, agent_config, cmd_type="pip_install")
             return f"CONFIRM_SPLIT:{warning}\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     if args.startswith("exec"):
         rest = args[len("exec"):].strip()
         if not rest:
             return "用法: /admin exec Shell命令"
+        rest, _did_trash = rewrite_delete_to_trash(rest)
+        if _did_trash:
+            _ok, _res = execute_shell_command(rest)
+            return _res if _ok else f"❌ 執行失敗: {_res}"
         risk = assess_command_risk(rest, agent_config)
         # 如果風險為 high，且自動批准未啟用，則直接拒絕（或要求確認）
-        if risk == 'high':
-            # 可選擇直接拒絕：
-            return "❌ 此命令風險過高（涉及刪除/修改系統檔案），已拒絕執行。"
+        if risk in ('high', 'blocked'):
+            # 高風險或自殺防護命中：一律拒絕
+            return "❌ 此命令風險過高（涉及刪除/修改系統檔案或自我保護），已拒絕執行。"
             # 或者保持原有確認邏輯（但這不符合「不可刪檔」的精神）
         # 其餘邏輯保持不變...
         
         # 決定執行方式
-        use_docker = False
+        use_docker = should_use_docker(chat_id, agent_config)
         
         if risk == 'safe':
             if use_docker:
-                success, result = execute_docker_sandboxed(rest)
+                success, result = execute_docker_sandboxed(rest, agent_config=agent_config)
             else:
-                success, result = execute_shell_command(rest, agent_config)
+                success, result = execute_shell_command(rest)
             return result if success else f"❌ 執行失敗: {result}"
             
         # auto_approve: env -> agent_config -> direct file read
@@ -1889,13 +2145,13 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
         auto_approve = auto_approve_env or auto_approve_cfg
         if risk in ('low', 'medium') and auto_approve:
             if use_docker:
-                success, result = execute_docker_sandboxed(rest)
+                success, result = execute_docker_sandboxed(rest, agent_config=agent_config)
             else:
-                success, result = execute_shell_command(rest, agent_config)
+                success, result = execute_shell_command(rest)
             return result if success else f"❌ 執行失敗: {result}"
         token = generate_token(chat_id, "shell_exec", rest)
         _store_pending(token, "shell_exec", rest, chat_id)
-        warning = _build_confirm_warning(f"執行 Shell 命令：{html.escape(rest)}", risk, rest, agent_config)
+        warning = _build_confirm_warning(f"執行 Shell 命令：{html.escape(rest)}", risk, rest, agent_config, cmd_type="exec")
         return f"CONFIRM_SPLIT:{warning}\n---CONFIRM_SPLIT---\n/admin confirm {token}"
 
     return json.dumps({

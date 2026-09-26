@@ -17,6 +17,7 @@
     <!-- ═══════════ 站內樣式 ═══════════ -->
     <link rel="stylesheet" href="{{ asset_url('style.css') }}">
     <link rel="stylesheet" href="{{ asset_url('mok-polish.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('index-skin.css') }}">
     <!-- QuickNav 快捷提示套件 by indexPage -->
     <link rel="stylesheet" href="{{ asset_url('quicknav/quicknav.css') }}">
 
@@ -26,6 +27,9 @@
     <script src="{{ asset_url('mok_price.js') }}"></script>
     <script src="{{ asset_url('notify.js') }}"></script>
     <script src="{{ asset_url('main.js') }}"></script>
+<style>[data-admin-only].mok-hidden{display:none!important;}#toolsPanel.mok-hidden,#toolsPanel2.mok-hidden{display:none!important;}.agent-header button.mok-hidden{display:none!important;}.mok-channels{position:relative;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}.mok-channels>.header-btns-dropdown{left:0;right:auto;top:calc(100%
+.mok-channels .mok-channels-label{font-size:10px;letter-spacing:1px;opacity:.55;margin-right:2px;white-space:nowrap}
+</style>
 </head>
 <body>
     <div class="app-container">
@@ -35,7 +39,7 @@
             <div class="agent-header">
                 <span class="agent-header-actions">
                     <button id="createQiBtn" class="mok-pill" style="--tone:#4ec9b0;">➕</button>
-                    <button id="meetingBtn" class="mok-pill" style="--tone:#4ec9b0;" onclick="location.href='會議模式'">📋 會議</button>
+                    <span class="mok-channels" id="mokChannelGroup"><button id="channelBtn" class="mok-pill" style="--tone:#4ec9b0;" title="頻道" aria-haspopup="true" aria-expanded="false">📡 頻道 ▾</button><div class="header-btns-dropdown" id="channelDropdown"><button id="meetingBtn" class="header-dropdown-item" style="--tone:#4ec9b0;" onclick="location.href='會議模式'">📋 會議</button><button id="gameBtn" class="header-dropdown-item" style="--tone:#ffb84d;" onclick="location.href='game'">🎮 game</button><button id="live3Btn" class="header-dropdown-item" style="--tone:#e06c9f;" onclick="location.href='report/病毒引擎/直播房3/index.html'">🎬 直播房3</button><button id="social2Btn" class="header-dropdown-item" style="--tone:#4ea3ff;" onclick="location.href='report/春/mokagi社交平台2/index.html'">🌐 mokagi社交平台2</button></div></span>
                     <button id="clearAllJobsBtn" class="mok-pill mok-pill--danger" style="--tone:#e05561; display:none;" title="一鍵清空所有 Agent 的 _job.json">🧹 清空Jobs</button>
                 </span>
                 <button class="collapse-btn" id="toggleAgentSidebar">◀</button>
@@ -51,16 +55,23 @@
                 <div class="chat-header-left">
                     <span id="agentHeaderDisplay"></span>
                     <div class="agent-header-btns" id="agentHeaderBtns">
-                        <button id="unreadBtn" class="header-tool-btn mok-pill" style="--tone:#8a6d9c; display:inline-block;" title="切換左側名片未讀標示">🔕 未讀</button>
+                        <button id="unreadBtn" class="header-tool-btn mok-pill" style="--tone:#8a6d9c; display:inline-block;" title="切換左側名片未讀標示">📭 未讀</button>
                         <button id="showPendingBtn" class="header-tool-btn mok-pill" data-foldable="1" style="--tone:#4ec9b0; display:none;">📋 未完成工作</button>
-                        <button id="showToolProcessBtn" class="header-tool-btn mok-pill" data-foldable="1" style="--tone:#e0a800; display:none;">🔧 工具過程</button>
-                        <button id="showSemanticBtn" class="header-tool-btn mok-pill" data-foldable="1" style="--tone:#4a7a9c; display:none;">🔍 語義搜索</button>
-                        <button id="showExperienceBtn" class="header-tool-btn mok-pill" data-foldable="1" style="--tone:#7a5a4a; display:none;">📚 經驗參考</button>
                     </div>
                 </div>
-                <button id="stopBtn" class="mok-pill mok-pill--danger header-stop-btn" style="--tone:#e05561; display:inline-flex !important;" title="緊急重啟">🚫 <span class="btn-label">緊急重啟</span></button>
-                <button id="headerMoreBtn" class="header-more-btn mok-pill mok-pill--ghost" style="--tone:#8a8a95; display:none;" title="更多功能">⋯</button>
-                <div class="header-btns-dropdown" id="headerBtnsDropdown"></div>
+                <!-- ★ 更多 = 會員面板（by idx 2026-09-20；2026-09-21 改版）：下方依序 = 會籍鍵（src="/member"）/ Token 餘額 / 完成提示鍵 / 空行 / 緊急重啟鍵 -->
+                <button id="headerMoreBtn" class="header-more-btn mok-pill mok-pill--ghost" style="--tone:#8a8a95; display:inline-flex;" title="更多功能（會員）"><span id="headerMemberName">會員名稱</span></button>
+                <div class="header-btns-dropdown" id="headerBtnsDropdown">
+                    <div class="header-more-static" id="headerMoreStatic">
+                        <!-- src="/member" 鍵：點它開會員浮動面板（iframe src=/member） -->
+                        <button id="headerMemberBtn" class="header-dropdown-item" data-src="/member" title="會籍（/member）">🎫 會籍</button>
+                        <div class="header-token-balance" id="headerTokenBalance" title="Token 餘額">💰 Token 餘額：—</div>
+                        <button id="notifyToggleBtn" class="header-dropdown-item notify-toggle-btn" title="完成提示">🔔 通知</button>
+                        <div class="header-dropdown-gap" aria-hidden="true"></div>
+                        <button id="stopBtn" data-admin-only class="mok-pill mok-pill--danger header-stop-btn header-dropdown-item mok-hidden" style="--tone:#e05561;" title="緊急重啟">🚫 <span class="btn-label">緊急重啟</span></button>
+                    </div>
+                    <div class="header-fold-items" id="headerFoldItems"></div>
+                </div>
             </div>
 
             <!-- 訊息串 -->
@@ -96,12 +107,11 @@
                     <div class="drag-hint">📁 放開以加入檔案</div>
                     <!-- 新增附件容器 -->
                     <div id="attachmentsContainer" class="attachments-area" style="display: none;"></div>
-                    <textarea id="chatInput" rows="2" placeholder="(Enter換行，Shift+Enter發送 · 可Ctrl+V貼截圖)"></textarea>
+                    <textarea id="chatInput" rows="2" placeholder="輸入訊息⋯（Enter換行 · Shift+Enter送出 · Ctrl+V貼截圖）&#10;手勢：右滑→對話歷史 · 左滑→水晶盤 · 點3下輸入框→工作區 · 長按送出鍵→錄音"></textarea>
                 </div>
 
                 <!-- 按鈕組 -->
                 <div class="btnBox">
-                    <button id="menuToggle" class="mobile-menu-toggle" title="agent頭像">⚙️</button>
                     <button id="mobileOpenLeftBtn" class="mobile-panel-btn" title="選擇對話">💬 <span class="btn-label">選擇對話</span></button>
                     <button id="jumpBtn" title="對話歷史">📋 <span class="btn-label">對話歷史</span></button>
                     <button id="mobileOpenRightBtn" class="mobile-panel-btn" title="工作">🖥️ <span class="btn-label">工作</span></button>
@@ -126,22 +136,27 @@
         <div class="tools-panel" id="toolsPanel">
             <div class="tools-header">
                 <div class="tools-header-buttons">
-                    <button data-tool="game">🎮 game</button>
+                    <button id="agentInfoBtn" class="agent-info-btn" title="查看 Agent 資訊">🌸</button>
+                    <button data-tool="room">🏠 房間</button>
+                    <button data-tool="bookmark">📑 書籤</button>
+                    <button data-tool="search">🔍 搜尋</button>
                     <button data-tool="files">📁 文件</button>
+                    <button data-tool="tools">🔧 工具</button>
+                    <button data-tool="tokenstats">📈 Token 統計</button>
+                    <button data-tool="gpu">💻 GPU</button>
+                    <button data-tool="進化" data-admin-only class="mok-hidden">🧬 進化</button>
+                    <button data-tool="admin" data-admin-only class="mok-hidden">🧑💼 admin</button>
+                    <button data-tool="game">🎮 game</button>
                     <button data-tool="logs">📋 日誌</button>
                     <button data-tool="monitor">📊 監控</button>
-                    <button data-tool="tokenstats">📈 Token 統計</button>
-                    <button data-tool="tools">🔧 工具</button>
                     <button data-tool="ascii">🎨 ASCII</button>
-                    <button data-tool="search">🔍 搜尋</button>
-                    <button data-tool="bookmark">📑 書籤</button>
-                    <button data-tool="novnc">🖥️ 桌面</button>
-                    <button data-tool="backup">💾 備份</button>
-                    <button data-tool="room">🏠 房間</button>
+                    <button data-tool="novnc" data-admin-only class="mok-hidden">🖥️ 桌面</button>
+                    <button data-tool="backup" data-admin-only class="mok-hidden">💾 備份</button>
+                    <button id="openToolsPanel2" title="再開一組工具面板">🧰 面板2</button>
+                    <button id="notebookBtn" title="筆記">📝 筆記</button>
                 </div>
-                <button id="agentInfoBtn" class="agent-info-btn" title="查看 Agent 資訊">🌸</button>
-                <button id="openToolsPanel2" title="再開一組工具面板">➕</button>
-                <button id="notebookBtn" title="筆記">📝 筆記</button>
+                <button id="toolsMoreBtn" class="tools-more-btn" title="更多工具" style="display:none;">⋯</button>
+                <div class="header-btns-dropdown" id="toolsMoreDropdown"></div>
                 <button id="toggleToolsPanel">❌</button>
             </div>
             <div class="tools-content" id="toolsContent"></div>
@@ -161,8 +176,11 @@
                 <button data-tool="tools" data-panel="2">🔧 工具</button>
                 <button data-tool="ascii" data-panel="2">🎨 ASCII</button>
                 <button data-tool="search" data-panel="2">🔍 搜尋</button>
-                <button data-tool="backup" data-panel="2">💾 備份</button>
+                <button data-tool="backup" data-panel="2" data-admin-only class="mok-hidden">💾 備份</button>
                 <button data-tool="room" data-panel="2">🏠 房間</button>
+                <button data-tool="gpu" data-panel="2">💻 GPU</button>
+                <button data-tool="進化" data-panel="2" data-admin-only class="mok-hidden">🧬 進化</button>
+                <button data-tool="admin" data-panel="2" data-admin-only class="mok-hidden">🧑💼 admin</button>
             </div>
             <button id="closeToolsPanel2" title="關閉">❌</button>
         </div>
@@ -177,6 +195,18 @@
         </div>
         <div class="notebook-content">
             <iframe src="/webTools/K_notebook2.html" style="width:100%; height:100%; border:none;"></iframe>
+        </div>
+    </div>
+
+    <!-- ════════════════ 會員浮動面板（會籍鍵開啟）by idx 2026-09-20 ════════════════ -->
+    <div class="member-panel-float" id="memberPanel" style="display:none;">
+        <div class="tools-header-float" id="memberPanelDragHandle">
+            <span class="notebook-title" id="memberPanelTitle">🧑💼 會員</span>
+            <button id="closeMemberPanel" title="關閉">❌</button>
+        </div>
+        <div class="member-content">
+            <!-- src="/member"：第一次點鍵才注入 src，避免每次開頁都載入後台 -->
+            <iframe id="memberFrame" data-src="/member" src="about:blank" style="width:100%; height:100%; border:none;"></iframe>
         </div>
     </div>
 
@@ -217,5 +247,55 @@
     <!-- ════════════════ QuickNav 快捷提示套件 by indexPage ════════════════ -->
     <script src="{{ asset_url('quicknav/quicknav.js') }}"></script>
     <script>QuickNav.init({ input: '#chatInput' });</script>
+<script>
+/* admin-only 管制 by 凜 2026-09-23：進化 / admin / 桌面(VNC) / 備份 / 緊急重啟 僅 admin 可見可操作 */
+(function(){
+  function reveal(on, data){
+    window.MOK_IS_ADMIN = !!on;
+    window.MOK_LOGGED_IN = !!(data && data.logged_in);
+    var els=document.querySelectorAll('[data-admin-only]');
+    for(var i=0;i<els.length;i++){ els[i].classList.toggle('mok-hidden', !on); }
+    // 未登入訪客：整個工作區隱藏＋禁用（#toolsPanel / #toolsPanel2）
+    var _tp=document.getElementById('toolsPanel');
+    if(_tp) _tp.classList.toggle('mok-hidden', !window.MOK_LOGGED_IN);
+    var _tp2=document.getElementById('toolsPanel2');
+    if(_tp2 && !window.MOK_LOGGED_IN){ _tp2.classList.add('mok-hidden'); _tp2.style.display='none'; } var _ah=document.querySelector('.agent-header'); if(_ah){ var _ahb=_ah.querySelectorAll('button'); for(var k=0;k<_ahb.length;k++){ var _b=_ahb[k]; _b.classList.toggle('mok-hidden', !window.MOK_LOGGED_IN); _b.disabled=!window.MOK_LOGGED_IN; _b.style.pointerEvents=window.MOK_LOGGED_IN?'':'none'; } }
+  }
+  window.MOK_LOGGED_IN = false;
+  reveal(false, null);
+  window.MOK_refreshAdmin = function(){
+    return fetch('/api/whoami',{credentials:'same-origin'})
+      .then(function(r){return r.json();})
+      .then(function(d){ reveal(d && d.is_admin, d); return !!(d&&d.is_admin); })
+      .catch(function(){ reveal(false, null); return false; });
+  };
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', window.MOK_refreshAdmin); }
+  else { window.MOK_refreshAdmin(); }
+})();
+</script>
+<script>/* 頻道下拉水晶盤 by indexPage 2026-09-26 */ (function(){function b(){var g=document.getElementById("mokChannelGroup");if(!g||g.dataset.mokChBound)return;var t=document.getElementById("channelBtn"),d=document.getElementById("channelDropdown");if(!t||!d)return;g.dataset.mokChBound="1";function s(o){d.classList.toggle("open",o);t.classList.toggle("open",o);t.setAttribute("aria-expanded",o?"true":"false");}t.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();s(!d.classList.contains("open"));});d.addEventListener("click",function(e){e.stopPropagation();});document.addEventListener("click",function(e){if(!g.contains(e.target))s(false);});document.addEventListener("keydown",function(e){if(e.key==="Escape")s(false);});}if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",b);}else{b();}})();</script>
+<script>/* 頻道清單載入（/static/channels.json，可隨時編輯）by indexPage 2026-09-26 */ (function(){
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function render(list){
+    var d=document.getElementById('channelDropdown'); if(!d||!list||!list.length) return;
+    var h='';
+    for(var i=0;i<list.length;i++){var it=list[i]||{}; if(!it.href) continue;
+      var tone=it.tone||'#4ec9b0', icon=it.icon||'', label=it.label||it.href, href=String(it.href);
+      h+='<button class="header-dropdown-item" data-ch="'+esc(it.id||label)+'" style="--tone:'+esc(tone)+';" '
+        +'onclick="location.href=\''+esc(href).replace(/'/g,"\\'")+'\'">'+esc((icon?icon+' ':'')+label)+'</button>';
+    }
+    if(h) d.innerHTML=h;
+  }
+  function boot(){
+    if(!document.getElementById('channelDropdown')) return;
+    try{
+      fetch('/static/channels.json?t='+Date.now(),{cache:'no-store'})
+        .then(function(r){return r.ok?r.json():null;})
+        .then(function(j){ if(j&&j.channels) render(j.channels); })
+        .catch(function(){});
+    }catch(e){}
+  }
+  if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}
+})();</script>
 </body>
 </html>

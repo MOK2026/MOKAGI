@@ -2,7 +2,7 @@
 
 # 安裝 `xvfb`、`x11vnc`、`fluxbox`、`websockify`、`firefox`。
 
-    bash ~/.mok/html/webTools/novncsetup_desktop.sh
+    bash ~/.mok/html/webTools/novnc/setup_desktop.sh
 
 
 
@@ -10,7 +10,7 @@
 
 bash
 
-    bash ~/.mok/html/webTools/novncstart_desktop.sh start
+    bash ~/.mok/html/webTools/novnc/start_desktop.sh start
 
 
 這會依序啟動：
@@ -22,6 +22,6 @@ bash
 ### 步驟 3：驗證
 
 bash
-    bash ~/.mok/html/webTools/novncstart_desktop.sh status
+    bash ~/.mok/html/webTools/novnc/start_desktop.sh status
 
 應該四個服務都顯示 `1`（表示正在運行）。

@@ -5,7 +5,8 @@ mok_web.py
 202608260224_我覺得可以版
 """
 
-import os, sys
+import os, sys, fnmatch
+import secrets
 import re
 import json
 import asyncio
@@ -122,12 +123,54 @@ import tempfile
 tool_handler.load_tools()
 
 # 定義模板目錄
-BASE_DIR = os.path.expanduser(f"~/.{MOKAGI_home}/html")          # 你的 HTML 根目錄
+# 兼容：優先使用專案本地 html/，其次使用 ~/.mok/html
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+_project_html_dir = os.path.join(_project_root, 'html')
+_default_html_dir = os.path.expanduser(f"~/.{MOKAGI_home}/html")
+if os.path.isdir(_project_html_dir):
+    BASE_DIR = _project_html_dir
+elif os.path.isdir(_default_html_dir):
+    BASE_DIR = _default_html_dir
+else:
+    BASE_DIR = _project_html_dir if os.path.isdir(_project_root) else _default_html_dir
+
 template_dir = BASE_DIR
 static_dir = os.path.join(BASE_DIR, "static")
 
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir, static_url_path='/static')
-app.config['SECRET_KEY'] = 'secret_dev_key'
+def _load_web_secret_key():
+    """Flask session 密鑰（2026-09-21 安全修補）。
+    優先讀環境變數 MOK_WEB_SECRET_KEY；否則使用持久化隨機密鑰（首次自動生成、0600）。
+    禁止硬編碼弱密鑰——否則可偽造 session cookie 冒充 admin，直接繞過 tenant 隔離。"""
+    _env = os.environ.get('MOK_WEB_SECRET_KEY')
+    if _env and len(_env) >= 32:
+        return _env
+    _path = os.path.expanduser('~/.mok/gateway/.web_secret_key')
+    _legacy_path = os.path.expanduser('~/.mok/.web_secret_key')
+    if not os.path.exists(_path) and os.path.exists(_legacy_path):
+        # 舊路徑自動遷移（2026-09-26 搬至 gateway/）
+        try:
+            os.makedirs(os.path.dirname(_path), exist_ok=True)
+            os.rename(_legacy_path, _path)
+            os.chmod(_path, 0o600)
+        except Exception:
+            _path = _legacy_path
+    try:
+        if os.path.exists(_path):
+            _k = open(_path, 'r', encoding='utf-8').read().strip()
+            if len(_k) >= 32:
+                return _k
+        _k = secrets.token_hex(32)
+        _fd = os.open(_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(_fd, 'w', encoding='utf-8') as _f:
+            _f.write(_k)
+        return _k
+    except Exception as _e:
+        print('SECRET_KEY 無法持久化，暫用隨機密鑰：', _e)
+        return secrets.token_hex(32)
+
+
+app.config['SECRET_KEY'] = _load_web_secret_key()
 ASSET_BUSTER = str(int(time.time()))
 WEB_BUILD_ID = 'mok-web-sse-fix-20260822-02'
 
@@ -223,6 +266,12 @@ _sse_cleanup_timers = {}  # {session_id: threading.Timer}
 _sse_agents = {}   # {session_id: agent_name}  用於查詢進行中的 session（頁面刷新後續流）
 _sse_buffers = {}  # {session_id: [event,...]} 事件緩衝（權威來源，供刷新後重放思考/工具/回答）
 _sse_done = {}     # {session_id: bool}         該 session 是否已結束（done/error）
+_sse_disconnected = {}  # {session_id: bool}    客戶端是否已斷線（供中止無用生成用）
+
+
+class _SSEClientGone(BaseException):
+    """客戶端 SSE 連線已斷（事件緩衝已被清理）。
+    繼承 BaseException，避免被 except Exception / autofix 重試機制攔截。"""
 _sse_agg = {}      # {session_id: {rounds,think,reply,n}} 聚合快照（供刷新後一鍵重建 + 只續流尾巴）
 _sse_agg_last = {} # {session_id: float} 上次聚合快照時間（節流 0.5s）
 _sse_users = {}    # {session_id: user_id}  同一 (agent,user) 開新一輪時用來收掉舊輪
@@ -257,6 +306,7 @@ def _schedule_sse_cleanup(session_id, delay_sec=180):
             _sse_agents.pop(session_id, None)
             _sse_buffers.pop(session_id, None)
             _sse_done.pop(session_id, None)
+            _sse_disconnected.pop(session_id, None)
             _sse_agg.pop(session_id, None)
             _sse_agg_last.pop(session_id, None)
             _sse_users.pop(session_id, None)
@@ -268,6 +318,27 @@ def _schedule_sse_cleanup(session_id, delay_sec=180):
     with _sse_lock:
         _sse_cleanup_timers[session_id] = timer
     timer.start()
+
+
+def _trace_reply_event(event, session_id):
+    """(b) 追蹤 log 2026-09-24：記錄每個 reply 事件的 len/hash，用於定位偶發回覆重複。
+    開關：存在 ~/.mok/logs/.reply_trace_off 即停用；超過 5MB 自動輪替。"""
+    try:
+        if not event or event.get("type") != "reply":
+            return
+        import os as _os, hashlib as _hl
+        if _os.path.exists("/home/ubuntu/.mok/logs/.reply_trace_off"):
+            return
+        _p = "/home/ubuntu/.mok/logs/reply_trace.jsonl"
+        if _os.path.exists(_p) and _os.path.getsize(_p) > 5242880:
+            _os.replace(_p, _p + ".1")
+        _tc = event.get("content", "") or ""
+        with open(_p, "a", encoding="utf-8") as _tf:
+            _tf.write(json.dumps({"t": round(time.time(), 3), "ag": event.get("agent"), "s": session_id,
+                                  "n": len(_tc), "h": _hl.sha1(_tc.encode("utf-8", "ignore")).hexdigest()[:12]},
+                                 ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def _maybe_schedule_cleanup_after_disconnect(session_id):
@@ -387,6 +458,66 @@ def get_file_tree(path, depth=0):
 # ---------- 數據庫（聊天曆史，僅用於前端展示）----------
 DB_PATH = os.path.expanduser(f"~/.{MOKAGI_home}/.memory/chat_history.db")
 
+# ===== 多租戶隔離（tenant）20260921：身分一律以「登入 session」為準 =====
+# 未登入者只接受訪客 id（web_guest_* / guest:*）；嚴禁回落成 ADMIN_CHAT_ID / web_default，
+# 否則任何訪客都會被當成 admin（跨會員資料外洩）。
+_PRIVILEGED_TENANTS = frozenset({'admin', 'root'})  # 2026-09-21 收斂：移除死條目 web_default / guest
+
+
+def _session_member_user():
+    '''目前請求已登入的會員帳號；未登入回 None。'''
+    try:
+        from flask import session as _fs
+        _u = _fs.get('member_user')
+        if _u:
+            return str(_u)
+    except Exception:
+        pass
+    return None
+
+
+def _is_guest_id(_c):
+    return bool(_c) and (_c.startswith('web_guest_') or _c.startswith('guest:'))
+
+
+def resolve_tenant(data=None):
+    '''解析本次請求的租戶（tenant）。
+
+    1) 已登入      -> 一律採用 session 的會員帳號（前端無法偽造）
+    2) 未登入      -> 只接受訪客 id（web_guest_* / guest:*）
+    取不到合法身分 -> 回 None（呼叫端必須回 401 / 擋掉，絕不可回落成 admin）
+    '''
+    _u = _session_member_user()
+    if _u:
+        return _u
+    if isinstance(data, dict):
+        _c = data.get('user_id')
+        if _c:
+            _c = str(_c).strip()
+            if _is_guest_id(_c):
+                return _c
+    return None
+
+
+def resolve_tenant_arg():
+    '''GET / DELETE 等無 body 的請求：先看 session，再看 ?user_id=（只接受訪客 id）。'''
+    _u = _session_member_user()
+    if _u:
+        return _u
+    try:
+        _q = (request.args.get('user_id') or '').strip()
+    except Exception:
+        _q = ''
+    return _q if _is_guest_id(_q) else None
+
+
+def _can_read_all(tenant):
+    '''只有 admin / root 可讀全部；一般租戶只看得到自己 tenant 的資料；未識別（None）不得讀全部。'''
+    if tenant is None:
+        return False
+    return str(tenant) in _PRIVILEGED_TENANTS
+
+
 def init_db():
     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         conn.execute('''
@@ -409,6 +540,25 @@ def init_db():
         if 'rounds' not in columns:
             conn.execute('ALTER TABLE chat_history ADD COLUMN rounds TEXT')
             print("✅ chat_history 表已新增 rounds 欄位")
+        # ===== 多租戶隔離（tenant）20260921：舊資料一律歸 'admin' =====
+        if 'tenant' not in columns:
+            conn.execute('ALTER TABLE chat_history ADD COLUMN tenant TEXT')
+            print('✅ chat_history 表已新增 tenant 欄位（舊資料 -> admin）')
+            conn.execute("UPDATE chat_history SET tenant = 'admin' WHERE tenant IS NULL OR tenant = ''")
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_chat_tenant ON chat_history (tenant, agent, id)')
+        # conversation_history 同步（由 core/mokagi.py 寫入；舊資料同樣歸 'admin'）
+        try:
+            _conv_db = os.path.expanduser(f'~/.{MOKAGI_home}/.memory/conversation_history.db')
+            with closing(sqlite3.connect(_conv_db, timeout=30)) as _c2:
+                _c3 = [r[1] for r in _c2.execute('PRAGMA table_info(conversation_history)').fetchall()]
+                if _c3 and 'tenant' not in _c3:
+                    _c2.execute('ALTER TABLE conversation_history ADD COLUMN tenant TEXT')
+                    _c2.execute("UPDATE conversation_history SET tenant = 'admin' WHERE tenant IS NULL OR tenant = ''")
+                    print('✅ conversation_history 表已新增 tenant 欄位（舊資料 -> admin）')
+                _c2.execute('CREATE INDEX IF NOT EXISTS idx_conv_tenant ON conversation_history (tenant, user_key)')
+                _c2.commit()
+        except Exception as _e:
+            print(f'[tenant] conversation_history 遷移略過: {_e}')
         # ========== 新增 token_usage 表 ==========
         conn.execute('''
             CREATE TABLE IF NOT EXISTS token_usage (
@@ -666,7 +816,10 @@ def reload_config(env_path):
 def _start_sse_chat_session(data):
     user_msg = data.get('message', '').strip()
     agent_name = data.get('agent', '')
-    user_id = data.get("user_id") or _current_admin_chat_id or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+    # P0 止血：不再回落成 admin / web_default；未登入且非訪客 -> 401
+    user_id = resolve_tenant(data)
+    if not user_id:
+        raise PermissionError('unauthorized: 請先登入會員（/login）才能使用 AI 服務。')
     context_files = data.get("context_files", None)
     if not user_msg:
         raise ValueError("empty message")
@@ -685,6 +838,7 @@ def _start_sse_chat_session(data):
         _sse_agents[session_id] = agent_name
         _sse_buffers[session_id] = []
         _sse_done[session_id] = False
+        _sse_disconnected[session_id] = False
         _sse_agg[session_id] = {"rounds": [], "think": "", "reply": "", "n": 0}
         _sse_agg_last[session_id] = 0.0
         _sse_users[session_id] = user_id
@@ -731,7 +885,14 @@ def _start_sse_chat_session(data):
             try:
                 _et = event.get("type")
                 if _et == "iteration_start":
-                    agg_rounds.append({"think": "", "tool_calls": [], "tool_results": [], "reply": "", "iteration": event.get("iteration", len(agg_rounds) + 1)})
+                    _it = event.get("iteration", len(agg_rounds) + 1)
+                    _prev = agg_rounds[-1] if agg_rounds else None
+                    _prev_empty = bool(_prev) and not (_prev.get("think") or _prev.get("reply") or _prev.get("tool_calls") or _prev.get("tool_results"))
+                    if _prev_empty:
+                        # 方案C：前置的語義搜索/經驗參考已落在這一輪，沿用不另開新輪
+                        _prev["iteration"] = _it
+                    else:
+                        agg_rounds.append({"think": "", "tool_calls": [], "tool_results": [], "reply": "", "iteration": _it})
                 elif _et == "think":
                     if not agg_rounds:
                         agg_rounds.append({"think": "", "tool_calls": [], "tool_results": [], "reply": "", "iteration": 1})
@@ -745,10 +906,20 @@ def _start_sse_chat_session(data):
                         agg_rounds.append({"think": "", "tool_calls": [], "tool_results": [], "reply": "", "iteration": 1})
                     agg_rounds[-1]["tool_results"].append({"name": event.get("tool_name", "未知工具"), "content": event.get("content", "")})
                 elif _et == "reply":
-                    if event.get("subtype", "normal") not in ("pending_list", "tool_process", "semantic_search", "experience"):
+                    _sub = event.get("subtype", "normal")
+                    if _sub in ("tool_process", "semantic_search", "experience"):
                         if not agg_rounds:
                             agg_rounds.append({"think": "", "tool_calls": [], "tool_results": [], "reply": "", "iteration": 1})
-                        agg_rounds[-1]["reply"] += event.get("content", "")
+                        _ak = {"tool_process": "tool_process", "semantic_search": "semantic", "experience": "experience"}[_sub]
+                        agg_rounds[-1][_ak] = agg_rounds[-1].get(_ak, "") + event.get("content", "") + "\n\n"
+                    elif _sub != "pending_list":
+                        if not agg_rounds:
+                            agg_rounds.append({"think": "", "tool_calls": [], "tool_results": [], "reply": "", "iteration": 1})
+                        # 2026-09-19：工具執行結果（subtype=tool_result）改歸入工具結果，不黏進回覆文字
+                        if _sub == "tool_result":
+                            agg_rounds[-1]["tool_results"].append({"name": event.get("tool_name", "工具"), "content": event.get("content", "")})
+                        else:
+                            agg_rounds[-1]["reply"] += event.get("content", "")
                 # 節流快照：每 >=0.5s 或關鍵事件即時更新，供刷新後「一鍵重建 + 只續流尾巴」
                 _now = time.time()
                 _force = _et in ("iteration_start", "tool_calls", "tool_result", "done")
@@ -772,8 +943,17 @@ def _start_sse_chat_session(data):
             event["agent"] = agent_name
             # 🔧 事件緩衝：同步寫入 session 緩衝（供頁面刷新後重放思考/工具/回答）
             try:
+                _buf_gone = False
                 with _sse_lock:
-                    _sse_buffers[session_id].append(event.copy())
+                    _buf = _sse_buffers.get(session_id)
+                    if _buf is None:
+                        _buf_gone = True
+                    else:
+                        _buf.append(event.copy())
+                        _trace_reply_event(event, session_id)
+                if _buf_gone:
+                    # (A) 止血：客戶端已斷線（緩衝已被延遲清理）→ 靜默丟棄，不再刷成千上萬行錯誤
+                    _sse_disconnected[session_id] = True
             except Exception as _be:
                 print(f"[SSE stream_emit] buffer append failed: {_be}")
             try:
@@ -784,17 +964,17 @@ def _start_sse_chat_session(data):
                 accumulated_think += event["content"]
                 if assistant_msg_id is None:
                     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time()))
+                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp, tenant) VALUES (?, ?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time(), user_id))
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
                 update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
             elif event["type"] == "reply":
-                if event.get("subtype", "normal") in ("pending_list", "tool_process", "semantic_search", "experience"):
+                if event.get("subtype", "normal") in ("pending_list", "tool_process", "semantic_search", "experience", "tool_result"):
                     return
                 accumulated_reply += event["content"]
                 if assistant_msg_id is None:
                     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time()))
+                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp, tenant) VALUES (?, ?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time(), user_id))
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
                 update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
@@ -804,7 +984,7 @@ def _start_sse_chat_session(data):
                     accumulated_reply = event["final_reply"]
                 if assistant_msg_id is None:
                     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", accumulated_reply, accumulated_think, time.time()))
+                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp, tenant) VALUES (?, ?, ?, ?, ?, ?)", (agent_name, "assistant", accumulated_reply, accumulated_think, time.time(), user_id))
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
                 update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
@@ -820,7 +1000,7 @@ def _start_sse_chat_session(data):
 
         try:
             with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-                cursor = conn.execute('INSERT INTO chat_history (agent, role, content, timestamp) VALUES (?, ?, ?, ?)', (agent_name, 'user', user_msg, time.time()))
+                cursor = conn.execute('INSERT INTO chat_history (agent, role, content, timestamp, tenant) VALUES (?, ?, ?, ?, ?)', (agent_name, 'user', user_msg, time.time(), user_id))
                 user_msg_id = cursor.lastrowid
                 conn.commit()
         except Exception as _e:
@@ -831,7 +1011,37 @@ def _start_sse_chat_session(data):
         try:
             async def _bg_coro():
                 async def async_stream_cb(event):
+                    # (B) 治本：偵測到客戶端已斷線 → 丟出中止例外，讓生成迴圈提前結束（連帶取消上游請求）
+                    if _sse_disconnected.get(session_id):
+                        raise _SSEClientGone()
                     pass  # [log精簡] 原每 SSE chunk 印 log，曾使日誌漲到 856MB，已移除
+                    # ✨ girl gate：偵測一般模型安全拒答 → GIRL_AUTO=1 直接開 girl，否則送確認按鈕
+                    try:
+                        if event.get("type") == "done":
+                            import girl_gate
+                            _fr = (accumulated_reply or event.get("final_reply") or event.get("content") or "")
+                            _g = girl_gate.check(user_msg, _fr, agent_name)
+                            if _g and _g.get("needs_girl"):
+                                girl_gate.save_pending(str(user_id), user_text=user_msg)
+                                if _g.get("auto"):
+                                    try:
+                                        import girl_engine as _ge_auto
+                                        _ge_auto.spawn_auto_start(str(user_id), agent_name)
+                                        _auto_txt = "🚦 偵測到一般模型安全拒答（色情過濾）→ 已直接幫主人打開 vast girl 模型（qwen-Claude 27B），上線後會自動切換。"
+                                    except Exception as _ae:
+                                        _auto_txt = f"🚦 偵測到安全拒答，但自動開 girl 失敗：{_ae}"
+                                    event["girl_confirm"] = {
+                                        "text": _auto_txt,
+                                        "actions": [{"id": "girl_go", "label": "🖥️ 查看 vast girl 狀態"}],
+                                    }
+                                else:
+                                    event["girl_confirm"] = {
+                                        "text": "🧠 一般模型出現安全拒答。要切到「vast girl」引擎（qwen-Claude 27B）重新回答嗎？",
+                                        "actions": [{"id": "girl_go", "label": "🖥️ 開 vast girl（qwen-Claude）"},
+                                                    {"id": "girl_no", "label": "不用"}],
+                                    }
+                    except Exception:
+                        pass
                     stream_emit(event)
                 agent_config = await mokagi.get_agent_config(agent_name)
                 from autofix2 import autofix_run
@@ -844,6 +1054,8 @@ def _start_sse_chat_session(data):
                     stream_emit({"type": "reply", "content": "failed"})
                     stream_emit({"type": "done"})
             loop.run_until_complete(_bg_coro())
+        except _SSEClientGone:
+            print(f"[SSE /api/chat] session={session_id} 客戶端已斷線，中止生成（連帶取消上游請求）")
         except Exception as _e:
             print(f"[SSE bg] error: {_e}")
             import traceback
@@ -872,6 +1084,200 @@ def _start_sse_chat_session(data):
     return {"session_id": session_id, "agent_name": agent_name, "queue": q}
 
 
+def _latest_conv_id(agent, tenant=None):
+    '''取該侍女最近一筆對話的 conv_id。多租戶：一般租戶只看自己；admin 可看全部。'''
+    try:
+        with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
+            if _can_read_all(tenant):
+                row = conn.execute(
+                    'SELECT conv_id FROM chat_history WHERE agent = ? AND conv_id IS NOT NULL '
+                    'ORDER BY id DESC LIMIT 1', (agent,)).fetchone()
+            else:
+                row = conn.execute(
+                    'SELECT conv_id FROM chat_history WHERE agent = ? AND conv_id IS NOT NULL '
+                    'AND (tenant = ? OR tenant IS NULL) ORDER BY id DESC LIMIT 1',
+                    (agent, tenant)).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _save_girl_maid_reply(agent, content, conv_id=None, tenant=None):
+    '''把侍女對「開 vast girl」的對話回答落盤到 chat_history（含 tenant 歸戶）。
+
+    因為是存進對話紀錄（而非只是彈出提示），所以重新整理、換侍女、
+    重開頁面後都還看得到開機狀態。回傳新訊息 id（失敗回 None）。
+    '''
+    if not content:
+        return None
+    if tenant is None:
+        try:
+            tenant = resolve_tenant(request.get_json(force=True, silent=True) or {})
+        except Exception:
+            tenant = None
+    if conv_id is None:
+        conv_id = _latest_conv_id(agent, tenant)
+    try:
+        with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
+            cur = conn.execute(
+                'INSERT INTO chat_history (agent, role, content, think_content, conv_id, timestamp, tenant) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (agent, 'assistant', content, None, conv_id, time.time(), tenant))
+            conn.commit()
+            return cur.lastrowid
+    except Exception as e:
+        print(f'[girl] 落盤侍女回答失敗: {e}')
+        return None
+
+
+def _girl_maid_reply_text(ok, engine_msg, agent):
+    '''把 vast girl 引擎狀態包成侍女口吻的『對話回答』。'''
+    if ok:
+        head = f'🖥️ 好的主人～{agent}已經把 vast girl 引擎開好了，也替您切換過去。'
+    else:
+        head = f'🖥️ 收到主人～{agent}正在幫您開機 vast girl 引擎（qwen-Claude 27B）。'
+    out = [head, '', f'【開機狀態】{engine_msg}']
+    if not ok:
+        out += ['', '☝️ 這則開機狀態已寫進對話裡，重新整理或換侍女後都還看得到～']
+    return '\n'.join(out)
+
+
+@app.route('/api/girl/confirm', methods=['POST'])
+def api_girl_confirm():
+    '''C 里程碑：Web 端「開 vast girl / 不用」按鈕回調'''
+    d = request.get_json(force=True, silent=True) or {}
+    action = d.get('action') or 'girl_no'
+    agent = d.get('agent') or '稚'
+    # ✨ 盡量把侍女這則「開機狀態」歸到主人當前那串對話（前端會帶 conv_id）
+    try:
+        _cv = d.get('conv_id')
+        conv_id = int(_cv) if _cv not in (None, '', 'null', 'undefined') else None
+    except Exception:
+        conv_id = None
+    try:
+        import girl_engine
+        import girl_switch
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'無法載入 girl 模組: {e}'})
+    if action != 'girl_go':
+        reply_text = f'👌 好的主人，{agent}維持原來的模型，不開 vast girl 了。需要時再叫{agent}～'
+        _mid = _save_girl_maid_reply(agent, reply_text, conv_id)
+        return jsonify({'ok': True, 'msg': reply_text, 'reply_text': reply_text,
+                        'message_id': _mid, 'agent': agent})
+    try:
+        ok, msg = asyncio.run(girl_engine.request_girl_start(str(d.get('user_id') or 'web'), agent))
+    except Exception as e:
+        ok, msg = False, f'❌ girl_engine 呼叫失敗: {e}'
+    engine_msg = msg
+    if ok:
+        # 只有 girl 模型「真的在線」才立即切換；若還在開機中，則等 e_flip 上線後自動切換。
+        # 全程絕不 pm2 restart mok_agi，改用「清配置緩存 + 通知前端刷新頁面」。
+        _girl_now = False
+        try:
+            import girl_engine as _ge
+            _models = _ge._tags()
+            _names = [m.get('name', '') for m in (_models or [])]
+            _girl_now = _models is not None and any(_ge.GIRL_MODEL in n for n in _names)
+        except Exception:
+            _girl_now = False
+        if _girl_now:
+            try:
+                import girl_switch
+                s_ok, s_msg = girl_switch.switch(agent)
+                if s_ok:
+                    msg = msg + '\n' + s_msg
+            except Exception as se:
+                msg = msg + f'\n（切換模型失敗: {se}）'
+            try:
+                if agent in _agent_config_cache:
+                    del _agent_config_cache[agent]
+                socketio.emit('reload_page', {'reason': 'girl_online', 'agent': agent})
+            except Exception:
+                pass
+        engine_msg = msg
+    reply_text = _girl_maid_reply_text(ok, engine_msg, agent)
+    _mid = _save_girl_maid_reply(agent, reply_text, conv_id)
+    return jsonify({'ok': ok, 'msg': reply_text, 'reply_text': reply_text,
+                    'message_id': _mid, 'engine_msg': engine_msg, 'agent': agent})
+
+def _read_json(path):
+    try:
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+@app.route('/api/girl/status', methods=['GET'])
+def api_girl_status():
+    '''vast girl 引擎開機狀態（給前端即時更新侍女那則開機訊息）。'''
+    agent = request.args.get('agent', '稚')
+    home = os.path.expanduser('~')
+    online = False
+    iface_ok = False
+    try:
+        import girl_engine
+        models = girl_engine._tags()
+        if models is not None:
+            iface_ok = True
+            names = [m.get('name', '') for m in models]
+            online = any(girl_engine.GIRL_MODEL in n for n in names)
+    except Exception:
+        pass
+    agent_state = _read_json(os.path.join(home, '.mok', 'agent', agent, 'girl_state.json'))
+    vast_state = _read_json(os.path.join(home, '.mok', 'agent', agent, 'jobs', 'vastai', 'llm_state.json'))
+    try:
+        _ts = max(float(vast_state.get('ts') or 0), float(agent_state.get('ts') or 0))
+    except Exception:
+        _ts = 0
+    state_fresh = (time.time() - _ts) < 600  # 已烘焙範本 0 秒開機（多租競速），10 分鐘內視為最新
+    phase = vast_state.get('phase') or agent_state.get('phase') or ('online' if online else 'unknown')
+    if (not state_fresh) and (not online) and (not iface_ok):
+        phase = 'none'
+    fresh = state_fresh
+    if online:
+        text = '✅ 已開機完成，vast girl（girl:qwen-Claude）已可使用。'
+        booting = False
+    elif (not iface_ok) and agent_state.get('online') and fresh:
+        text = '⏳ 開機中：實例已就緒，反向隧道仍在建立。'
+        booting = True
+    elif phase in ('created', 'deploying', 'loading', 'starting', 'initializing', 'offering', 'running'):
+        text = f'⏳ 開機中：目前階段 {phase}（已烘焙範本・0 秒開機／多租競速挑最穩，通常 1–5 分鐘）。'
+        booting = True
+    elif phase == 'online':
+        text = '⏳ 開機中：模型已載入，反向隧道尚未接通。'
+        booting = True
+    else:
+        text = '⚪ 目前沒有 vast girl 引擎在開機。'
+        booting = False
+    return jsonify({'ok': True, 'agent': agent, 'online': online, 'booting': booting,
+                    'phase': phase, 'ts': agent_state.get('ts') or vast_state.get('ts'),
+                    'text': text})
+
+
+@app.route('/api/girl/reload', methods=['POST'])
+def api_girl_reload():
+    '''e_flip 上線後呼叫：清配置緩存 + 通知所有前端刷新頁面（不重啟 mok_agi）。'''
+    d = request.get_json(force=True, silent=True) or {}
+    agent = d.get('agent') or '稚'
+    try:
+        if agent in _agent_config_cache:
+            del _agent_config_cache[agent]
+    except Exception:
+        pass
+    try:
+        reload_config(CURRENT_ENV_PATH)
+    except Exception:
+        pass
+    try:
+        socketio.emit('reload_page', {'reason': 'girl_ready', 'agent': agent})
+    except Exception:
+        pass
+    return jsonify({'ok': True, 'agent': agent})
+
+
 @app.route('/api/chat', methods=['POST'])
 def api_chat_sse():
     data = request.get_json(force=True)
@@ -879,6 +1285,8 @@ def api_chat_sse():
         _started = _start_sse_chat_session(data)
     except ValueError as _e:
         return jsonify({"error": str(_e)}), 400
+    except PermissionError as _e:
+        return jsonify({"error": str(_e), "code": "UNAUTHORIZED"}), 401
     session_id = _started["session_id"]
     agent_name = _started["agent_name"]
     q = _started["queue"]
@@ -933,6 +1341,8 @@ def api_chat_start():
         _started = _start_sse_chat_session(data)
     except ValueError as _e:
         return jsonify({"error": str(_e)}), 400
+    except PermissionError as _e:
+        return jsonify({"error": str(_e), "code": "UNAUTHORIZED"}), 401
 
     session_id = _started["session_id"]
     agent_name = _started["agent_name"]
@@ -1100,7 +1510,19 @@ def handle_chat_message(data):
     # 🔧 標記此 agent 工作中（頁面刷新時可恢復狀態）
     _running_agents.add(agent_name)
 
-    user_id = data.get("user_id") or _current_admin_chat_id or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+    # P0 止血：不再回落成 admin / web_default；未登入且非訪客 -> 擋掉
+    user_id = resolve_tenant(data)
+    if not user_id:
+        try:
+            socketio.emit('chat_stream', {'type': 'reply', 'agent': agent_name,
+                          'content': '⛔ 請先登入會員（/login）才能使用 AI 服務。'},
+                          room=request.sid, namespace='/')
+            socketio.emit('chat_stream', {'type': 'done', 'agent': agent_name},
+                          room=request.sid, namespace='/')
+        except Exception:
+            pass
+        _running_agents.discard(agent_name)
+        return
     context_files = data.get("context_files", None)  # 🔧 前端控制 soul 文件載入
 
     # 🔧 客服模式：自動預先抓取頁面內容（不依賴 LLM 自己調用 web_fetch）
@@ -1141,8 +1563,8 @@ def handle_chat_message(data):
     import time
     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         cursor = conn.execute(
-            'INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)',
-            (agent_name, 'user', user_msg, None, time.time())
+            'INSERT INTO chat_history (agent, role, content, think_content, timestamp, tenant) VALUES (?, ?, ?, ?, ?, ?)',
+            (agent_name, 'user', user_msg, None, time.time(), user_id)
         )
         user_msg_id = cursor.lastrowid
         conn.commit()
@@ -1183,6 +1605,7 @@ def handle_chat_message(data):
             try:
                 with _sse_lock:
                     _sse_buffers[_sse_session_id].append(event.copy())
+                    _trace_reply_event(event, _sse_session_id)
                 _sse_q.put(event.copy())
             except Exception as _sse_put_err:
                 print(f"[stream_emit] SSE q.put 失敗: {_sse_put_err}")
@@ -1210,20 +1633,20 @@ def handle_chat_message(data):
                 accumulated_think += event["content"]
                 if assistant_msg_id is None:
                     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time()))
+                        cursor = conn.execute("INSERT INTO chat_history (agent, role, content, think_content, timestamp, tenant) VALUES (?, ?, ?, ?, ?, ?)", (agent_name, "assistant", "", "", time.time(), user_id))
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
                 update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
 
             elif event["type"] == "reply":
-                if event.get("subtype", "normal") in ("pending_list", "tool_process", "semantic_search", "experience"):
+                if event.get("subtype", "normal") in ("pending_list", "tool_process", "semantic_search", "experience", "tool_result"):
                     return
                 accumulated_reply += event["content"]
                 if assistant_msg_id is None:
                     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                         cursor = conn.execute(
-                            "INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)",
-                            (agent_name, "assistant", "", "", time.time())
+                            "INSERT INTO chat_history (agent, role, content, think_content, timestamp, tenant) VALUES (?, ?, ?, ?, ?, ?)",
+                            (agent_name, "assistant", "", "", time.time(), user_id)
                         )
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
@@ -1237,8 +1660,8 @@ def handle_chat_message(data):
                 if assistant_msg_id is None:
                     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
                         cursor = conn.execute(
-                            "INSERT INTO chat_history (agent, role, content, think_content, timestamp) VALUES (?, ?, ?, ?, ?)",
-                            (agent_name, "assistant", accumulated_reply, accumulated_think, time.time())
+                            "INSERT INTO chat_history (agent, role, content, think_content, timestamp, tenant) VALUES (?, ?, ?, ?, ?, ?)",
+                            (agent_name, "assistant", accumulated_reply, accumulated_think, time.time(), user_id)
                         )
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
@@ -1341,8 +1764,8 @@ def handle_chat_message(data):
 def _update_user_message_conv_id(agent, conv_id, user_msg_id, user_id=None):
     # 確保 user_id 有效
     if not user_id:
-        user_id = "web_default"
-        print(f"[DEBUG] user_id 為空，使用默認值: {user_id}")
+        # 多租戶隔離(20260921)：嚴禁回落成共享身分 web_default（等同任何人共用一份歷史）
+        print("[DEBUG] user_id 為空，跳過 conv_id 回退，避免跨用戶污染")
     
     # 如果 conv_id 為 None，從 conversation_history 回退查詢（直接取最新記錄）
     if conv_id is None:
@@ -1359,15 +1782,20 @@ def _update_user_message_conv_id(agent, conv_id, user_msg_id, user_id=None):
                 conv_id = row[0]
                 print(f"[DEBUG] 從 conversation_history 回退查詢到最新的 user 記錄 ID: {conv_id}")
             else:
-                # 用模糊匹配查找（兼容 web_default 等不同 user_id）
-                cursor = conn.execute(
-                    'SELECT id FROM conversation_history WHERE user_key LIKE ? AND role = "user" ORDER BY id DESC LIMIT 1',
-                    (f"%_{agent}",)
-                )
-                row = cursor.fetchone()
-                if row:
-                    conv_id = row[0]
-                    print(f"[DEBUG] 從 conversation_history 模糊查詢到最新的 user 記錄 ID: {conv_id}")
+                # 多租戶隔離(20260921)：禁止 LIKE "%_agent" 模糊匹配（會撈到其他用戶的最新訊息，
+                # 導致 a01 的訊息被綁上 admin 的 conv_id → 前端讀到別人的歷史）。
+                # 改為僅以 tenant 精確回退。
+                try:
+                    cursor = conn.execute(
+                        'SELECT id FROM conversation_history WHERE tenant = ? AND role = "user" ORDER BY id DESC LIMIT 1',
+                        (user_id,)
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        conv_id = row[0]
+                        print(f"[DEBUG] 以 tenant={user_id} 精確回退到 user 記錄 ID: {conv_id}")
+                except Exception as _e:
+                    print(f"[DEBUG] tenant 精確回退失敗（忽略）: {_e}")
                 else:
                     print(f"[DEBUG] 在 conversation_history 中未找到 user_key={user_id}_{agent} 的記錄")
     
@@ -1387,6 +1815,18 @@ def _update_user_message_conv_id(agent, conv_id, user_msg_id, user_id=None):
 @socketio.on('stop_generation')
 def handle_stop():
     sid = request.sid
+    try:
+        from flask import session as _fs
+        _su = _fs.get('member_user')
+    except Exception:
+        _su = None
+    if not (_su and str(_su) in _PRIVILEGED_TENANTS):
+        try:
+            socketio.emit('stream_stopped', {'status': 'forbidden'}, room=sid)
+        except Exception:
+            pass
+        print("stop_generation rejected (not admin): %s" % sid)
+        return
     # 先通知前端服務即將重啟（可選）
     socketio.emit('stream_stopped', {'status': 'restarting'}, room=sid)
     # 立即執行 pm2 restart（不等待，後臺運行）
@@ -1738,16 +2178,17 @@ def backup_page():
 def api_backup_items():
     # 列出 ~/.mok 頂層項目，供備份時勾選要排除的內容
     mok_dir = os.path.expanduser('~/.mok')
-    ALWAYS_EXCLUDE = {'backups', '__pycache__', '.git', 'node_modules', 'playwright-browsers', '.chroma_data', '.speech2text_models', '.pending_cron_confirm', 'mpt', 'browser_profile', 'browser_profile2', 'trash', 'whisper_models', 'CPU_上傳.bat', 'CPU_備份.bat'}
-    # 顯示於清單但預設「不勾選(=不備份)」：browser_profiles(3.3G) / _tmp(暫存) / .trash(資源回收)，避免誤備份大目錄造成逾時 HTTP 524
-    DEFAULT_UNCHECKED = {'browser_profiles', '_tmp', '.trash'}
+    # 精確名稱或 glob 樣式（見下方 any(fnmatch...)）；非核心/可重建者永久排除，避免把數 GB 大目錄包進備份
+    ALWAYS_EXCLUDE = {'backups', '__pycache__', '.git', 'node_modules', 'playwright-browsers', '.speech2text_models', '.pending_cron_confirm', 'mpt', 'trash', '.trash', 'whisper_models', 'CPU_上傳.bat', 'CPU_備份.bat', 'desktop_setup.log', 'browser_profile', 'browser_profile2', 'browser_profile_fb', '_restore_bak_*', '_fix_bak_*'}
+    # 「完整備份」必須要有的核心資料 → 預設勾選(=要備份)；其餘項目一律預設不勾選
+    DEFAULT_CHECKED = {'agent', 'core', 'frontends', 'gateway', 'html', 'sandbox', 'skill', 'tools', 'work', '.chroma_data', '.memory', 'MOKAGI.sh', 'README.md', 'env.env'}
     items = []
     try:
         entries = sorted(os.listdir(mok_dir))
     except OSError as e:
         return jsonify({'success': False, 'error': str(e)}), 500
     for name in entries:
-        if name in ALWAYS_EXCLUDE:
+        if any(fnmatch.fnmatch(name, _pat) for _pat in ALWAYS_EXCLUDE):
             continue
         if '.bak' in name or name in ('CPU_上傳.bat', 'CPU_備份.bat'):
             continue
@@ -1756,7 +2197,7 @@ def api_backup_items():
             continue
         is_dir = os.path.isdir(fp)
         size_bytes = _backup_dir_size(fp) if is_dir else os.path.getsize(fp)
-        items.append({'name': name, 'is_dir': is_dir, 'size': _backup_human_size(size_bytes), 'size_bytes': size_bytes, 'default_off': name in DEFAULT_UNCHECKED})
+        items.append({'name': name, 'is_dir': is_dir, 'size': _backup_human_size(size_bytes), 'size_bytes': size_bytes, 'default_off': name not in DEFAULT_CHECKED})
     return jsonify({'items': items})
 
 def _backup_dir_size(path):
@@ -1807,20 +2248,22 @@ _BACKUP_STATE = {'running': False, 'message': ''}
 def _run_backup_task(mok_dir, backup_dir, user_exclude, filename, filepath):
     import tarfile
     try:
-        nested_exclude = {'__pycache__', '.git', 'node_modules', 'logs', 'playwright-browsers', '.chroma_data', '.speech2text_models', 'whisper_models'}
-        top_exclude = user_exclude | {'backups', '__pycache__', '.git', 'node_modules', 'playwright-browsers', '.chroma_data', '.speech2text_models', '.pending_cron_confirm', 'mpt', 'browser_profile', 'browser_profile2', 'trash', 'whisper_models', 'CPU_上傳.bat', 'CPU_備份.bat'}
+        nested_exclude = {'__pycache__', '.git', 'node_modules', 'logs', 'playwright-browsers', '.speech2text_models', 'whisper_models', 'videos', '聲音工作'}
+        nested_glob = {'live2d*'}
+        top_exclude = user_exclude | {'backups', '__pycache__', '.git', 'node_modules', 'playwright-browsers', '.speech2text_models', '.pending_cron_confirm', 'mpt', 'browser_profile', 'browser_profile2', 'browser_profile_fb', 'trash', '.trash', 'desktop_setup.log', 'whisper_models', 'CPU_上傳.bat', 'CPU_備份.bat'}
+        top_glob = {'_restore_bak_*', '_fix_bak_*'}
         with tarfile.open(filepath, 'w:gz', compresslevel=6) as tar:
             for entry in sorted(os.listdir(mok_dir)):
-                if entry in top_exclude:
+                if entry in top_exclude or any(fnmatch.fnmatch(entry, _p) for _p in top_glob):
                     continue
                 full = os.path.join(mok_dir, entry)
                 if not os.path.exists(full):
                     continue
                 if os.path.isdir(full):
                     for root, dirs, files in os.walk(full):
-                        dirs[:] = [d for d in dirs if d not in nested_exclude and '.bak' not in d]
+                        dirs[:] = [d for d in dirs if d not in nested_exclude and not any(fnmatch.fnmatch(d, _p) for _p in nested_glob) and '.bak' not in d]
                         for f in files:
-                            if '.bak' in f or f in ('CPU_上傳.bat', 'CPU_備份.bat'):
+                            if '.bak' in f or f in ('CPU_上傳.bat', 'CPU_備份.bat') or f.lower().endswith('.mp4'):
                                 continue
                             fp = os.path.join(root, f)
                             arcname = os.path.relpath(fp, mok_dir)
@@ -1914,6 +2357,47 @@ def api_backup_list():
                 'time': datetime.datetime.fromtimestamp(stat.st_mtime, datetime.timezone(datetime.timedelta(hours=_admin_tz_offset()))).strftime('%Y-%m-%d %H:%M:%S')
             })
     return jsonify({'backups': backups})
+
+@app.route('/api/backup/restore/<path:filename>', methods=['POST'])
+def api_backup_restore(filename):
+    # 一鍵還原：背景執行 restore.sh（停 pm2 -> 覆蓋檔案 -> 還原 cron -> 重啟所有服務）
+    backup_dir = os.path.join(os.path.expanduser('~'), '.mok', 'backups')
+    safe_name = os.path.basename(filename)
+    filepath = os.path.join(backup_dir, safe_name)
+    if not os.path.isfile(filepath):
+        return jsonify({'success': False, 'error': '找不到備份檔案'}), 404
+    restore_script = os.path.join(os.path.expanduser('~'), '.mok', 'tools', 'scripts', 'restore.sh')
+    if not os.path.exists(restore_script):
+        return jsonify({'success': False, 'error': '找不到還原腳本 restore.sh'}), 500
+    def _clean_names(lst):
+        out_names = []
+        for x in (lst or []):
+            x = str(x).strip().strip('/')
+            if x and '/' not in x and x not in ('.', '..') and not x.startswith('-'):
+                out_names.append(x)
+        return out_names
+    data = request.get_json(silent=True) or {}
+    only = _clean_names(data.get('only'))
+    skip = _clean_names(data.get('skip'))
+    cmd = ['setsid', 'bash', restore_script, safe_name]
+    mode_txt = '完整還原'
+    if only:
+        cmd += ['--only', ' '.join(only)]
+        mode_txt = '選擇性還原（只還原：' + ' '.join(only) + '）'
+    elif skip:
+        cmd += ['--skip', ' '.join(skip)]
+        mode_txt = '選擇性還原（排除：' + ' '.join(skip) + '）'
+    try:
+        with open(os.path.join(backup_dir, 'restore_run.out'), 'a') as out:
+            subprocess.Popen(cmd,
+                             stdout=out, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    return jsonify({'success': True, 'started': True,
+                    'message': '[還原] 已啟動一鍵還原 -> ' + safe_name +
+                               '\n約 6 秒後開始：建立還原前安全備份 -> 停止所有 pm2 -> 覆蓋系統檔案 -> 還原 cron -> 重啟所有服務。'})
+
 
 @app.route('/api/backup/download/<path:filename>')
 def api_backup_download(filename):
@@ -2573,7 +3057,7 @@ def create_agent():
                 # 本地角色模板（女媧人物範例）→ 直接讀取檔案，並複製附屬資料（references 等）
                 import shutil
                 _local_path = role_url.replace('file://', '')
-                _nuwa_root = os.path.expanduser(f"~/.{MOKAGI_home}/skill/nuwa/nuwa-examples")
+                _nuwa_root = os.path.expanduser(f"~/.{MOKAGI_home}/skill/nuwa/角色")
                 if not _local_path.startswith(_nuwa_root):
                     raise ValueError(f"不允許讀取此路徑: {_local_path}")
                 with open(_local_path, 'r', encoding='utf-8') as _lf:
@@ -2638,9 +3122,10 @@ def create_agent():
 
 妳房間 {name}/jobs 只可有20個項目,滿了通知我
 
-嚴禁:
-    重開 mok_agi， pm2 restart mok_agi，關閉 mok_agi
-    (如要重啟 mok_agi 必須{_admin_name}人手操作)
+【核心安全｜硬規則】
+    禁止以任何方式重啟、停止 core 進程（含 admin exec / cron / shell / python / 腳本）。
+    若修改核心代碼需生效，一律向主人回報「需主人手動重啟」，並停止操作等待確認。
+    本規則由工具層強制執行，任何嘗試都會被拒絕。
 """
 
     _user_md_path = os.path.join(soul_dir, 'user.md')
@@ -3118,20 +3603,40 @@ def get_chat_history():
     if limit > 100:
         limit = 100  # 防止一次性取過多
 
+    # ===== 多租戶隔離(20260921)：一般租戶只看自己的資料，特權(admin)才可讀全部 =====
+    tenant = resolve_tenant_arg()
+    if tenant is None:
+        return {"messages": [], "has_more": False}
+    _read_all = _can_read_all(tenant)
+
     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         conn.row_factory = sqlite3.Row
         # 總記錄數（用於判斷是否有更多）
-        total = conn.execute(
-            'SELECT COUNT(*) FROM chat_history WHERE agent = ?', (agent,)
-        ).fetchone()[0]
+        if _read_all:
+            total = conn.execute(
+                'SELECT COUNT(*) FROM chat_history WHERE agent = ?', (agent,)
+            ).fetchone()[0]
+        else:
+            total = conn.execute(
+                'SELECT COUNT(*) FROM chat_history WHERE agent = ? AND tenant = ?',
+                (agent, tenant)
+            ).fetchone()[0]
 
         # 按 id 降序取最新數據（新消息在前）
-        rows = conn.execute(
-            '''SELECT id, conv_id, role, content, think_content, rounds, timestamp
-               FROM chat_history WHERE agent = ?
-               ORDER BY id DESC LIMIT ? OFFSET ?''',
-            (agent, limit, offset)
-        ).fetchall()
+        if _read_all:
+            rows = conn.execute(
+                '''SELECT id, conv_id, role, content, think_content, rounds, timestamp
+                   FROM chat_history WHERE agent = ?
+                   ORDER BY id DESC LIMIT ? OFFSET ?''',
+                (agent, limit, offset)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                '''SELECT id, conv_id, role, content, think_content, rounds, timestamp
+                   FROM chat_history WHERE agent = ? AND tenant = ?
+                   ORDER BY id DESC LIMIT ? OFFSET ?''',
+                (agent, tenant, limit, offset)
+            ).fetchall()
 
         messages = []
         for row in rows:
@@ -3164,18 +3669,25 @@ def post_chat_history():
     think_content = data.get('thinkContent')
     conv_id = data.get('conv_id')
     timestamp = data.get('timestamp', time.time())
+    tenant = resolve_tenant(data)
+    if not tenant:
+        return {"error": "unauthorized: 請先登入會員（/login）", "code": "UNAUTHORIZED"}, 401
     if not agent or not role:
         return {"error": "Missing required fields"}, 400
     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         conn.execute(
-            'INSERT INTO chat_history (agent, role, content, think_content, conv_id, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
-            (agent, role, content, think_content, conv_id, timestamp)
+            'INSERT INTO chat_history (agent, role, content, think_content, conv_id, timestamp, tenant) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (agent, role, content, think_content, conv_id, timestamp, tenant)
         )
         conn.commit()
     return {"status": "ok"}
 
 @app.route('/api/chat_history', methods=['DELETE'])
 def delete_chat_history():
+    # 多租戶隔離(20260921)：清空 agent 歷史屬全域破壞性操作，僅特權租戶可執行
+    _tenant = resolve_tenant_arg()
+    if _tenant is None or not _can_read_all(_tenant):
+        return {"error": "unauthorized: 僅管理員可清空對話歷史", "code": "UNAUTHORIZED"}, 401
     agent = request.args.get('agent', '')
     if not agent:
         return {"error": "Missing agent parameter"}, 400
@@ -3245,8 +3757,11 @@ def api_search():
     if not agent_name:
         agent_name = os.path.basename(CURRENT_ENV_PATH).lstrip('.')
 
-    # 取得使用者識別碼（預設使用 ADMIN_CHAT_ID）
-    chat_id = _current_admin_chat_id or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+    # 多租戶隔離(20260921)：身分一律取自 session／訪客 id，
+    # 嚴禁回落 ADMIN_CHAT_ID，否則任何訪客都是在搜 admin 的對話歷史。
+    chat_id = resolve_tenant(data)
+    if chat_id is None:
+        return {"error": "unauthorized: 請先登入會員（/login）", "code": "UNAUTHORIZED"}, 401
 
     # 非同步呼叫 memory 的語義搜索
     import asyncio
@@ -3637,7 +4152,42 @@ def handle_save_agent_settings(data):
 def handle_static():
     if request.path.startswith('/static/'):
         filename = request.path[8:]  # 去掉 '/static/'
+        # admin-only：noVNC 桌面靜態頁（/static/novnc/*）僅限 admin（2026-09-23 by 凜）
+        if filename.startswith('novnc/') and not _is_privileged_session():
+            return jsonify({'success': False, 'error': 'forbidden: admin only'}), 403
         return send_from_directory(static_dir, filename)
+
+# ===== admin-only 管制（2026-09-23 by 凜）：緊急重啟 / 進化 / admin 桌面 / 備份 =====
+_ADMIN_ONLY_PREFIXES = ('/api/backup/', '/webTools/admin.html', '/skill/進化/','/webTools/novnc')
+
+
+def _is_privileged_session():
+    """是否為特權（admin/root）身分；以登入 session 為唯一依據。"""
+    try:
+        _u = _session_member_user()
+        if _u and str(_u) in _PRIVILEGED_TENANTS:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+@app.before_request
+def _admin_only_guard():
+    if request.method == 'OPTIONS':
+        return None
+    p = request.path or ''
+    if not (p == '/backup' or p.startswith(_ADMIN_ONLY_PREFIXES)):
+        return None
+    if _is_privileged_session():
+        return None
+    return jsonify({'success': False, 'error': 'forbidden: admin only'}), 403
+
+
+@app.route('/api/whoami')
+def api_whoami():
+    _u = _session_member_user()
+    return jsonify({'logged_in': bool(_u), 'username': _u, 'is_admin': _is_privileged_session()})
         
 # ---------- 冷呼控制台 API 代理（轉發到 cold_call 伺服器 8765，解決 iframe 跨埠問題）----------
 @app.route('/skill/賺錢王/api/<path:sub_path>', methods=['GET', 'POST', 'OPTIONS'])
@@ -3753,7 +4303,9 @@ def get_pending_tasks():
     if not agent:
         return {"error": "Missing agent parameter"}, 400
 
-    user_id = _current_admin_chat_id or _agent_config.get("ADMIN_CHAT_ID") or os.environ.get("ADMIN_CHAT_ID", "web_default")
+    user_id = resolve_tenant_arg()
+    if not user_id:
+        return {"tasks": []}
     
     # 直接讀取 _job.json
     import json
@@ -3975,6 +4527,11 @@ def add_cors_headers(response):
 @app.route("/api/search_all_conversations", methods=["GET"])
 def search_all_conversations():
     """搜尋全主機內所有 agent 與使用者的對話內容（LIKE 全文檢索）"""
+    # 多租戶隔離(20260921)：全域搜尋僅限特權租戶，其餘只能搜自己的 tenant
+    _tenant = resolve_tenant_arg()
+    if _tenant is None:
+        return {"error": "unauthorized: 請先登入會員（/login）", "code": "UNAUTHORIZED"}, 401
+    _read_all = _can_read_all(_tenant)
     q = request.args.get("q", "").strip()
     if not q or len(q) < 1:
         return {"error": "Missing or too short query", "results": []}, 400
@@ -3993,10 +4550,10 @@ def search_all_conversations():
             rows = conn.execute(
                 """SELECT id, agent, role, content, timestamp
                    FROM chat_history
-                   WHERE content LIKE ?
+                   WHERE content LIKE ?{_tf}
                    ORDER BY timestamp DESC
-                   LIMIT ?""",
-                (f"%{q}%", limit)
+                   LIMIT ?""".format(_tf="" if _read_all else " AND tenant = ?"),
+                ((f"%{q}%", limit) if _read_all else (f"%{q}%", _tenant, limit))
             ).fetchall()
             for row in rows:
                 content = row["content"] or ""
@@ -4019,10 +4576,10 @@ def search_all_conversations():
             rows = conn.execute(
                 """SELECT id, user_key, role, content, timestamp
                    FROM conversation_history
-                   WHERE content LIKE ?
+                   WHERE content LIKE ?{_tf}
                    ORDER BY timestamp DESC
-                   LIMIT ?""",
-                (f"%{q}%", limit)
+                   LIMIT ?""".format(_tf="" if _read_all else " AND tenant = ?"),
+                ((f"%{q}%", limit) if _read_all else (f"%{q}%", _tenant, limit))
             ).fetchall()
             for row in rows:
                 content = row["content"] or ""
@@ -4131,6 +4688,11 @@ def bookmark_rename():
 @app.route("/api/bookmark/conversation", methods=["GET"])
 def bookmark_conversation():
     """根據 conv_id 取得完整對話"""
+    # 多租戶隔離(20260921)：只能取自己 tenant 的對話，特權租戶可讀全部
+    _tenant = resolve_tenant_arg()
+    if _tenant is None:
+        return {"error": "unauthorized: 請先登入會員（/login）", "code": "UNAUTHORIZED"}, 401
+    _read_all = _can_read_all(_tenant)
     conv_id = request.args.get("conv_id", "").strip()
     if not conv_id:
         return {"error": "缺少 conv_id"}, 400
@@ -4141,8 +4703,8 @@ def bookmark_conversation():
         with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT role, content, think_content, timestamp FROM chat_history WHERE CAST(conv_id AS TEXT) = ? ORDER BY timestamp ASC",
-                (conv_id,)
+                "SELECT role, content, think_content, timestamp FROM chat_history WHERE CAST(conv_id AS TEXT) = ?" + ("" if _read_all else " AND tenant = ?") + " ORDER BY timestamp ASC",
+                ((conv_id,) if _read_all else (conv_id, _tenant))
             ).fetchall()
             for row in rows:
                 messages.append({
@@ -4160,8 +4722,8 @@ def bookmark_conversation():
         with closing(sqlite3.connect(HISTORY_DB)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT role, content, timestamp FROM conversation_history WHERE CAST(id AS TEXT) = ? ORDER BY timestamp ASC",
-                (conv_id,)
+                "SELECT role, content, timestamp FROM conversation_history WHERE CAST(id AS TEXT) = ?" + ("" if _read_all else " AND tenant = ?") + " ORDER BY timestamp ASC",
+                ((conv_id,) if _read_all else (conv_id, _tenant))
             ).fetchall()
             for row in rows:
                 messages.append({

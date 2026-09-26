@@ -6,7 +6,7 @@
 // ============================================================
 (function() {
     // 🔖 目前版本號（改版必改）
-    const __MOKAGI_VER__ = "2026082901";
+    const __MOKAGI_VER__ = "2026092404";
 
     // 🚀 啟動時自我檢查：若瀏覽器/CDN 快取了舊版，自動換成最新版
     (function selfCheck() {
@@ -50,7 +50,7 @@
         
         // 後端必須配置
         agent: window.MOKAGI_AGENT || '客服',                    // 默認使用莫氏 Agent
-        user_id: window.MOKAGI_USER_ID || localStorage.getItem('mokagi_user_id') || generateUUID(),
+        user_id: window.MOKAGI_USER_ID || localStorage.getItem('web_user_id') || localStorage.getItem('mokagi_user_id') || generateUUID(),
         server: window.MOKAGI_SERVER || window.location.origin, // 後端服務器地址
 
         // 其他配置可選
@@ -63,7 +63,7 @@
         saySorry: window.MOKAGI_SAY_SORRY || '⚠️ 連接已斷開，嘗試重連...',
         agentIcon: window.MOKAGI_AGENT_ICON || '🤖',   // 新增：Agent 圖標
         theme: window.MOKAGI_THEME || '#4A90D9',
-        quickLinks: window.quickLinks || [],           // 快速查詢按鈕列表 [{text, query}, ...]
+        quickLinks: window.quickLinks || [],           // 快速查詢按鈕列表 [{text, query, answer?}, ...]（有 answer 直接顯示、不打 LLM）
 
         // 🖥️ 沉浸式佈局配置
         desktopLayout: window.MOKAGI_DESKTOP_LAYOUT !== undefined ? window.MOKAGI_DESKTOP_LAYOUT : true,
@@ -74,6 +74,89 @@
 
     };
     console.log('CONFIG 初始化:', CONFIG);
+
+    // ============================================================
+    // 📝 內建 Markdown 渲染（無外部依賴，可安全嵌入任何網站）
+    // ============================================================
+    function _mokEsc(t) {
+        return String(t == null ? '' : t)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+    function _mokInline(t) {
+        t = _mokEsc(t);
+        var ics = [];
+        t = t.replace(/`([^`]+)`/g, function (m, c) { ics.push(c); return '\u0001' + (ics.length - 1) + '\u0001'; });
+        t = t.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+        t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+        t = t.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+        t = t.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+        t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        t = t.replace(/(^|[^"=\w>])(https?:\/\/[^\s<>"]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+        t = t.replace(/\u0001(\d+)\u0001/g, function (m, i) { return '<code class="mok-md-code">' + ics[+i] + '</code>'; });
+        return t;
+    }
+    function _mokMd(src) {
+        if (src == null) return '';
+        var text = String(src);
+        var blocks = [];
+        text = text.replace(/```[^\n]*\n?([\s\S]*?)```/g, function (m, code) {
+            blocks.push(code.replace(/\n+$/, ''));
+            return '\u0002CODE' + (blocks.length - 1) + 'CODE\u0002';
+        });
+        var lines = text.replace(/\r\n/g, '\n').split('\n');
+        var out = '', listType = null, para = [], quote = [];
+        function closeList() { if (listType) { out += '</' + listType + '>'; listType = null; } }
+        function flushPara() { if (para.length) { out += '<p>' + para.map(_mokInline).join('<br>') + '</p>'; para = []; } }
+        function flushQuote() { if (quote.length) { out += '<blockquote>' + quote.map(_mokInline).join('<br>') + '</blockquote>'; quote = []; } }
+        function flushAll() { flushPara(); flushQuote(); closeList(); }
+        for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i];
+            var cm = ln.match(/^\u0002CODE(\d+)CODE\u0002$/);
+            if (cm) { flushAll(); out += '<pre class="mok-md-pre"><code>' + _mokEsc(blocks[+cm[1]]) + '</code></pre>'; continue; }
+            if (!ln.trim()) { flushAll(); continue; }
+            var h = ln.match(/^\s{0,3}(#{1,6})\s+(.*)$/);
+            if (h) { flushAll(); var lv = h[1].length; out += '<h' + lv + '>' + _mokInline(h[2].replace(/\s+#+\s*$/, '')) + '</h' + lv + '>'; continue; }
+            if (/^\s{0,3}(-{3,}|\*{3,}|_{3,})\s*$/.test(ln)) { flushAll(); out += '<hr>'; continue; }
+            var bq = ln.match(/^\s{0,3}>\s?(.*)$/);
+            if (bq) { flushPara(); closeList(); quote.push(bq[1]); continue; } if (ln.indexOf("|") !== -1 && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[i + 1])) { flushAll(); var _cells = function (row) { row = row.trim().replace(/^\|/, "").replace(/\|$/, ""); return row.split("|").map(function (c) { return c.trim(); }); }; var _head = _cells(ln); out += "<table><thead><tr>"; for (var _hi = 0; _hi < _head.length; _hi++) out += "<th>" + _mokInline(_head[_hi]) + "</th>"; out += "</tr></thead><tbody>"; i += 2; while (i < lines.length && lines[i].indexOf("|") !== -1 && lines[i].trim() !== "") { var _row = _cells(lines[i]); out += "<tr>"; for (var _ri = 0; _ri < _head.length; _ri++) out += "<td>" + _mokInline(_row[_ri] || "") + "</td>"; out += "</tr>"; i++; } i--; out += "</tbody></table>"; continue; }
+            var ul = ln.match(/^\s*[-*+]\s+(.*)$/);
+            if (ul) { flushPara(); flushQuote(); if (listType !== 'ul') { closeList(); out += '<ul>'; listType = 'ul'; } out += '<li>' + _mokInline(ul[1]) + '</li>'; continue; }
+            var ol = ln.match(/^\s*\d+[.)]\s+(.*)$/);
+            if (ol) { flushPara(); flushQuote(); if (listType !== 'ol') { closeList(); out += '<ol>'; listType = 'ol'; } out += '<li>' + _mokInline(ol[1]) + '</li>'; continue; }
+            flushQuote(); closeList(); para.push(ln);
+        }
+        flushAll();
+        out = out.replace(/\u0002CODE(\d+)CODE\u0002/g, function (m, i) { return '<pre class="mok-md-pre"><code>' + _mokEsc(blocks[+i]) + '</code></pre>'; });
+        return out;
+    }
+    function _mokMdCss() {
+        if (document.getElementById('mokagi-md-style')) return;
+        var st = document.createElement('style');
+        st.id = 'mokagi-md-style';
+        st.textContent = '.mok-md{white-space:normal !important;line-height:1.7;color:#24292f;}'
+        + '.mok-md>*:first-child{margin-top:0;}.mok-md>*:last-child{margin-bottom:0;}'
+        + '.mok-md p{margin:.4em 0;}'
+        + '.mok-md h1,.mok-md h2,.mok-md h3,.mok-md h4,.mok-md h5,.mok-md h6{margin:.7em 0 .35em;line-height:1.35;font-weight:700;color:#1f2328;}'
+        + '.mok-md h1{font-size:1.35em;border-bottom:1px solid rgba(0,0,0,.08);padding-bottom:.2em;}'
+        + '.mok-md h2{font-size:1.22em;}.mok-md h3{font-size:1.1em;}'
+        + '.mok-md ul,.mok-md ol{margin:.4em 0;padding-left:1.4em;}'
+        + '.mok-md li{margin:.18em 0;}'
+        + '.mok-md code.mok-md-code{background:rgba(27,31,36,.08);padding:.1em .35em;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88em;}'
+        + '.mok-md pre.mok-md-pre{background:#f6f8fa;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;overflow-x:auto;margin:.5em 0;}'
+        + '.mok-md pre.mok-md-pre code{background:none;padding:0;font-size:.85em;color:#24292f;white-space:pre;}'
+        + '.mok-md a{color:#4A90D9;text-decoration:underline;word-break:break-all;}'
+        + '.mok-md blockquote{margin:.5em 0;padding:.2em .8em;border-left:3px solid #d0d7de;color:#57606a;background:rgba(27,31,36,.03);}'
+        + '.mok-md hr{border:none;border-top:1px solid rgba(0,0,0,.12);margin:.8em 0;}'
+        + '.mok-md table{border-collapse:collapse;width:100%;margin:.5em 0;font-size:.92em;}'
+        + '.mok-md th,.mok-md td{border:1px solid #e5e7eb;padding:5px 8px;text-align:left;}'
+        + '.mok-md th{background:#f6f8fa;}.mok-md img{max-width:100%;border-radius:6px;}';
+        (document.head || document.documentElement).appendChild(st);
+    }
+
 
     // ========== localStorage 對話歷史管理 ==========
     const HISTORY_KEY = 'mokagi_history_' + CONFIG.user_id + '_' + CONFIG.agent;
@@ -191,7 +274,7 @@
             const fs = msg.role === 'system' ? '11px' : '14px';
             const bubble = document.createElement('div');
             bubble.style.cssText = 'max-width:80%;background:' + bg + ';color:' + tc + ';padding:8px 14px;border-radius:18px;word-break:break-word;white-space:pre-wrap;font-size:' + fs + ';';
-            bubble.textContent = msg.text;
+            if (msg.role === 'user') { bubble.textContent = msg.text; } else { bubble.classList.add('mok-md'); bubble.innerHTML = _mokMd(msg.text); }
             msgDiv.appendChild(bubble);
             messagesDiv.appendChild(msgDiv);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -328,11 +411,11 @@
         div.className = 'mokagi-round';
         div.style.cssText = `
             margin-bottom: 12px;
-            border: 1px solid #3e3e42;
-            border-radius: 8px;
+            border: 1px solid #e6e8eb;
+            border-radius: 10px;
             overflow: hidden;
-            background: #1f1f22;
-            box-shadow: 0 1px 6px rgba(0,0,0,0.35);
+            background: #ffffff;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
         `;
         // 標題列：🔄 第N輪 完成/進行中 + 工具名
         const header = document.createElement('div');
@@ -340,12 +423,12 @@
         header.style.cssText = `
             padding: 6px 12px;
             font-size: 12px;
-            color: #e0a800;
+            color: #b7791f;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            background: #252526;
-            border-bottom: 1px solid #3e3e42;
+            background: #f7f8fa;
+            border-bottom: 1px solid #eceef1;
         `;
         const titleSpan = document.createElement('span');
         titleSpan.className = 'round-title';
@@ -368,7 +451,7 @@
         replyDiv.style.cssText = `
             padding: 8px 12px;
             font-size: 14px;
-            color: #e4e4e7;
+            color: #24292f;
             white-space: pre-wrap;
             word-break: break-word;
             line-height: 1.6;
@@ -381,7 +464,7 @@
     function _mkDetails(kind, summaryText, bodyHtml) {
         const details = document.createElement('details');
         details.className = kind + '-det';
-        details.style.cssText = `background: #1a1a1d; border-top: 1px solid #3e3e42;`;
+        details.style.cssText = `background: #f7f8fa; border-top: 1px solid #eceef1;`;
         const summary = document.createElement('summary');
         summary.textContent = summaryText;
         const _sumColor = kind === 'think' ? '#a09060' : kind === 'tools' ? '#5b9bd5' : kind === 'results' ? '#00b894' : '#7a7a85';
@@ -394,7 +477,7 @@
         `;
         const body = document.createElement('div');
         body.className = 'round-details-body ' + kind + '-body';
-        body.style.cssText = `padding: 4px 12px 10px 12px; font-size: 13px; color: #c0c0c0;`;
+        body.style.cssText = `padding: 4px 12px 10px 12px; font-size: 13px; color: #4b5563;`;
         if (bodyHtml) body.innerHTML = bodyHtml;
         details.appendChild(summary);
         details.appendChild(body);
@@ -410,6 +493,10 @@
         if (title) title.textContent = '🔄 第' + round.iteration + '輪 ' + (round.done ? '完成' : '進行中');
         const tools = el.querySelector('.round-tools');
         if (tools) tools.textContent = round.toolCalls.map(function(t){ return t.name; }).join(', ');
+        var _hasSide = (round.think && round.think.trim().length > 0) || (round.toolCalls && round.toolCalls.length > 0) || (round.toolResults && round.toolResults.length > 0);
+        var _hdr = el.querySelector('.round-header');
+        if (_hdr) _hdr.style.display = _hasSide ? '' : 'none';
+        el.querySelectorAll('details').forEach(function (dt) { dt.style.display = _hasSide ? '' : 'none'; });
     }
 
     function handleStreamEvent(event) {
@@ -442,7 +529,6 @@
                 txt.textContent += thinkContent;
             }
             const det = el ? el.querySelector('.think-det') : null;
-            if (det && !det.open) det.open = true;
             mDiv.scrollTop = mDiv.scrollHeight;
             return;
         }
@@ -477,7 +563,6 @@
                     body.appendChild(row);
                 });
             }
-            if (det && !det.open) det.open = true;
             mDiv.scrollTop = mDiv.scrollHeight;
             return;
         }
@@ -489,24 +574,23 @@
             if (!round) return;
             round.toolResults.push({ name: name, content: content });
             const el = _roundEls[_curRoundIdx];
-            const det = el ? el.querySelector('.res-det') : null;
+            const det = el ? el.querySelector('.results-det') : null;
             const sum = det ? det.querySelector('summary') : null;
             if (sum) sum.textContent = '📦 工具結果 (' + round.toolResults.length + ')';
-            const body = det ? det.querySelector('.res-body') : null;
+            const body = det ? det.querySelector('.results-body') : null;
             if (body) {
                 const row = document.createElement('div');
-                row.style.cssText = 'margin:6px 0;padding:6px 8px;background:#1a2e1a;border-radius:4px;';
+                row.style.cssText = 'margin:6px 0;padding:6px 8px;background:#eef7f2;border-radius:4px;';
                 const nm = document.createElement('div');
                 nm.style.cssText = 'color:#00b894;font-size:12px;font-weight:500;margin-bottom:2px;';
                 nm.textContent = '🔧 ' + name;
                 const txt = document.createElement('div');
-                txt.style.cssText = 'color:#c0c0c0;font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;';
+                txt.style.cssText = 'color:#4b5563;font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;';
                 txt.textContent = String(content).substring(0, 1200);
                 row.appendChild(nm);
                 row.appendChild(txt);
                 body.appendChild(row);
             }
-            if (det && !det.open) det.open = true;
             mDiv.scrollTop = mDiv.scrollHeight;
             return;
         }
@@ -521,7 +605,7 @@
             round.reply += content;
             const el = _roundEls[_curRoundIdx];
             const replyDiv = el ? el.querySelector('.round-reply') : null;
-            if (replyDiv) replyDiv.textContent = round.reply;
+            if (replyDiv) { replyDiv.classList.add('mok-md'); replyDiv.innerHTML = _mokMd(round.reply); }
             mDiv.scrollTop = mDiv.scrollHeight;
             return;
         }
@@ -756,6 +840,12 @@
                     btn.style.color = CONFIG.theme;
                 });
                 btn.addEventListener("click", () => {
+                    // ✅ 快捷回答：有 answer 就直接顯示預設答案，完全不呼叫 LLM
+                    if (item.answer) {
+                        addMessage("user", item.query || item.text);
+                        addMessage("assistant", item.answer, true);
+                        return;
+                    }
                     addMessage("user", item.query);
                     sendViaSSE(item.query);
                 });
@@ -910,6 +1000,7 @@
             }
         `;
         document.head.appendChild(animStyle);
+        try { _mokMdCss(); } catch (e) {}
 
 // 🌓 透明度控制
         const opacitySlider = header.querySelector('#mokagi-opacity-slider');
@@ -1112,7 +1203,7 @@
                 white-space: pre-wrap;
                 font-size: 14px;
             `;
-            bubble.textContent = content;
+            if (role === 'user') { bubble.textContent = content; } else { bubble.classList.add('mok-md'); bubble.innerHTML = _mokMd(content); }
             msgDiv.appendChild(bubble);
             messagesDiv.appendChild(msgDiv);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;

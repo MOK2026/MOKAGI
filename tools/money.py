@@ -188,12 +188,17 @@ def _summarize(subject: str, stop_at: str, log_text: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-def naturalize_money_result(result_str: str) -> str:
-    """把 JSON 結果轉成人話。"""
+async def naturalize_money_result(user_text: str = "", raw_result: str = "", ollama_api: str = None,
+                                  model_name: str = None, temp_msg=None, context=None,
+                                  agent_config: dict = None, result_str: str = None) -> str:
+    """把 JSON 結果轉成人話（框架標準簽名）。"""
+    raw = result_str if result_str is not None else raw_result
     try:
-        d = json.loads(result_str) if isinstance(result_str, str) else result_str
+        d = json.loads(raw) if isinstance(raw, str) else raw
     except Exception:
-        return result_str
+        return raw
+    if not isinstance(d, dict):
+        return raw
     if not d.get("success"):
         return f"❌ 生成失敗：{d.get('error', '未知錯誤')}"
     subject = d.get("subject", "")

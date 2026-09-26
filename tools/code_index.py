@@ -94,6 +94,7 @@ from pathlib import Path
 
 from mok_token import count_tokens, MOK_max_tokens, truncate_by_token
 
+import fcntl
 import chromadb
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
@@ -107,7 +108,19 @@ INDEX_DIRS = [
     os.path.expanduser(f"~/.{MOKAGI_HOME}/html"),
 ]
 CHROMA_PATH = os.path.expanduser(f"~/.{MOKAGI_HOME}/.chroma_data")
+# 多個 agent 進程共用同一個 ChromaDB，重建必須用「跨進程檔案鎖」序列化
+REBUILD_LOCK_PATH = os.path.join(CHROMA_PATH, ".rebuild.lock")
+INDEX_MARKER_PATH = os.path.join(CHROMA_PATH, ".index_built_at")
 COLLECTION_NAME = "code_index"
+# 掃描範圍控制（可用環境變數覆寫）：
+#  MOK_CODE_INDEX_SKIP   要跳過的「路徑片段」，逗號分隔（預設排除爬蟲行銷頁）
+#  MOK_CODE_INDEX_MAX_KB 單檔大小上限（KB），0=不限（預設 300）
+_CODE_INDEX_SKIP = [x.strip() for x in os.environ.get(
+    "MOK_CODE_INDEX_SKIP", "/html/project/,/trash/,/_dev_archive/").split(",") if x.strip()]
+try:
+    _CODE_INDEX_MAX_KB = int(os.environ.get("MOK_CODE_INDEX_MAX_KB", "300") or "0")
+except ValueError:
+    _CODE_INDEX_MAX_KB = 300
 # ==============
 
 # 全域變量
@@ -344,28 +357,126 @@ def _chunk_html_code(content: str, filepath: str) -> List[Dict]:
 
 
 def _scan_files(dirs: List[str]) -> List[str]:
-    """掃描目錄下的所有 Python 和 HTML 檔案"""
+    """掃描目錄下的所有 Python 和 HTML 檔案。
+
+    依 _CODE_INDEX_SKIP（路徑片段黑名單）與 _CODE_INDEX_MAX_KB（單檔大小上限）過濾，
+    避免把爬蟲抓來的大量行銷頁／巨型檔案全部切塊，導致索引暴增到數萬塊、重建動輒
+    十幾分鐘（這正是先前 code_index 逾時 / exit=-11 的根因之一）。
+    """
     files = []
     for dir_path in dirs:
         if not os.path.exists(dir_path):
             continue
         for root, _, filenames in os.walk(dir_path):
+            if any(sk in (root + "/") for sk in _CODE_INDEX_SKIP):
+                continue
             for filename in filenames:
                 # 跳過 __pycache__ 和 .pyc
                 if '__pycache__' in root or filename.endswith('.pyc'):
                     continue
-                if filename.endswith('.py') or filename.endswith('.html'):
-                    files.append(os.path.join(root, filename))
+                if not (filename.endswith('.py') or filename.endswith('.html')):
+                    continue
+                fp = os.path.join(root, filename)
+                if any(sk in fp for sk in _CODE_INDEX_SKIP):
+                    continue
+                if _CODE_INDEX_MAX_KB > 0:
+                    try:
+                        if os.path.getsize(fp) > _CODE_INDEX_MAX_KB * 1024:
+                            continue
+                    except OSError:
+                        continue
+                files.append(fp)
     return files
+
+
+def _newest_source_mtime() -> float:
+    """回傳索引目錄中最新的程式碼檔案修改時間"""
+    newest = 0.0
+    try:
+        for fp in _scan_files(INDEX_DIRS):
+            try:
+                newest = max(newest, os.path.getmtime(fp))
+            except OSError:
+                continue
+    except Exception:
+        return 0.0
+    return newest
+
+
+def _index_is_fresh() -> bool:
+    """索引是否已是最新（沒有程式碼檔案比上次成功重建時間更新）"""
+    try:
+        built_at = os.path.getmtime(INDEX_MARKER_PATH)
+    except OSError:
+        return False
+    return _newest_source_mtime() <= built_at
 
 
 def rebuild_index(force: bool = False) -> str:
     """
     重建程式碼索引（刪除舊索引，重新建立）
     返回操作結果訊息
+
+    重要：多個 agent 進程共用同一個 ChromaDB，重建必須用跨進程檔案鎖序列化，
+    否則會出現 SQLITE_READONLY_DBMOVED（code 1032 attempt to write a readonly
+    database），並讓同時查詢的子進程在原生層 SIGSEGV（exit=-11）或卡到逾時。
+    force=False 時若索引已是最新則直接跳過，避免開機時多個進程同時重建。
     """
-    with _index_operation_lock:
-        return _rebuild_index_locked(force)
+    try:
+        os.makedirs(CHROMA_PATH, exist_ok=True)
+    except OSError:
+        pass
+
+    lock_fd = os.open(REBUILD_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        deadline = time.time() + 90  # 最多等 90 秒取得跨進程鎖
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.time() >= deadline:
+                    return "⏳ 另一個進程正在重建索引，等待 90 秒仍未取得鎖，請稍後再試"
+                time.sleep(1)
+
+        if not force and _index_is_fresh():
+            return "✅ 程式碼索引已是最新，跳過重建（其他進程剛重建過）"
+
+        with _index_operation_lock:
+            result = _rebuild_index_locked(force)
+
+        if isinstance(result, str) and result.startswith("✅"):
+            # 驗證寫入是否真的落地：ChromaDB 被其他進程持有時，寫入會被靜默丟棄；
+            # 此時絕不能更新新鮮度標記，否則索引會「假裝最新」而永不重建。
+            _verify_ok = True
+            try:
+                _expected = 0
+                for _fp in _scan_files(INDEX_DIRS):
+                    try:
+                        _cc = open(_fp, encoding="utf-8", errors="ignore").read()
+                    except Exception:
+                        continue
+                    _expected += len(_chunk_python_code(_cc, _fp) if _fp.endswith(".py") else _chunk_html_code(_cc, _fp))
+                _cnow = _get_collection()
+                _actual = _cnow.count() if _cnow is not None else -1
+                _verify_ok = abs(_actual - _expected) <= max(5, int(0.02 * max(1, _expected)))
+            except Exception:
+                _verify_ok = True
+            if not _verify_ok:
+                return ("❌ 重建未生效（ChromaDB 被其他進程持有，寫入被丟棄）："
+                        f"期望 {_expected} 筆、實際 {_actual} 筆。"
+                        "請改由『持有 DB 的主進程』同進程重建。")
+            try:
+                with open(INDEX_MARKER_PATH, "w") as _mf:
+                    _mf.write(str(time.time()))
+            except OSError:
+                pass
+        return result
+    finally:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        finally:
+            os.close(lock_fd)
 
 
 def _rebuild_index_locked(force: bool = False) -> str:
@@ -401,24 +512,57 @@ def _rebuild_index_locked(force: bool = False) -> str:
     if not all_chunks:
         return "⚠️ 未找到任何可索引的程式碼區塊"
     
-    # 刪除舊索引
+    # 讀取既有索引的 id 與內容雜湊（id 只含檔名+行號，內容改了 id 不變，必須比對內容）
+    existing_ids = set()
+    existing_hash = {}
     try:
-        col.delete(where={})
-    except:
-        pass
+        _ex = col.get(include=["documents"])
+        _ex_ids = _ex.get("ids", []) or []
+        _ex_docs = _ex.get("documents", []) or []
+        existing_ids = set(_ex_ids)
+        for _i in range(min(len(_ex_ids), len(_ex_docs))):
+            existing_hash[_ex_ids[_i]] = hashlib.md5((_ex_docs[_i] or "").encode("utf-8")).hexdigest()
+    except Exception as e:
+        logging.warning(f"讀取既有索引內容失敗（視為全新重建）: {e}")
+        existing_ids = set()
+        existing_hash = {}
+
+    # 只重嵌「新增或內容有變」的區塊，未變動的直接沿用（否則每次重啟都要重嵌上萬個區塊）
+    pending = [
+        c for c in all_chunks
+        if existing_hash.get(c["id"]) != hashlib.md5(c["text"].encode("utf-8")).hexdigest()
+    ]
+    logging.info(f"[code_index] 掃描 {len(all_chunks)} 個區塊，需重嵌 {len(pending)} 個（其餘沿用既有索引）")
     
-    # 批量新增
-    batch_size = 100
-    total = len(all_chunks)
+    # 以 upsert 寫入（同 id 覆蓋），讓查詢端在重建期間仍查得到舊資料
+    batch_size = 256
+    total = len(pending)
+    new_ids = set(c["id"] for c in all_chunks)
     for i in range(0, total, batch_size):
-        batch = all_chunks[i:i+batch_size]
-        col.add(
+        batch = pending[i:i+batch_size]
+        col.upsert(
             documents=[c["text"] for c in batch],
             metadatas=[c["metadata"] for c in batch],
             ids=[c["id"] for c in batch]
         )
-    
-    return f"✅ 程式碼索引已重建：{total} 個區塊，來自 {len(files)} 個檔案"
+
+    # 最後清掉已被刪除或改名的舊區塊
+    stale_ids = list(existing_ids - new_ids)
+    for i in range(0, len(stale_ids), 500):
+        try:
+            col.delete(ids=stale_ids[i:i+500])
+        except Exception as e:
+            logging.warning(f"刪除過期索引區塊失敗: {e}")
+
+    logging.info(
+        f"[code_index] 重建完成：索引共 {len(all_chunks)} 個區塊 / {len(files)} 個檔案"
+        f"（重嵌 {total} 個、清理 {len(stale_ids)} 個過期區塊）"
+    )
+
+    return (
+        f"✅ 程式碼索引已重建：共 {len(all_chunks)} 個區塊，來自 {len(files)} 個檔案"
+        f"（本次重嵌 {total} 個，清理 {len(stale_ids)} 個）"
+    )
 
 
 def search_code(query: str, n_results: int = 10, file_filter: str = None) -> List[Dict]:
@@ -430,6 +574,20 @@ def search_code(query: str, n_results: int = 10, file_filter: str = None) -> Lis
         return _search_code_locked(query, n_results, file_filter)
 
 
+def _query_keyword_tokens(query: str) -> List[str]:
+    """從查詢字串抽出可精確比對的關鍵字（英文識別字 + 中文詞）"""
+    tokens: List[str] = []
+    lower = set()
+    for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", query or ""):
+        if t.lower() not in lower:
+            lower.add(t.lower())
+            tokens.append(t)
+    for t in re.findall(r"[\u4e00-\u9fff]{2,}", query or ""):
+        if t not in tokens:
+            tokens.append(t)
+    return tokens
+
+
 def _search_code_locked(query: str, n_results: int = 10, file_filter: str = None) -> List[Dict]:
     col = _get_collection()
     if col is None:
@@ -439,6 +597,35 @@ def _search_code_locked(query: str, n_results: int = 10, file_filter: str = None
     if file_filter:
         where["file"] = {"$contains": file_filter}
     
+    # 關鍵字精確比對優先：all-MiniLM-L6-v2 是英文模型，中文查詢的語義比對會失準，
+    # 先用原文關鍵字做精確比對，確保中文詞與識別字查詢也能命中。
+    kw_hits = []
+    _kw_seen = set()
+    for _tok in _query_keyword_tokens(query)[:3]:
+        try:
+            _got = col.get(where_document={"$contains": _tok}, limit=5,
+                           include=["documents", "metadatas"])
+        except Exception as _e:
+            logging.warning(f"關鍵字檢索失敗({_tok}): {_e}")
+            continue
+        for _doc, _meta in zip(_got.get("documents", []) or [], _got.get("metadatas", []) or []):
+            if file_filter and file_filter not in str(_meta.get("file", "")):
+                continue
+            _key = (_meta.get("file", ""), _meta.get("line_start", 0), _meta.get("line_end", 0))
+            if _key in _kw_seen:
+                continue
+            _kw_seen.add(_key)
+            kw_hits.append({
+                "text": _doc,
+                "file": _meta.get("file", ""),
+                "type": _meta.get("type", "unknown"),
+                "name": _meta.get("name", ""),
+                "line_start": _meta.get("line_start", 0),
+                "line_end": _meta.get("line_end", 0),
+                "ext": _meta.get("ext", ""),
+                "keyword": True
+            })
+
     try:
         results = col.query(
             query_texts=[query],
@@ -452,8 +639,13 @@ def _search_code_locked(query: str, n_results: int = 10, file_filter: str = None
     docs = results.get("documents", [[]])[0]
     metas = results.get("metadatas", [[]])[0]
     
-    output = []
+    output = list(kw_hits)
+    _out_keys = {(o.get("file", ""), o.get("line_start", 0), o.get("line_end", 0)) for o in output}
     for doc, meta in zip(docs, metas):
+        _k = (meta.get("file", ""), meta.get("line_start", 0), meta.get("line_end", 0))
+        if _k in _out_keys:
+            continue
+        _out_keys.add(_k)
         output.append({
             "text": doc,
             "file": meta.get("file", ""),
@@ -464,7 +656,7 @@ def _search_code_locked(query: str, n_results: int = 10, file_filter: str = None
             "ext": meta.get("ext", "")
         })
     
-    return output
+    return output[:n_results]
 
 
 def get_full_file_content(filepath: str) -> Optional[str]:

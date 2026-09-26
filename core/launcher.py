@@ -18,7 +18,7 @@ import signal
 from pathlib import Path
 
 #PROJECT_DIR = Path.home() / ".mok"
-PROJECT_DIR = Path("/home/ubuntu/.mok")
+PROJECT_DIR = Path("/home/ubuntu/.mok"); import logging, logging.handlers as _lgh; _sse_log = logging.getLogger("mok.sse"); _sse_log.setLevel(logging.INFO); _sse_log.propagate = False; _sse_h = _lgh.RotatingFileHandler(str(PROJECT_DIR / "logs" / "sse.log"), maxBytes=536870912, backupCount=5, encoding="utf-8"); _sse_h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s")); _sse_log.addHandler(_sse_h)  # [E 2026-09-26 衍] SSE 事件獨立日誌檔（512MB 自帶輪替，保留 5 份）
 
 
 AGENT_ROOT = PROJECT_DIR / "agent"   # Agent 配置根目錄
@@ -41,7 +41,7 @@ def stream_reader(pipe, prefix, output_queue):
     for line in pipe:
         if not line:
             break
-        output_queue.put((prefix, line))
+        _sse_log.info("%s %s", prefix, line.rstrip("\n")) if "[SSE" in line[:24] else output_queue.put((prefix, line))  # [E 2026-09-26 衍] SSE 事件改走獨立 log
 
 def get_env_from_config(config_path):
     """直接讀取配置文件，解析 KEY=VALUE 行，忽略註釋和空行"""
@@ -68,6 +68,28 @@ def get_env_from_config(config_path):
 
 
 
+_THREAD_ENV_KEYS = (
+    "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+)
+
+
+def apply_thread_limits(env):
+    """A方案：把 MOK_NUM_THREADS(預設1) 套用到所有 native 執行緒環境變數，
+    避免多個侍女進程各自依偵測核心數開一堆執行緒，造成 CPU 超額訂閱與發熱。"""
+    raw = str(env.get("MOK_NUM_THREADS", "")).strip()
+    try:
+        n = int(raw)
+        if n < 1:
+            n = 1
+    except (TypeError, ValueError):
+        n = 1
+    for _k in _THREAD_ENV_KEYS:
+        env[_k] = str(n)
+    env["TOKENIZERS_PARALLELISM"] = "false"
+    return n
+
+
 def start_bot(agent_name, config_path):
     env = os.environ.copy()
     env.update(get_env_from_config(config_path))
@@ -78,6 +100,7 @@ def start_bot(agent_name, config_path):
         return None
 
     env["MOK_AGENT_NAME"] = agent_name
+    apply_thread_limits(env)
     env["MOKAGI_HOME"] = "mok"
     env["PYTHONPATH"] = f"{str(PROJECT_DIR / 'core')}:{str(PROJECT_DIR)}:{str(AGENT_ROOT)}"
 
@@ -105,6 +128,8 @@ def start_web(port=5000):
         env.update(get_env_from_config(default_cfg))
     env["MOKAGI_HOME"] = "mok"
     env["PYTHONPATH"] = f"{str(PROJECT_DIR / 'core')}:{str(PROJECT_DIR)}:{str(AGENT_ROOT)}"
+
+    apply_thread_limits(env)
 
     web_script = PROJECT_DIR / "frontends" / "mok_web.py"
     if not web_script.exists():

@@ -138,15 +138,27 @@ PLUGIN_INFO = {
 }
 
 import logging
+import re
 import subprocess
+import sys
 import tempfile
 import os
 import json
 import asyncio
+import importlib.util
+from pathlib import Path
 from typing import Optional, Tuple, Dict
 
 import mokagi
-from autofix2 import generate_fix
+
+_CORE_AUTOFIX2 = Path(__file__).resolve().parent.parent / "core" / "autofix2.py"
+_SPEC = importlib.util.spec_from_file_location("core_autofix2", _CORE_AUTOFIX2)
+if _SPEC is not None and _SPEC.loader is not None:
+    _AUTOFIX2_MODULE = importlib.util.module_from_spec(_SPEC)
+    _SPEC.loader.exec_module(_AUTOFIX2_MODULE)
+    generate_fix = _AUTOFIX2_MODULE.generate_fix
+else:
+    raise ImportError("core/autofix2.py not found")
 
 # ------------------------------------------------------------------------------------ #
 # 輔助函數: execute_code_safely
@@ -196,10 +208,10 @@ async def execute_code_safely(code: str) -> Tuple[bool, str, str]:
 # str: 結果訊息，支援 HTML 格式。
 # ------------------------------------------------------------------------------------
 async def handle_autofix(args, chat_id: str = None, agent_config: Optional[Dict] = None) -> str:
+    """Thin compatibility wrapper. All real logic stays in core/autofix2.py."""
     if agent_config is None:
         agent_config = mokagi._agent_config
 
-    # 解析參數
     code = ""
     error = ""
     context = ""
@@ -213,7 +225,7 @@ async def handle_autofix(args, chat_id: str = None, agent_config: Optional[Dict]
         tool_name = args.get("tool_name", "")
         original_args = args.get("original_args", "")
     elif isinstance(args, str):
-        lines = args.strip().split('\n')
+        lines = args.strip().split("\n")
         traceback_start = -1
         for i, line in enumerate(lines):
             if "Traceback (most recent call last)" in line:
@@ -223,83 +235,40 @@ async def handle_autofix(args, chat_id: str = None, agent_config: Optional[Dict]
             code = "\n".join(lines[:traceback_start])
             error = "\n".join(lines[traceback_start:])
         else:
-            # 沒有找到 traceback，假設整個輸入就是錯誤信息
             error = args
             code = "(未提供程式碼)"
 
-    # 處理工具調用修正場景
     if tool_name and not code:
-        # 1. 嘗試自動修復常見錯誤
-        fixed_args = None
-        explanation = None
-        
-        # 1a. 缺少依賴（ModuleNotFoundError）
-        if "ModuleNotFoundError" in error or "No module named" in error:
-            import re
-            match = re.search(r"ModuleNotFoundError: No module named '([^']+)'", error)
-            if match:
-                package = match.group(1)
-                # 嘗試自動 pip install
-                result = subprocess.run(f"pip install --user {package}", shell=True, capture_output=True, text=True, timeout=300)
-                if result.returncode == 0:
-                    fixed_args = original_args   # 參數不變，直接重試
-                    explanation = f"已自動安裝缺失套件 {package}。"
-                else:
-                    return json.dumps({"fixed": False, "error": f"無法自動安裝 {package}，請手動安裝。"})
-        # 1b. 參數格式錯誤（例如 admin 工具收到 dict）
-        elif "strip" in error and "dict" in error:
-            # 嘗試將 original_args 中的字典轉換為字符串
-            try:
-                if isinstance(original_args, dict):
-                    # 對於 admin 工具，特殊處理
-                    if tool_name == "admin":
-                        # original_args 可能已經是 {"action":"exec","args":"..."}
-                        action = original_args.get("action", "")
-                        args_val = original_args.get("args", "")
-                        if action:
-                            fixed_args = f"{action} {args_val}".strip()
-                        else:
-                            fixed_args = json.dumps(original_args)
-                    else:
-                        fixed_args = json.dumps(original_args)
-                    explanation = "已將參數從字典轉換為字符串。"
-                else:
-                    # 嘗試用 LLM 生成修正參數
-                    fixed_args, explanation = await generate_fix("", error, context, tool_name, json.dumps(original_args), llm_func=mokagi.call_llm, agent_config=agent_config, mokagi_home=mokagi.MOKAGI_home)
-            except:
-                fixed_args, explanation = await generate_fix("", error, context, tool_name, json.dumps(original_args), llm_func=mokagi.call_llm, agent_config=agent_config, mokagi_home=mokagi.MOKAGI_home)
-        else:
-            # 其他錯誤，使用 LLM 生成修正參數
-            fixed_args, explanation = await generate_fix("", error, context, tool_name, json.dumps(original_args), llm_func=mokagi.call_llm, agent_config=agent_config, mokagi_home=mokagi.MOKAGI_home)
-
+        fixed_args, explanation = await generate_fix(
+            "",
+            error,
+            context,
+            tool_name,
+            json.dumps(original_args, ensure_ascii=False),
+            llm_func=mokagi.call_llm,
+            agent_config=agent_config,
+            mokagi_home=mokagi.MOKAGI_home,
+        )
         if fixed_args is None:
-            return json.dumps({"fixed": False, "error": explanation})
-        
-        # 返回可直接重試的修正參數
-        return json.dumps({"fixed": True, "args": fixed_args, "explanation": explanation})
+            return json.dumps({"fixed": False, "error": explanation}, ensure_ascii=False)
+        return json.dumps({"fixed": True, "args": fixed_args, "explanation": explanation}, ensure_ascii=False)
 
-    # 代碼修正場景
     if not code or code == "(未提供程式碼)":
-        """返回 自動修正程式碼錯誤 幫助文本"""
-        help_text = f'''
-{PLUGIN_INFO["icon"]} 自動修正程式碼錯誤說明：
-
-自動修正程式碼錯誤
-（提供錯誤訊息和程式碼，AI 嘗試生成修正版本）
+        help_text = f"""
+{PLUGIN_INFO['icon']} 自動修正程式碼錯誤說明：
 
 使用方法：
-    <pre>/autofix [錯誤訊息]</pre>  
-    或
-    在工具調用失敗時自動觸發
+    /autofix [錯誤訊息]
+或在工具調用失敗時自動觸發
 
-參數說明：
-    - 可提供原始程式碼和錯誤訊息
-    - 或提供 tool_name、original_args 和 error 來修正工具調用參數
+參數：
+    - code：原始 Python 程式碼
+    - error：錯誤訊息
+    - context：額外上下文
+    - tool_name：工具名稱
+    - original_args：原始參數
 
-=====
-🧩 自然語言意圖辨識：
-'''
-        # 動態添加 intent_keywords（不轉義）
+"""
         for keyword, cmd in PLUGIN_INFO["intent_keywords"]:
             help_text += f'   "{keyword}" → {cmd}\n'
         return help_text
@@ -313,13 +282,17 @@ async def handle_autofix(args, chat_id: str = None, agent_config: Optional[Dict]
             "original_args": str(args)
         }, ensure_ascii=False)
 
-    # 產生修正版本
-    fixed_code, explanation = await generate_fix(code, error, context, llm_func=mokagi.call_llm, agent_config=agent_config, mokagi_home=mokagi.MOKAGI_home)
+    fixed_code, explanation = await generate_fix(
+        code,
+        error,
+        context,
+        llm_func=mokagi.call_llm,
+        agent_config=agent_config,
+        mokagi_home=mokagi.MOKAGI_home,
+    )
     if fixed_code is None:
         return f"❌ 無法生成修正程式碼：{explanation}"
 
-    #可選：自動執行修正後的程式碼以驗證（需使用者確認，這裡先不自動執行）
-    # 改為提供修正程式碼，讓使用者複製或確認後再執行
     result = f"""🔧 自動修正建議
 
 {explanation}
@@ -327,37 +300,31 @@ async def handle_autofix(args, chat_id: str = None, agent_config: Optional[Dict]
 ```python
 {fixed_code}
 ```
-請複製上方程式碼並再次執行。如果需要我自動執行修正後的程式碼。
+請複製上方程式碼並再次執行。
 """
 
-    # autofix.py - handle_autofix 函數末尾
-    from admin import request_confirmation, is_admin
-    if chat_id and is_admin(chat_id, agent_config):
-        token = request_confirmation(
-            chat_id=chat_id,
-            cmd_type="autofix_exec",
-            args=fixed_code,
-            description="執行自動修正後的 Python 程式碼"
-        )
-        result += f"\n\n⚠️ 將執行修正後的程式碼，請確認：\n<pre>/admin confirm {token}</pre>"
-    else:
-        result += "\n\n（非管理員無法執行修正程式碼）"
+    try:
+        from admin import request_confirmation, is_admin
+        if chat_id and is_admin(chat_id, agent_config):
+            token = request_confirmation(
+                chat_id=chat_id,
+                cmd_type="autofix_exec",
+                args=fixed_code,
+                description="執行自動修正後的 Python 程式碼",
+            )
+            result += f"\n\n⚠️ 將執行修正後的程式碼，請確認：\n<pre>/admin confirm {token}</pre>"
+        else:
+            result += "\n\n（非管理員無法執行修正程式碼）"
+    except Exception:
+        pass
 
     return result
 
-# ------------------------------------------------------------------------------------
-# 額外功能：處理使用者確認執行修正程式碼
-# 這需要掛接到 mokagi.process_message 的確認流程，或者單獨提供一個命令 /confirm_fix
-# 但為了最小改動，我們不在本工具中實現完整確認邏輯，僅提供修正建議。
-# 如果希望集成確認機制，可以擴展 admin.py 的確認碼機制或使用 _pending_confirm。
-# ------------------------------------------------------------------------------------
 
 async def execute_autofix_code(code: str) -> tuple:
-    """實際執行修正後的 Python 代碼"""
-    from autofix import execute_code_safely
+    """實際執行修正後的 Python 代碼。"""
     success, out, err = await execute_code_safely(code)
     if success:
         result = f"✅ 修正代碼執行成功\n輸出：\n{out[:1000]}" if out else "✅ 修正代碼執行成功（無輸出）"
         return True, result
-    else:
-        return False, f"❌ 執行修正代碼時出錯：\n{err[:1000]}"
+    return False, f"❌ 執行修正代碼時出錯：\n{err[:1000]}"

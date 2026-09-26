@@ -13,8 +13,8 @@ import sys
 import json
 from functools import partial
 
-from telegram import Update, BotCommand
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 # 導入統一核心模塊
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -124,7 +124,7 @@ async def _cleanup_working_video(chat_id: str, context, current_msg_id: int = No
             pass  # 消息可能已被刪除
 
 # ================== 流式回調函數（核心） ==================
-async def stream_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, temp_msg, state: dict, event: dict):
+async def stream_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, temp_msg, state: dict, event: dict, user_text: str = ""):
     """
     處理 mokagi 產生的事件，實時更新 Telegram 消息
     event 格式：
@@ -172,8 +172,100 @@ async def stream_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             # 清理累積器，為下一次對話準備
             state["think_content"] = ""
             state["full_reply"] = ""
+            # ✨ A/B: girl gate — 偵測一般模型的安全拒答 → GIRL_AUTO=1 直接開 girl，否則送確認按鈕
+            try:
+                import girl_gate
+                g = girl_gate.check(user_text, final_reply, MOK_AGENT_NAME)
+                if g["needs_girl"]:
+                    girl_gate.save_pending(str(update.effective_chat.id), user_text=user_text)
+                    if g.get("auto"):
+                        # ★ GIRL_AUTO=1：檢查到色情過濾(安全拒答) → 直接打開 girl 模型
+                        try:
+                            import girl_engine as _ge_auto
+                            _ge_auto.spawn_auto_start(str(update.effective_chat.id), MOK_AGENT_NAME)
+                            _auto_txt = "🚦 偵測到一般模型安全拒答（色情過濾）→ 已直接幫主人打開 vast girl 模型（qwen-Claude 27B），上線後會自動切換。"
+                        except Exception as _ae:
+                            _auto_txt = f"🚦 偵測到安全拒答，但自動開 girl 失敗：{_ae}"
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text=_auto_txt,
+                        )
+                    else:
+                        kb = InlineKeyboardMarkup([[
+                            InlineKeyboardButton("🖥️ 開 vast girl（qwen-Claude）", callback_data="girl_go"),
+                            InlineKeyboardButton("不用", callback_data="girl_no"),
+                        ]])
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text="🧠 一般模型出現安全拒答。要切到「vast girl」引擎（qwen-Claude 27B）重新回答嗎？",
+                            reply_markup=kb,
+                        )
+            except Exception as ge:
+                logging.warning(f"girl_gate 失敗: {ge}")
     except Exception as e:
         logging.error(f"流式回調出錯: {e}")
+
+
+# ================== girl 引擎確認按鈕 callback（B/D/E） ==================
+async def girl_confirm_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """「開 vast girl / 不用」按鈕回調：no → 關閉；go → 呼叫 girl_engine.request_girl_start"""
+    q = update.callback_query
+    if q is None:
+        return
+    await q.answer()
+    try:
+        chat_id = str(q.message.chat_id)
+        if q.data == "girl_no":
+            try:
+                await q.edit_message_text(f"👌 好的主人～{MOK_AGENT_NAME}維持原樣，不開 vast girl 了。需要時再叫{MOK_AGENT_NAME}～")
+            except Exception:
+                pass
+            return
+        if q.data == "girl_go":
+            try:
+                import girl_engine
+                ok, msg = await girl_engine.request_girl_start(chat_id, MOK_AGENT_NAME)
+            except Exception as ge:
+                ok, msg = False, f"❌ girl_engine 呼叫失敗: {ge}"
+            if ok:
+                # E 里程碑：引擎已上線 → 切 MOK_CURRENT_MODEL=girl:qwen-Claude + 延遲重載
+                try:
+                    import girl_switch
+                    s_ok, s_msg = girl_switch.switch(MOK_AGENT_NAME)
+                    msg = msg + "\n" + s_msg if s_ok else msg
+                except Exception as se:
+                    msg = msg + f"\n(girl_switch 失敗: {se})"
+                try:
+                    # E reload：通知前端熱重載（絕不 pm2 restart mok_agi）
+                    import urllib.request as _ur
+                    _req = _ur.Request("http://127.0.0.1:5000/api/girl/reload",
+                                       data=json.dumps({"agent": MOK_AGENT_NAME}).encode("utf-8"),
+                                       headers={"Content-Type": "application/json"}, method="POST")
+                    _ur.urlopen(_req, timeout=5).read()
+                    msg = msg + "\n🔄 已通知前端熱重載，切換至 girl:qwen-Claude 即刻生效（不重啟服務）。"
+                except Exception:
+                    pass
+            msg = f"🖥️ 收到主人～{MOK_AGENT_NAME}正在幫您開機 vast girl 引擎（qwen-Claude 27B）。\n\n" + msg
+            # ✨ 侍女以「對話回答」形式輸出開機狀態：發一則獨立訊息（不是只改那顆按鈕的彈出提示），
+            #    TG 訊息本身會保留，所以換侍女／重開對話後都還看得到，不會不見。
+            # 先把原本那顆按鈕訊息收掉鍵盤、改成簡短狀態，避免重複觸發。
+            try:
+                await q.edit_message_text("🖥️ 已為主人按下「開 vast girl」，開機狀態請看下方對話👇")
+            except Exception:
+                try:
+                    await q.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+            try:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
+            except Exception:
+                # 真的發不出去時，退而求其次：至少把按鈕訊息改成開機狀態
+                try:
+                    await q.edit_message_text(msg)
+                except Exception:
+                    pass
+    except Exception as e:
+        logging.warning(f"girl_confirm_cb 失敗: {e}")
 
 
 # ================== Telegram 命令處理器 ==================
@@ -376,7 +468,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     temp_msg = await update.message.reply_text("💭 思考中...")
     try:
-        cb = partial(stream_callback, update, context, temp_msg, stream_state)
+        cb = partial(stream_callback, update, context, temp_msg, stream_state, user_text)
         await process_message(user_id=chat_id, text=user_text, stream_callback=cb, agent_config=mokagi._agent_config)
     except Exception as e:
         logging.exception("處理消息時出錯")
@@ -416,6 +508,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(CallbackQueryHandler(girl_confirm_cb, pattern="^(girl_go|girl_no)$"))
     
 
 

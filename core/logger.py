@@ -8,8 +8,8 @@ import os, re, json
 from datetime import datetime
 from typing import Optional, Callable
 
-# 清理舊日誌，只保留最新 10 條
-logs_keep = 10
+# 清理舊日誌，只保留最新 50 條（做夢補丁A：做夢間隔內舊log不再被滾掉，避免漏內容）
+logs_keep = 50
 
 
 
@@ -30,6 +30,18 @@ class WorkflowLogger:
             log_error(f"搜索失敗: {error}", "web_search")
 
     """
+
+    # 批次E：日誌檔名標題取「內文首 X 字」
+    LOG_TITLE_CHARS = 30
+
+    @classmethod
+    def _make_log_title(cls, raw):
+        """取內文首 X 字當日誌檔名標題：只取第一行、壓縮空白、清掉不安全字元。"""
+        text = "" if raw is None else str(raw)
+        text = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")[0]
+        text = re.sub(r"\s+", " ", text).strip()
+        safe = re.sub(r"[^\w\-_.]", "_", text[: cls.LOG_TITLE_CHARS]).strip("_.")
+        return safe or "chat"
 
     def __init__(
         self,
@@ -67,13 +79,13 @@ class WorkflowLogger:
         os.makedirs(base_dir, exist_ok=True)
         # 清理舊日誌，只保留最新 10 條
         self._cleanup_old_logs(base_dir, keep=logs_keep)
-        # ===== 修改：優先使用外部傳入的 LLM 標題 =====
+        # ===== 批次E：日誌檔名標題取「內文首 X 字」 =====
+        raw_title = ""
         if title and isinstance(title, str) and title.strip():
-            safe_title = re.sub(r'[^\w\-_\.]', '_', title.strip()[:20])
-        elif goal and isinstance(goal, str):
-            safe_title = re.sub(r'[^\w\-_\.]', '_', goal[:10])
-        else:
-            safe_title = "chat"
+            raw_title = title
+        elif goal and isinstance(goal, str) and goal.strip():
+            raw_title = goal
+        safe_title = self._make_log_title(raw_title)
         # ===== 結束 =====
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_path = os.path.join(base_dir, f"{timestamp}_{safe_title}.md")
@@ -195,7 +207,7 @@ class WorkflowLogger:
         """事後更新日誌標題（重新命名檔案），用於在輸出完成後更新標題"""
         if not new_title or not isinstance(new_title, str) or not new_title.strip():
             return
-        safe_new = re.sub(r'[^\w\-_\.]', '_', new_title.strip()[:20])
+        safe_new = self._make_log_title(new_title)   # 批次E：重新命名也取內文首 X 字
         dir_name = os.path.dirname(self.log_path)
         timestamp = os.path.basename(self.log_path).split("_")[0]
         new_path = os.path.join(dir_name, f"{timestamp}_{safe_new}.md")

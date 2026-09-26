@@ -81,6 +81,10 @@ PLUGIN_INFO = {
         ("/獲取會話", "/memory get_conversation"),
         ("/會話ID", "/memory get_conversation"),
         ("/修id", "/memory patch_conv_id"),
+        ("/記憶抽取", "/memory autoextract"),
+        ("/記憶整理", "/memory maintain"),
+        ("/記憶衰減", "/memory maintain"),
+        ("/更新檔案", "/memory profile"),
     ],
     "update":"202608260224_我覺得可以版",
 
@@ -113,7 +117,8 @@ PLUGIN_INFO = {
                         "forgetall", "rebuild_kb", "list_kb",
                         "get_full_history", "semantic_search", "get_conversation",
                         "get_recent_summary",
-                        "patch_conv_id"
+                        "patch_conv_id",
+                        "autoextract", "maintain", "profile"
                     ],
                     "description": (
                         "要執行的操作。各 action 的詳細說明（含是否需要 content）：\n\n"
@@ -584,6 +589,10 @@ async def recall_memory(chat_id: int, query: str, n_results: int = 1, include_kb
             )
             docs = results.get("documents", [[]])[0]
             if docs:
+                try:
+                    _touch_access(col, (results.get("ids") or [[]])[0])
+                except Exception:
+                    pass
                 parts.append("\n".join(docs))
     except Exception as e:
         logging.error(f"使用者記憶檢索錯誤: {e}")
@@ -618,6 +627,446 @@ async def recall_memory(chat_id: int, query: str, n_results: int = 1, include_kb
 
 
 
+# ============================================================================ #
+# 記憶增強層（Supermemory 對標）
+#   自動抽取 / 衝突消解 / 衰減遺忘 / profile 雙段化
+#   設計：舊資料仍可用；新資料帶 last_access/access_count/source/stability 以支援衰減。
+#   開關（可寫在 agent 設定檔，未設用預設）：
+#     MOK_MEM_AUTO_EXTRACT=1      每輪自動抽取 facts（預設開）
+#     MOK_MEM_DEDUP_SIM=0.85      相似度門檻，超過則 update 而非 insert
+#     MOK_MEM_DECAY_HALFLIFE=30   半衰期（天）
+#     MOK_MEM_GC_MIN_SCORE=0.15   低於此分數即遺忘（GC）
+#     MOK_MEM_GC_PROTECT_STATIC=1 1=static/manual 記憶永不被 GC
+#     MOK_MEM_PROFILE_AUTO=1      1=每輪新增 facts 後自動刷新 user.md 動態段（未設時，已 profile 化的 agent 也會刷新）
+#     MOK_MEM_PROFILE_REFRESH_SEC=3600 profile 自動刷新節流秒數（預設 3600）
+# ============================================================================ #
+_profile_refresh_ts = {}
+
+def _mem_cfg(agent_config, key, default):
+    try:
+        v = (agent_config or {}).get(key)
+        return default if v in (None, "") else v
+    except Exception:
+        return default
+
+def _mem_f(agent_config, key, default):
+    try:
+        return float(_mem_cfg(agent_config, key, default))
+    except Exception:
+        return float(default)
+
+def _mem_bool(agent_config, key, default=True):
+    v = str(_mem_cfg(agent_config, key, "1" if default else "0")).strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+def _similarity_from_distance(d):
+    try:
+        d = float(d)
+    except Exception:
+        return 0.0
+    if d < 0:
+        d = 0.0
+    return 1.0 / (1.0 + d)
+
+def _find_similar(col, chat_id, content, top=5):
+    """回傳 [{id, doc, sim, meta}]，sim 0~1，越大越相似。"""
+    where = {"chat_id": str(chat_id)} if chat_id is not None else None
+    try:
+        res = col.query(query_texts=[content], n_results=top,
+                        where=where, include=["documents", "metadatas", "distances"])
+    except Exception as e:
+        logging.error(f"[記憶] 相似查詢失敗: {e}")
+        try:
+            res = col.query(query_texts=[content], n_results=top)
+        except Exception:
+            return []
+    ids = (res.get("ids") or [[]])[0]
+    docs = (res.get("documents") or [[]])[0]
+    dists = (res.get("distances") or [[]])[0]
+    metas = (res.get("metadatas") or [[]])[0]
+    out = []
+    for i in range(len(ids)):
+        out.append({
+            "id": ids[i],
+            "doc": docs[i] if i < len(docs) else "",
+            "sim": _similarity_from_distance(dists[i] if i < len(dists) else 9.9),
+            "meta": (metas[i] if i < len(metas) and metas[i] else {}) or {},
+        })
+    return out
+
+def smart_remember(col, chat_id, content, source="manual", dedup_sim=0.85, agent_config=None):
+    """衝突消解寫入：與既有記憶相似度 > dedup_sim → update，否則 insert。"""
+    content = (content or "").strip()
+    if not content:
+        return {"action": "skip"}
+    if col is None:
+        return {"action": "error", "msg": "collection 未就緒"}
+    now = time.time()
+    cands = [c for c in _find_similar(col, chat_id, content, top=5) if c["sim"] >= dedup_sim]
+    cands.sort(key=lambda c: c["sim"], reverse=True)
+    if cands:
+        best = cands[0]
+        meta = dict(best.get("meta") or {})
+        old_doc = best.get("doc") or meta.get("content") or ""
+        new_doc = content if len(content) >= len(old_doc) else old_doc
+        meta.update({
+            "chat_id": str(chat_id),
+            "content": new_doc,
+            "source": meta.get("source") or source,
+            "updated_at": now,
+            "last_access": now,
+            "access_count": int(meta.get("access_count") or 0) + 1,
+        })
+        meta.setdefault("created_at", now)
+        meta.setdefault("stability", "static" if meta.get("source") in ("manual", "static") else "dynamic")
+        try:
+            col.update(ids=[best["id"]], documents=[new_doc], metadatas=[meta])
+            return {"action": "update", "id": best["id"], "old": old_doc, "new": new_doc,
+                    "sim": round(best["sim"], 3)}
+        except Exception as e:
+            logging.error(f"[記憶] update 失敗，改為 insert: {e}")
+    new_id = f"{chat_id}_{int(now * 1000)}_{abs(hash(content)) % 100000}"
+    meta = {
+        "chat_id": str(chat_id), "content": content, "source": source,
+        "created_at": now, "updated_at": now, "last_access": now, "access_count": 0,
+        "stability": "static" if source in ("manual", "static") else "dynamic",
+    }
+    try:
+        col.add(documents=[content], metadatas=[meta], ids=[new_id])
+        return {"action": "insert", "id": new_id, "new": content}
+    except Exception as e:
+        logging.error(f"[記憶] insert 失敗: {e}")
+        return {"action": "error", "msg": str(e)}
+
+def _touch_access(col, ids):
+    """命中檢索時更新 last_access / access_count（用於衰減）。"""
+    ids = [i for i in (ids or []) if i]
+    if not ids or col is None:
+        return
+    try:
+        got = col.get(ids=ids)
+    except Exception as e:
+        logging.error(f"[記憶] touch get 失敗: {e}")
+        return
+    gids = got.get("ids") or []
+    docs = got.get("documents") or []
+    metas = got.get("metadatas") or []
+    for i, rid in enumerate(gids):
+        m = dict(metas[i] or {}) if i < len(metas) and metas[i] else {}
+        m["last_access"] = time.time()
+        m["access_count"] = int(m.get("access_count") or 0) + 1
+        try:
+            kw = {"ids": [rid], "metadatas": [m]}
+            if i < len(docs) and docs[i]:
+                kw["documents"] = [docs[i]]
+            col.update(**kw)
+        except Exception as e:
+            logging.error(f"[記憶] touch update 失敗: {e}")
+
+def _decay_score(meta, now=None, half_life_days=30.0):
+    """0~1 保留分數：越舊、越少用 → 越低。"""
+    now = now or time.time()
+    meta = meta or {}
+    try:
+        last = float(meta.get("last_access") or meta.get("updated_at") or meta.get("created_at") or 0)
+    except Exception:
+        last = 0.0
+    if last <= 0:
+        return 0.0
+    age_days = max(0.0, (now - last) / 86400.0)
+    recency = 0.5 ** (age_days / max(1.0, half_life_days))
+    acc = int(meta.get("access_count") or 0)
+    freq = 1.0 - 0.5 ** (acc + 1)
+    return round(recency * (0.5 + 0.5 * freq), 4)
+
+def gc_user_memory(agent_name, chat_id=None, dry_run=True, agent_config=None, max_scan=20000):
+    """衰減遺忘：刪除分數低於門檻的動態記憶。"""
+    col = _col(agent_name)
+    if col is None:
+        return {"ok": False, "msg": "collection 未就緒"}
+    return _gc_on_col(col, chat_id=chat_id, dry_run=dry_run, agent_config=agent_config, max_scan=max_scan)
+
+def _gc_on_col(col, chat_id=None, dry_run=True, agent_config=None, max_scan=20000):
+    min_score = _mem_f(agent_config, "MOK_MEM_GC_MIN_SCORE", 0.15)
+    half_life = _mem_f(agent_config, "MOK_MEM_DECAY_HALFLIFE", 30.0)
+    protect = _mem_bool(agent_config, "MOK_MEM_GC_PROTECT_STATIC", True)
+    include_legacy = _mem_bool(agent_config, "MOK_MEM_GC_INCLUDE_LEGACY", False)
+    where = {"chat_id": str(chat_id)} if chat_id is not None else None
+    try:
+        got = col.get(where=where, limit=max_scan)
+    except Exception as e:
+        return {"ok": False, "msg": f"讀取失敗: {e}"}
+    gids = got.get("ids") or []
+    metas = got.get("metadatas") or []
+    now = time.time()
+    dead, kept = [], 0
+    for i, rid in enumerate(gids):
+        m = metas[i] if i < len(metas) and metas[i] else {}
+        src = m.get("source")
+        st = str(m.get("stability") or "")
+        is_dynamic = (st == "dynamic") or (src in ("auto", "dynamic"))
+        # 保護：舊資料 / 靜態事實 / manual 一律不衰減（除非明示 include_legacy 且有時間戳）
+        if not is_dynamic:
+            if not (include_legacy and (m.get("created_at") or m.get("last_access") or m.get("updated_at"))):
+                kept += 1
+                continue
+        if protect and (src in ("manual", "static") or st == "static"):
+            kept += 1
+            continue
+        if _decay_score(m, now, half_life) < min_score:
+            dead.append(rid)
+        else:
+            kept += 1
+    if dead and not dry_run:
+        try:
+            col.delete(ids=dead)
+        except Exception as e:
+            return {"ok": False, "msg": f"刪除失敗: {e}"}
+    return {"ok": True, "scanned": len(gids), "deleted": len(dead), "kept": kept,
+            "dry_run": bool(dry_run), "min_score": min_score, "half_life": half_life}
+
+def _col_existing(agent_name):
+    """只回傳已存在的 collection（不建立），避免替沒有記憶的 agent 生出空表。"""
+    global _client
+    try:
+        if _client is None:
+            _client = chromadb.PersistentClient(path=CHROMA_PATH, settings=Settings(anonymized_telemetry=False))
+        return _client.get_collection(name=f"{_get_safe_agent_name(agent_name)}_user_memory")
+    except Exception:
+        return None
+
+def gc_all_agents(dry_run=True, agent_config=None):
+    out = {}
+    for ag in _all_agent_names():
+        try:
+            col = _col_existing(ag)
+            if col is None:
+                continue
+            out[ag] = _gc_on_col(col, dry_run=dry_run, agent_config=agent_config)
+        except Exception as e:
+            out[ag] = {"ok": False, "msg": str(e)}
+    return out
+
+def _all_agent_names():
+    base = os.path.expanduser("~/.mok/agent")
+    try:
+        return sorted(n for n in os.listdir(base) if os.path.isdir(os.path.join(base, n)))
+    except Exception:
+        return []
+
+def _resolve_llm_cfg(agent_config):
+    """自動抽取用：挑一個「真的可用」的模型配置（小模型優先）。
+
+    mokagi 的 call_llm 只認 MOK_MODEL_NAME / _url / _token 三件套；
+    但設定檔常把「現用模型」放在 MOK_CURRENT_MODEL，主 token 卻是空的
+    （例如主任務模型走本機代理）。此時若直接判斷 MOK_MODEL_token 為空就放棄，
+    自動抽取會永遠回 no_token、整個功能啞掉。
+
+    優先序：
+      1) 主模型本身有 token → 直接用
+      2) MOK_CURRENT_MODEL 指定的模型（在編號模型表中找到同名者）→ 用它的 name/url/token
+      3) 任何帶 token 的編號模型
+      4) 主模型是 localhost（本機 Ollama）→ 仍可嘗試
+    回傳 (cfg, note)；找不到可用者回傳 (None, 原因)。
+    """
+    cfg = dict(agent_config or {})
+    if str(cfg.get("MOK_MODEL_token") or "").strip():
+        return cfg, "primary"
+    cur = str(cfg.get("MOK_CURRENT_MODEL") or "").strip()
+    cands = []
+    for i in [""] + [str(n) for n in range(2, 21)]:
+        name = str(cfg.get("MOK_MODEL_NAME" + i) or "").strip()
+        tok = str(cfg.get("MOK_MODEL_token" + i) or "").strip()
+        url = str(cfg.get("MOK_MODEL_url" + i) or "").strip()
+        if name and tok:
+            cands.append((i, name, tok, url))
+    if not cands:
+        u = str(cfg.get("MOK_MODEL_url") or "")
+        if "localhost" in u or "127.0.0.1" in u:
+            return cfg, "local"
+        return None, "no_token"
+    pick = None
+    for c in cands:
+        if cur and c[1] == cur:
+            pick = c
+            break
+    if pick is None:
+        pick = cands[0]
+    _i, _name, _tok, _url = pick
+    cfg["MOK_MODEL_NAME"] = _name
+    cfg["MOK_MODEL_token"] = _tok
+    if _url:
+        cfg["MOK_MODEL_url"] = _url
+    return cfg, "fallback:" + _name
+
+
+async def auto_extract_facts(user_key, user_msg, assistant_reply, agent_config=None):
+    """用小模型抽取 1~3 條事實，衝突消解後寫入 user_memory。"""
+    if agent_config is None:
+        try:
+            import mokagi
+            agent_config = mokagi._agent_config
+        except Exception:
+            agent_config = {}
+    if not _mem_bool(agent_config, "MOK_MEM_AUTO_EXTRACT", True):
+        return "disabled"
+    agent_name = agent_config.get("MOK_AGENT_NAME", "助手")
+    owner = agent_config.get("MOK_ADMIN_NAME", "用戶")
+    _rc, _llm_note = _resolve_llm_cfg(agent_config)
+    if _rc is None:
+        return "no_token"
+    agent_config = _rc
+    col = _col(agent_name)
+    if col is None:
+        return "no_collection"
+    prompt = (
+        "你是記憶抽取器。從以下一輪對話中，抽取 1~3 條「關於%s的、值得長期記住的客觀事實或偏好」。"
+        "用繁體中文，每條一句、精簡，不要臆測。\n"
+        "只輸出 JSON 陣列，不要任何其他文字。若沒有值得長期記住的資訊，輸出 []。\n"
+        "範例：[\"%s喜歡喝冰美式\", \"%s的時區是 UTC+8\"]\n\n%s: %s\n%s: %s"
+    ) % (owner, owner, owner, owner, (user_msg or "")[:500], agent_name, (assistant_reply or "")[:500])
+    try:
+        import mokagi
+        result = await mokagi.call_llm(
+            prompt=prompt, user_id="system", stream=False, temperature=0.2,
+            agent_config=agent_config, include_soul=False, num_predict=4096,
+        )
+        text = result if isinstance(result, str) else (result or {}).get("content", "")
+    except Exception as e:
+        logging.warning(f"[記憶抽取] LLM 失敗: {e}")
+        return f"llm_error: {e}"
+    facts = _parse_facts(text)
+    if not facts:
+        return "no_facts"
+    dedup = _mem_f(agent_config, "MOK_MEM_DEDUP_SIM", 0.85)
+    n_ins = n_upd = 0
+    for f in facts:
+        r = smart_remember(col, user_key, f, source="auto", dedup_sim=dedup, agent_config=agent_config)
+        if r.get("action") == "insert":
+            n_ins += 1
+        elif r.get("action") == "update":
+            n_upd += 1
+    # ===== profile 自動維護：有新 facts 時，節流刷新 user.md 的動態段 =====
+    if n_ins or n_upd:
+        _maybe_refresh_profile(agent_name, agent_config)
+    return f"facts={len(facts)} insert={n_ins} update={n_upd}"
+
+def _maybe_refresh_profile(agent_name, agent_config=None):
+    """節流刷新 agent 的 soul/user.md 動態段。
+
+    只在「已 profile 化」（user.md 內含動態標記）或 MOK_MEM_PROFILE_AUTO=1 時才動手，
+    避免誤改尚未啟用此功能的 agent。預設每小時最多刷新一次。
+    """
+    try:
+        path = os.path.join(os.path.expanduser("~/.mok/agent"), agent_name, "soul", "user.md")
+        if not os.path.exists(path):
+            return
+        if not _mem_bool(agent_config, "MOK_MEM_PROFILE_AUTO", False):
+            with open(path, "r", encoding="utf-8") as f:
+                if _PROFILE_BEGIN not in f.read():
+                    return
+        gap = _mem_f(agent_config, "MOK_MEM_PROFILE_REFRESH_SEC", 3600)
+        now = time.time()
+        if now - float(_profile_refresh_ts.get(agent_name) or 0) < gap:
+            return
+        _profile_refresh_ts[agent_name] = now
+        update_user_profile(agent_name, agent_config, dry_run=False)
+    except Exception as e:
+        logging.warning(f"[profile] 自動刷新失敗: {e}")
+
+def _parse_facts(text):
+    text = (text or "").strip()
+    if not text:
+        return []
+    m = re.search(r"\[.*\]", text, re.S)
+    if not m:
+        return []
+    try:
+        arr = json.loads(m.group(0))
+    except Exception:
+        return []
+    out = []
+    for x in arr:
+        if isinstance(x, str) and x.strip():
+            sx = x.strip()
+            if len(sx) <= 200 and sx not in out:
+                out.append(sx)
+    return out[:3]
+
+_PROFILE_BEGIN = "<!-- MOK_PROFILE_DYNAMIC_BEGIN -->"
+_PROFILE_END = "<!-- MOK_PROFILE_DYNAMIC_END -->"
+# 靜態段標記（長期事實，永不自動改）；補上讓雙段結構對稱、可被機器辨識。
+_STATIC_BEGIN = "<!-- MOK_PROFILE_STATIC_BEGIN -->"
+_STATIC_END = "<!-- MOK_PROFILE_STATIC_END -->"
+
+def _sanitize_md_line(s):
+    return (s or "").replace("=", "\uff1d").replace("\n", " ").strip()
+
+def update_user_profile(agent_name, agent_config=None, dry_run=False, max_items=20):
+    """user.md 雙段化：靜態長期事實（原內容，永不改）＋ 動態近況（自動維護）。"""
+    path = os.path.join(os.path.expanduser("~/.mok/agent"), agent_name, "soul", "user.md")
+    if not os.path.exists(path):
+        return {"ok": False, "msg": f"找不到 {path}"}
+    with open(path, "r", encoding="utf-8") as f:
+        raw = f.read()
+    static = raw
+    m = re.search(re.escape(_PROFILE_BEGIN) + r".*?" + re.escape(_PROFILE_END) + r"\s*", raw, re.S)
+    if m:
+        static = (raw[:m.start()] + raw[m.end():]).rstrip() + "\n"
+    # 清掉遺留的舊「動態近況」段落（標題＋佔位內容），確保重複套用不會出現兩個標題
+    static = re.sub(r"\n*##[^\n]*動態近況[^\n]*[\s\S]*$", "\n", static).rstrip() + "\n"
+    # 剝掉舊的 STATIC 段標記（若有），避免重複套用時愈疊愈多
+    static = re.sub(re.escape(_STATIC_BEGIN), "", static)
+    static = re.sub(re.escape(_STATIC_END), "", static)
+    static = static.strip("\n") + "\n"
+    lines = []
+    col = _col(agent_name)
+    if col is not None:
+        try:
+            got = col.get(limit=1000)
+            gids = got.get("ids") or []
+            docs = got.get("documents") or []
+            metas = got.get("metadatas") or []
+            now = time.time()
+            items = []
+            for i in range(len(gids)):
+                mm = metas[i] if i < len(metas) and metas[i] else {}
+                if mm.get("source") not in ("auto",):
+                    continue
+                ts = mm.get("updated_at") or mm.get("created_at") or 0
+                items.append((_decay_score(mm, now), docs[i] if i < len(docs) else "", ts))
+            items.sort(key=lambda t: (-t[0], -float(t[2] or 0)))
+            _seen_lines = set()   # 動態段去重：相同內容只留一次（已按分數/時間排序，保留最佳那筆）
+            for score, doc, ts in items:
+                try:
+                    when = time.strftime("%Y-%m-%d", time.localtime(float(ts))) if ts else "-"
+                except Exception:
+                    when = "-"
+                _txt = _sanitize_md_line(doc)
+                _key = _txt.strip().lower()
+                if not _key or _key in _seen_lines:
+                    continue
+                _seen_lines.add(_key)
+                lines.append(f"- ({when}) {_txt}")
+                if len(lines) >= max_items:
+                    break
+        except Exception as e:
+            logging.error(f"[profile] 讀取動態失敗: {e}")
+    dynamic_block = (
+        "\n\n## \U0001f504 動態近況（自動維護，請勿手改）\n\n"
+        + _PROFILE_BEGIN + "\n"
+        + ("\n".join(lines) if lines else "（暫無）")
+        + "\n" + _PROFILE_END + "\n"
+    )
+    new_raw = _STATIC_BEGIN + "\n" + static.strip("\n") + "\n" + _STATIC_END + "\n" + dynamic_block
+    if dry_run:
+        return {"ok": True, "dry_run": True, "path": path,
+                "static_len": len(static), "dynamic_items": len(lines)}
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(new_raw)
+    return {"ok": True, "path": path, "dynamic_items": len(lines)}
+
+# ============================================================================ #
 # 舊對話加入 語義搜索
 def _get_conversation_collection(agent_name: str):
     """返回用於對話語義搜索的 ChromaDB collection（與知識庫共用 client）"""
@@ -1214,12 +1663,16 @@ async def handle_memory(args, chat_id: str = None, agent_config: Optional[Dict] 
             normalized = re.sub(r'^(?:記住)\s*', '', normalized)
             normalized = re.sub(r'我', MOK_ADMIN_NAME, normalized)
             normalized = re.sub(r'你|妳|您', agent_name, normalized)
-            col.add(
-                documents=[normalized],
-                metadatas=[{"chat_id": chat_id}],
-                ids=[f"{chat_id}_{col.count()}"]
-            )
-            return f"✅ {agent_name} 已記住 [{normalized}]"
+            dedup = _mem_f(agent_config, "MOK_MEM_DEDUP_SIM", 0.85)
+            r = smart_remember(col, chat_id, normalized, source="manual",
+                               dedup_sim=dedup, agent_config=agent_config)
+            act = r.get("action")
+            if act == "update":
+                return (f"🔁 {agent_name} 更新既有記憶（相似度 {r.get('sim')}）：\n"
+                        f"  舊：{r.get('old')}\n  新：{r.get('new')}")
+            if act == "insert":
+                return f"✅ {agent_name} 已記住 [{normalized}]"
+            return f"⚠️ 記憶寫入未完成（{act}）：{r.get('msg','')}"
 
         # recall
         elif subcmd == "recall":
@@ -1231,8 +1684,10 @@ async def handle_memory(args, chat_id: str = None, agent_config: Optional[Dict] 
                 where={"chat_id": chat_id}
             )
             docs = results.get("documents", [[]])[0]
+            hit_ids = (results.get("ids") or [[]])[0]
             if not docs:
                 return "沒有找到相關記憶。"
+            _touch_access(col, hit_ids)
             reply = "🧠 回憶：\n"
             for d in docs:
                 reply += f"· {d}\n"
@@ -1361,7 +1816,121 @@ async def handle_memory(args, chat_id: str = None, agent_config: Optional[Dict] 
 
 
         # get_conversation
+        # 2026-09-22 修正（A+B 併用）：
+        #   A) 以 conv_id 為主鍵查 chat_history.db 撈「該對話全部訊息」（前端引用的正解）+ tenant 權限檢查
+        #   B) 管理員 fallback：可用 conv_id 跨 user_key / tenant 查 conversation_history，並標註來源
         elif subcmd == "get_conversation":
+            if not content:
+                return "用法: /memory get_conversation 會話ID"
+            # 2026-09-26 引用錨點正規化（純加法、零回歸，守住三條護欄）：
+            #   [ID:n] / [ID=n] / [id=n] -> 舊錨點：一律先當 conv_id 解析，查無再 fallback 當 message_id
+            #   [MID:n] / [MID=n]        -> 新錨點：直接當 message_id（chat_history.id），與 conv_id 不同號段
+            _raw = str(content).strip()
+            _anchor = "ID"
+            _mm = re.search(r"\[\s*(ID|MID)\s*[:=]\s*(\d+)\s*\]", _raw, re.IGNORECASE)
+            if _mm:
+                _anchor = _mm.group(1).upper()
+                conv_id = int(_mm.group(2))
+            elif _raw.isdigit():
+                conv_id = int(_raw)
+            else:
+                return "會話ID必須是數字（或 <引用對話: [ID:n]> / [MID:n] 格式）"
+            _src = ""
+
+            unique_id = mokagi._get_unique_user_id(chat_id, agent_name)
+            caller_tenant = str(chat_id) if chat_id is not None else ""
+            privileged = caller_tenant in {"admin", "root"}
+            note = ""
+            out_lines = []
+
+            def _gc_line(_role, _text, _agent="", _tenant=""):
+                _who = MOK_ADMIN_NAME if _role == "user" else agent_name
+                _tag = "（來源: %s / tenant=%s）" % (_agent, _tenant) if (privileged and _agent) else ""
+                return "%s%s: %s" % (_who, _tag, _text)
+
+            # ---- A：chat_history 撈完整對話（ID→conv_id 優先、查無 fallback message_id；MID→message_id）----
+            try:
+                with closing(sqlite3.connect(mokagi.TOKEN_DB_PATH)) as _chat_db:
+                    _chat_db.row_factory = sqlite3.Row
+                    _cols = "role, content, agent, tenant"
+                    _rows = []
+                    if _anchor == "MID":
+                        # 新錨點：以 message_id（chat_history.id）定位；取得到所屬 conv_id 就回整輪
+                        _hit = _chat_db.execute(
+                            "SELECT id, conv_id FROM chat_history WHERE id = ?", (conv_id,)
+                        ).fetchone()
+                        if _hit and _hit["conv_id"] is not None:
+                            _rows = _chat_db.execute(
+                                "SELECT " + _cols + " FROM chat_history WHERE conv_id = ? ORDER BY id ASC",
+                                (_hit["conv_id"],)
+                            ).fetchall()
+                            _src = "message_id=%s -> conv_id=%s（整輪）" % (conv_id, _hit["conv_id"])
+                        elif _hit:
+                            _rows = _chat_db.execute(
+                                "SELECT " + _cols + " FROM chat_history WHERE id = ? ORDER BY id ASC",
+                                (conv_id,)
+                            ).fetchall()
+                            _src = "message_id=%s（單則）" % conv_id
+                    else:
+                        # 舊錨點：先以 conv_id 解析，保住既有 logs／書籤／歷史裡的舊 ID
+                        _rows = _chat_db.execute(
+                            "SELECT " + _cols + " FROM chat_history WHERE conv_id = ? ORDER BY id ASC",
+                            (conv_id,)
+                        ).fetchall()
+                        if _rows:
+                            _src = "conv_id=%s" % conv_id
+                        else:
+                            # 相容 fallback：conv_id 查無時，改以 message_id 再試一次
+                            _rows = _chat_db.execute(
+                                "SELECT " + _cols + " FROM chat_history WHERE id = ? ORDER BY id ASC",
+                                (conv_id,)
+                            ).fetchall()
+                            if _rows:
+                                _src = "conv_id 查無 -> message_id=%s fallback" % conv_id
+                if _rows and not privileged:
+                    _allowed = [r for r in _rows if str(r["tenant"] or "") == caller_tenant]
+                    if not _allowed:
+                        return "會話ID %s 屬於其他租戶，您的帳號（tenant=%s）無權讀取。" % (conv_id, caller_tenant)
+                    _rows = _allowed
+                for _r in _rows:
+                    out_lines.append(_gc_line(_r["role"], _r["content"], _r["agent"], _r["tenant"]))
+                if out_lines and privileged:
+                    _tens = sorted({str(r["tenant"] or "") for r in _rows})
+                    note = "\n\n🔎 管理員檢視：conv_id=%s / tenant=%s" % (conv_id, ", ".join(_tens))
+            except Exception as _e:
+                logging.warning("[get_conversation] chat_history 查詢失敗: %s: %s" % (type(_e).__name__, _e))
+
+            _src_note = ("\n\n🔎 來源：%s" % _src) if _src else ""
+            if not out_lines and _anchor == "MID":
+                return "未找到訊息ID %s 對應的訊息。" % conv_id
+
+            # ---- B：conversation_history fallback（管理員可跨 user_key / tenant）----
+            #   MID 走 chat_history.id 號段，不與 conversation_history.id 共用，故不做此 fallback
+            if not out_lines and _anchor != "MID":
+                with closing(sqlite3.connect(mokagi.HISTORY_DB_PATH)) as conn:
+                    conn.row_factory = sqlite3.Row
+                    user_row = conn.execute(
+                        "SELECT id, user_key, tenant, content FROM conversation_history WHERE user_key = ? AND id = ? AND role = ?",
+                        (unique_id, conv_id, "user")
+                    ).fetchone()
+                    if user_row is None and privileged:
+                        user_row = conn.execute(
+                            "SELECT id, user_key, tenant, content FROM conversation_history WHERE id = ? AND role = ?",
+                            (conv_id, "user")
+                        ).fetchone()
+                        if user_row is not None:
+                            note = "\n\n🔎 管理員跨租戶 fallback：此訊息屬於 %s / tenant=%s" % (user_row["user_key"], user_row["tenant"])
+                    if user_row is None:
+                        return "未找到會話ID %s 對應的用戶消息。" % conv_id
+                    assistant_row = conn.execute(
+                        "SELECT content FROM conversation_history WHERE user_key = ? AND id >= ? AND role = ? ORDER BY id ASC LIMIT 1",
+                        (user_row["user_key"], conv_id, "assistant")
+                    ).fetchone()
+                out_lines.append("%s: %s" % (MOK_ADMIN_NAME, user_row["content"]))
+                out_lines.append("%s: %s" % (agent_name, (assistant_row["content"] if assistant_row else agent_name + "未找到回覆")))
+
+            return "\n".join(out_lines) + note + _src_note
+        elif False:  # 舊版 get_conversation（2026-09-22 由 A+B 版取代，保留備查，可整段刪除）
             if not content:
                 return "用法: /memory get_conversation 會話ID"
             try:
@@ -1428,6 +1997,40 @@ async def handle_memory(args, chat_id: str = None, agent_config: Optional[Dict] 
             except Exception as e:
                 return f"❌ 執行補丁時出錯：{str(e)}"
 
+
+        # autoextract：手動觸發一輪抽取（除錯用）
+        elif subcmd == "autoextract":
+            if not content:
+                return "用法: /memory autoextract 使用者訊息 ||| 助理回覆"
+            if "|||" in content:
+                u, a = content.split("|||", 1)
+            else:
+                u, a = content, ""
+            r = await auto_extract_facts(chat_id, u.strip(), a.strip(), agent_config)
+            return f"🧲 自動抽取結果：{r}"
+
+        # maintain：衰減遺忘（GC）
+        elif subcmd == "maintain":
+            toks = content.split()
+            apply_now = "apply" in toks
+            target = next((t for t in toks if t not in ("apply", "dry", "all")), None)
+            if "all" in toks or not toks:
+                resmap = gc_all_agents(dry_run=not apply_now, agent_config=agent_config)
+                scan = sum(v.get("scanned", 0) for v in resmap.values() if isinstance(v, dict))
+                dele = sum(v.get("deleted", 0) for v in resmap.values() if isinstance(v, dict))
+                tag = "已套用" if apply_now else "dry-run（加 apply 才真的刪）"
+                return f"🧹 衰減遺忘（全 agent / {tag}）：掃描 {scan} 條，待刪 {dele} 條。"
+            ag = target or agent_name
+            res = gc_user_memory(ag, chat_id=None, dry_run=not apply_now, agent_config=agent_config)
+            tag = "已套用" if apply_now else "dry-run（加 apply 才真的刪）"
+            return f"🧹 衰減遺忘（{ag} / {tag}）：{res}"
+
+        # profile：維護 user.md 雙段
+        elif subcmd == "profile":
+            apply_now = "apply" in content.split()
+            res = update_user_profile(agent_name, agent_config, dry_run=not apply_now)
+            tag = "已套用" if apply_now else "dry-run（加 apply 才真的寫）"
+            return f"📇 profile（{tag}）：{res}"
 
         else:
             return f"未知子命令: {subcmd}"

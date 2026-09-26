@@ -65,8 +65,9 @@ def _list_skills():
                 info["readme"] = False
                 info["size"] = 0
             skills.append(info)
-        elif entry.endswith(".md") and os.path.isfile(path):
+        elif entry.endswith(".md") and os.path.isfile(path) and entry != "README.md":
             # 防呆：頂層遺留 .md（新機制下不應存在）
+            # 例外：頂層 README.md 是技能系統本身的說明（唯一來源公告），不算 legacy
             skills.append({"name": entry, "legacy": True, "size": os.path.getsize(path)})
     if not skills:
         return json.dumps({"skills": [], "message": "技能目錄為空", "dir": SKILL_DIR}, ensure_ascii=False)

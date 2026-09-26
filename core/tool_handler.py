@@ -145,17 +145,21 @@ async def execute_command(cmd: str, args: str, chat_id: str = "web", agent_confi
     if not handler:
         return json.dumps({"success": False, "error": f"未知命令: {cmd}"}, ensure_ascii=False)
     try:
-        # 調用 handler，如果 handler 接受 agent_config 參數則傳遞
-        import inspect
-        sig = inspect.signature(handler)
-        if 'agent_config' in sig.parameters:
-            result = await handler(args, chat_id, agent_config=agent_config)
-        else:
-            result = await handler(args, chat_id)
-        # 如果 result 不是字符串，轉為字符串
-        if not isinstance(result, str):
-            result = json.dumps(result, ensure_ascii=False)
-        return result
+        async def _run():
+            import inspect
+            sig = inspect.signature(handler)
+            if 'agent_config' in sig.parameters:
+                r = await handler(args, chat_id, agent_config=agent_config)
+            else:
+                r = await handler(args, chat_id)
+            if not isinstance(r, str):
+                r = json.dumps(r, ensure_ascii=False)
+            return r
+        try:
+            import audit_layer
+            return await audit_layer.audited_call(cmd, dict(args=args), chat_id, agent_config, _run)
+        except ImportError:
+            return await _run()
     except Exception as e:
         logger.exception(f"執行命令 {cmd} 失敗")
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)

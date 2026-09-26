@@ -107,11 +107,11 @@
         var btn = document.getElementById('notifyToggleBtn');
         if (!btn) return;
         if (!enabled) {
-            btn.textContent = '🔕';
+            btn.textContent = '🔕 通知';
             btn.title = '完成提示已關閉（點擊開啟）';
             btn.style.opacity = '0.55';
         } else {
-            btn.textContent = '🔔';
+            btn.textContent = '🔔 通知';
             btn.title = '完成提示已開啟（聲音+震動+通知）';
             btn.style.opacity = '1';
         }

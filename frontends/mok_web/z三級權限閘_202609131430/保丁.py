@@ -31,12 +31,12 @@ _MOK_DIR = os.path.dirname(os.path.dirname(os.path.dirname(_PATCH_DIR)))
 MEMBER_DB = os.path.join(_MOK_DIR, 'frontends', 'mok_web', '會員系統_202608311340', 'member.db')
 
 # 未登入（guest）仍可瀏覽的路徑（前綴比對）
-GUEST_PAGES = ['/login', '/register', '/plans', '/logout']
+GUEST_PAGES = ['/login', '/register', '/plans', '/logout', '/member']
 # 方案 A：首頁 /index.html 直接放行，避免登入後回主頁被重導卡住
 HOME_OPEN = ['/', '/index.html']
 # 完全放行的前綴（API / 靜態資源 / 各後台自行判斷）
 ALWAYS_OPEN = ['/api', '/static', '/assets', '/img', '/js', '/css',
-               '/socket.io', '/admin', '/_test', '/favicon']
+               '/socket.io', '/admin', '/_test', '/favicon', '/project']
 
 ADMIN_USERS = set(x.strip() for x in (os.environ.get('ADMIN_USERNAMES') or 'admin').split(',') if x.strip())
 
@@ -145,3 +145,51 @@ if app is not None:
         print('[三級權限閘] 掛載失敗:', e)
 else:
     print('[三級權限閘] 找不到 app，未掛載')
+
+# ============================================================================
+# v2 擴充（2026-09-23）：訪客頁面閘「改讀公開層」
+#   plans 表中 requires_login=0 的方案＝公開層，其 pages 白名單對未登入訪客放行。
+#   未設定任何公開層時，行為與 v1 完全相同。
+# ============================================================================
+_orig_guest_ok = _guest_ok
+
+
+def _public_layer_pages():
+    """回傳公開層（requires_login=0）所有方案合併的 pages 白名單。"""
+    try:
+        with _db_lock, _conn() as c:
+            rows = c.execute('SELECT pages FROM plans '
+                             'WHERE COALESCE(requires_login,1)=0').fetchall()
+        out = []
+        for r in rows:
+            try:
+                out += json.loads(r['pages'] or '[]')
+            except Exception:
+                pass
+        return out
+    except Exception:
+        return []
+
+
+def _public_layer_allows(path):
+    pages = _public_layer_pages()
+    if not pages:
+        return False
+    if '*' in pages:
+        return True
+    for p in pages:
+        if not p or not isinstance(p, str) or not p.startswith('/'):
+            continue
+        if path == p:
+            return True
+        if len(p) > 1 and p.endswith('/') and path.startswith(p):
+            return True
+    return False
+
+
+def _guest_ok(path):
+    if _orig_guest_ok(path):
+        return True
+    return _public_layer_allows(path)
+
+print('[三級權限閘] v2 已載入（訪客頁面閘改讀 plans 公開層）', flush=True)

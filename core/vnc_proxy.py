@@ -99,8 +99,33 @@ def _relay(client_sock, target):
 class VNCProxyMiddleware:
     """WSGI middleware: 攔截 /novnc-ws WebSocket 升級並中繼到 websockify"""
 
-    def __init__(self, app):
+    def __init__(self, app, flask_app=None):
         self.app = app
+        self.flask_app = flask_app
+
+    def _ws_admin_ok(self, environ):
+        '''WebSocket / 旋轉端點 admin 檢查：僅允許 admin/root 的登入 session（fail-closed）。'''
+        _app = getattr(self, 'flask_app', None)
+        if _app is None:
+            return True
+        try:
+            from flask.sessions import SecureCookieSessionInterface
+            _name = (_app.config or {}).get('SESSION_COOKIE_NAME', 'session')
+            _raw = ''
+            for _part in (environ.get('HTTP_COOKIE') or '').split(';'):
+                if '=' in _part:
+                    _k, _v = _part.strip().split('=', 1)
+                    if _k == _name:
+                        _raw = _v
+                        break
+            if not _raw:
+                return False
+            _data = SecureCookieSessionInterface().get_signing_serializer(_app).loads(_raw)
+            if not _data:
+                return False
+            return str(_data.get('member_user') or '') in ('admin', 'root')
+        except Exception:
+            return False
 
 
     def _handle_rotate(self, environ, start_response):
@@ -149,8 +174,14 @@ class VNCProxyMiddleware:
         path = environ.get('PATH_INFO', '')
         upgrade = environ.get('HTTP_UPGRADE', '').lower()
         if path == '/novnc-rotate':
+            if not self._ws_admin_ok(environ):
+                start_response('403 Forbidden', [('Content-Type', 'text/plain; charset=utf-8'), ('Cache-Control', 'no-store')])
+                return [b'forbidden: admin only']
             return self._handle_rotate(environ, start_response)
         if path == '/novnc-ws' and upgrade == 'websocket':
+            if not self._ws_admin_ok(environ):
+                start_response('403 Forbidden', [('Content-Type', 'text/plain; charset=utf-8'), ('Cache-Control', 'no-store')])
+                return [b'forbidden: admin only']
             client_sock = environ.get('werkzeug.socket')
             if client_sock is None:
                 start_response('400 Bad Request', [('Content-Type', 'text/plain')])
@@ -195,5 +226,5 @@ class VNCProxyMiddleware:
 
     @classmethod
     def wrap_app(cls, app):
-        app.wsgi_app = cls(app.wsgi_app)
+        app.wsgi_app = cls(app.wsgi_app, app)
         return app

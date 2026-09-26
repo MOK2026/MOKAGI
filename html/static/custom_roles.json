@@ -4,7 +4,7 @@
     "emoji": "🎬",
     "division": "🎭 自訂角色",
     "specialty": "短劇分鏡專業化：劇本→角色/場景/道具→分鏡 JSON（含首/關鍵/尾幀圖像提示詞）",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/短劇助手侍女/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/短劇助手侍女/SKILL.md",
     "id": "custom_short_drama_assistant"
   },
   {
@@ -20,7 +20,7 @@
     "emoji": "🤖",
     "division": "🧠 人物範例（女媧）",
     "specialty": "AI 研究第一性思維 · 技術深度拆解",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/andrej-karpathy-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/andrej-karpathy-perspective/SKILL.md",
     "id": "nuwa_andrej_karpathy"
   },
   {
@@ -28,7 +28,7 @@
     "emoji": "🚀",
     "division": "🧠 人物範例（女媧）",
     "specialty": "第一性原理 · 成本拆解 · 激進迭代",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/elon-musk-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/elon-musk-perspective/SKILL.md",
     "id": "nuwa_elon_musk"
   },
   {
@@ -36,7 +36,7 @@
     "emoji": "🧠",
     "division": "🧠 人物範例（女媧）",
     "specialty": "簡化複雜概念 · 直覺式物理思維",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/feynman-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/feynman-perspective/SKILL.md",
     "id": "nuwa_feynman"
   },
   {
@@ -44,7 +44,7 @@
     "emoji": "🧬",
     "division": "🧠 人物範例（女媧）",
     "specialty": "AI 前瞻視角 · 深度學習本質",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/ilya-sutskever-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/ilya-sutskever-perspective/SKILL.md",
     "id": "nuwa_ilya_sutskever"
   },
   {
@@ -52,7 +52,7 @@
     "emoji": "🎬",
     "division": "🧠 人物範例（女媧）",
     "specialty": "爆款內容創造 · 流量增長操作系統",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/mrbeast-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/mrbeast-perspective/SKILL.md",
     "id": "nuwa_mrbeast"
   },
   {
@@ -60,7 +60,7 @@
     "emoji": "🏦",
     "division": "🧠 人物範例（女媧）",
     "specialty": "多元思維模型 · 逆向思考 · 投資智慧",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/munger-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/munger-perspective/SKILL.md",
     "id": "nuwa_munger"
   },
   {
@@ -68,7 +68,7 @@
     "emoji": "💎",
     "division": "🧠 人物範例（女媧）",
     "specialty": "財富與幸福哲學 · 槓桿與長期主義",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/naval-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/naval-perspective/SKILL.md",
     "id": "nuwa_naval"
   },
   {
@@ -76,7 +76,7 @@
     "emoji": "✍️",
     "division": "🧠 人物範例（女媧）",
     "specialty": "創業者思維 · 寫作 · 品味判斷",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/paul-graham-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/paul-graham-perspective/SKILL.md",
     "id": "nuwa_paul_graham"
   },
   {
@@ -84,7 +84,7 @@
     "emoji": "🍎",
     "division": "🧠 人物範例（女媧）",
     "specialty": "產品極致主義 · 簡約 · 現實扭曲力場",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/steve-jobs-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/steve-jobs-perspective/SKILL.md",
     "id": "nuwa_steve_jobs"
   },
   {
@@ -92,7 +92,7 @@
     "emoji": "💰",
     "division": "🧠 人物範例（女媧）",
     "specialty": "注意力收割 · 加密行銷操作系統",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/sun-yuchen-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/sun-yuchen-perspective/SKILL.md",
     "id": "nuwa_sun_yuchen"
   },
   {
@@ -100,7 +100,7 @@
     "emoji": "🦢",
     "division": "🧠 人物範例（女媧）",
     "specialty": "反脆弱 · 黑天鵝 · 風險思維",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/taleb-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/taleb-perspective/SKILL.md",
     "id": "nuwa_taleb"
   },
   {
@@ -108,7 +108,7 @@
     "emoji": "🇺🇸",
     "division": "🧠 人物範例（女媧）",
     "specialty": "談判 · 媒體操作 · 直覺決策",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/trump-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/trump-perspective/SKILL.md",
     "id": "nuwa_trump"
   },
   {
@@ -116,7 +116,7 @@
     "emoji": "🐦",
     "division": "🧠 人物範例（女媧）",
     "specialty": "X 平台內容策略 · 增長與變現運營",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/x-mastery-mentor/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/x-mastery-mentor/SKILL.md",
     "id": "nuwa_x_mastery_mentor"
   },
   {
@@ -124,7 +124,7 @@
     "emoji": "📱",
     "division": "🧠 人物範例（女媧）",
     "specialty": "延遲滿足 · 資訊流 · 機器學習思維",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/zhang-yiming-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/zhang-yiming-perspective/SKILL.md",
     "id": "nuwa_zhang_yiming"
   },
   {
@@ -132,7 +132,7 @@
     "emoji": "🎓",
     "division": "🧠 人物範例（女媧）",
     "specialty": "高考志願 · 職業規劃 · 現實主義",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/zhangxuefeng-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/zhangxuefeng-perspective/SKILL.md",
     "id": "nuwa_zhangxuefeng"
   },
   {
@@ -140,7 +140,7 @@
     "emoji": "📊",
     "division": "🧠 人物範例（女媧）",
     "specialty": "戰略頂層設計 · 輕資產模式 · 商業戰略",
-    "raw_url": "/home/ubuntu/.mok/skill/wangzijie.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/wangzijie-perspective/SKILL.md",
     "id": "nuwa_wangzijie"
   },
   {
@@ -148,7 +148,7 @@
     "emoji": "⚔️",
     "division": "🧠 人物範例（女媧）",
     "specialty": "高維商戰 · 資源整合 · 招商融資 · 商業模式設計",
-    "raw_url": "/home/ubuntu/.mok/skill/nuwa/nuwa-examples/角色/wang-ang-perspective/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/wang-ang-perspective/SKILL.md",
     "id": "nuwa_wang_ang"
   },
   {
@@ -156,7 +156,7 @@
     "emoji": "☯️",
     "division": "🎭 自訂角色",
     "specialty": "四柱八字排盤 · 命理典籍分析（窮通寶典/三命通會/滴天髓/淵海子平）· 大運流年",
-    "raw_url": "/home/ubuntu/.mok/skill/bazi/SKILL.md",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/bazi/SKILL.md",
     "id": "custom_bazi"
   }
 ]

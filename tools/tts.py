@@ -65,7 +65,7 @@ PLUGIN_INFO = {
     "command": "/tts",
     "icon": "🎙️",
     "handler": "handle_tts",
-    "description": "文字轉語音：將文字轉成語音 MP3，並透過 Telegram 發送語音消息。可選語音角色（xiaoxiao/xiaoyi/yunxi/...）。",
+    "description": "文字轉語音：將文字轉成語音 MP3。Telegram 環境下發送語音消息；Web 環境下回傳可播放的語音 URL。可選語音角色（xiaoxiao/xiaoyi/yunxi/...）。",
 
     "intent_keywords": [
         ("/語音", "/tts"),
@@ -77,12 +77,13 @@ PLUGIN_INFO = {
     "tool_schema": {
         "name": "tts",
         "description": (
-            "文字轉語音工具：使用 Microsoft Edge TTS 將文字轉換為自然流暢的語音 MP3，"
-            "並透過 Telegram Bot API 發送語音消息給用戶。\n\n"
-            "【功能】給定一段文字，生成語音檔案並通過 Telegram 發送。\n"
+            "文字轉語音工具：使用 Microsoft Edge TTS 將文字轉換為自然流暢的語音 MP3。"
+            "Telegram 環境下透過 Bot API 發送語音消息；Web 環境下回傳可直接播放的語音 URL。\n\n"
+            "【功能】給定一段文字，生成語音檔案並發送（Telegram）或回傳語音 URL（Web）。\n"
             "支援多種語音角色（女聲、男聲、粵語等）。\n\n"
             "【返回格式】\n"
-            "- 成功時返回 JSON：{\"success\": true, \"message\": \"語音已發送\", \"voice\": \"使用的語音\", \"text_length\": 文字長度}\n"
+            "- Telegram 成功：{\"success\": true, \"message\": \"語音已透過 Telegram 發送 ✅\", \"voice\": ..., \"text_length\": ...}\n"
+            "- Web 成功：{\"success\": true, \"mode\": \"web\", \"url\": \"/static/tts/xxx.mp3\", \"voice\": ..., \"text_length\": ...}（前端可直接播放該 URL）\n"
             "- 失敗時返回 JSON：{\"success\": false, \"error\": \"錯誤訊息\"}\n\n"
             "【語音角色】\n"
             "- xiaoxiao（預設）：年輕甜美女聲，活潑可愛\n"
@@ -178,6 +179,30 @@ def _resolve_voice(voice_name):
     return AVAILABLE_VOICES.get(voice_name, DEFAULT_VOICE)
 
 
+def _web_audio_dir():
+    """Web 模式語音存放目錄：~/.mok/html/static/tts（由 mok_web 的 /static 提供）。
+    mok_web 的 static_folder = <BASE_DIR>/static，BASE_DIR = ~/.mok/html。"""
+    mok_home = (os.environ.get("MOKAGI_HOME", "mok") or "mok").strip()
+    d = os.path.expanduser(f"~/.{mok_home}/html/static/tts")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _publish_web_audio(mp3_path):
+    """把生成的 MP3 移入靜態目錄，回傳可直接播放的相對 URL；失敗回 None。"""
+    import uuid
+    import shutil
+    try:
+        out_dir = _web_audio_dir()
+        fname = f"tts_{uuid.uuid4().hex[:12]}.mp3"
+        dest = os.path.join(out_dir, fname)
+        shutil.move(mp3_path, dest)
+        return f"/static/tts/{fname}"
+    except Exception as e:
+        logger.error(f"[TTS] 發佈 Web 語音失敗: {e}")
+        return None
+
+
 async def handle_tts(args, chat_id="web", agent_config=None):
     """
     處理 /tts 命令或 LLM 工具調用。
@@ -230,26 +255,30 @@ async def handle_tts(args, chat_id="web", agent_config=None):
             "dependency_missing": "requests"
         }, ensure_ascii=False)
 
-    # --- 獲取配置 ---
-    bot_token = _get_bot_token(agent_config)
-    if not bot_token:
-        return json.dumps({
-            "success": False,
-            "error": "找不到 Telegram Bot Token（MOK_TG_TOKEN），請在配置文件中設定。"
-        }, ensure_ascii=False)
+    # --- 解析語音角色 ---
+    voice = _resolve_voice(voice_name)
 
+    # --- 決定發送方式：Telegram 或 Web（回傳語音 URL）---
     target_chat_id = _get_chat_id(
         args if isinstance(args, dict) else {},
         chat_id,
         agent_config
     )
-    if not target_chat_id or target_chat_id == "web":
-        return json.dumps({
-            "success": False,
-            "error": "無法確定 Telegram chat_id。Web 版不支援語音發送，請在 Telegram 中使用此功能。"
-        }, ensure_ascii=False)
+    if target_chat_id:
+        # Telegram 模式：需要 Bot Token
+        bot_token = _get_bot_token(agent_config)
+        if not bot_token:
+            return json.dumps({
+                "success": False,
+                "error": "找不到 Telegram Bot Token（MOK_TG_TOKEN），請在配置文件中設定。"
+            }, ensure_ascii=False)
+        web_mode = False
+    else:
+        # Web 模式：生成語音後回傳可播放 URL（走 B）
+        bot_token = ""
+        web_mode = True
 
-    voice = _resolve_voice(voice_name)
+    logger.info("[TTS] 模式=%s voice=%s", ("Web" if web_mode else "Telegram"), voice)
 
     # --- 生成語音 ---
     mp3_path = None
@@ -271,6 +300,25 @@ async def handle_tts(args, chat_id="web", agent_config=None):
             return json.dumps({
                 "success": False,
                 "error": "語音生成失敗：檔案大小為 0。"
+            }, ensure_ascii=False)
+
+        # --- Web 模式：發佈到靜態目錄並回傳可播放 URL ---
+        if web_mode:
+            audio_url = _publish_web_audio(mp3_path)
+            if not audio_url:
+                return json.dumps({
+                    "success": False,
+                    "error": "Web 模式語音發佈失敗（無法寫入靜態目錄）。"
+                }, ensure_ascii=False)
+            logger.info(f"[TTS] Web 語音已生成: {audio_url}")
+            return json.dumps({
+                "success": True,
+                "mode": "web",
+                "message": f"語音已生成：{audio_url}",
+                "url": audio_url,
+                "voice": voice,
+                "text_length": len(text),
+                "file_size": file_size
             }, ensure_ascii=False)
 
         # --- 通過 Telegram API 發送 ---

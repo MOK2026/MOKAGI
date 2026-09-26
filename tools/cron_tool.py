@@ -58,86 +58,43 @@ import subprocess
 import logging
 from typing import Dict, Optional
 
-# 全域變數：存放待確認的命令
-_pending_cron_confirmations = {}
+# ===== 確認流程：統一使用 confirm_manager（admin 與 cron 共用「同一個實例」）=====
+import sys as _sys
+import importlib.util as _ilu
+if "mok_confirm_manager" not in _sys.modules:
+    _cm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "confirm_manager.py")
+    _spec = _ilu.spec_from_file_location("mok_confirm_manager", _cm_path)
+    _mcm = _ilu.module_from_spec(_spec)
+    _sys.modules["mok_confirm_manager"] = _mcm
+    _spec.loader.exec_module(_mcm)
+_confirm = _sys.modules["mok_confirm_manager"]
 
 
 def _cron_pending_dir() -> str:
-    try:
-        import mokagi
-        base = os.path.expanduser(f"~/.{mokagi.MOKAGI_home}")
-    except Exception:
-        base = os.path.expanduser("~/.mok")
-    return os.path.join(base, ".pending_cron_confirm")
+    return _confirm.PENDING_DIR
 
 
-def _cron_token_path(token: str) -> str:
-    return os.path.join(_cron_pending_dir(), f"{token}.json")
-
-
-def _load_cron_pending() -> None:
-    d = _cron_pending_dir()
-    try:
-        if not os.path.isdir(d):
-            return
-        now = time.time()
-        for fn in os.listdir(d):
-            if not fn.endswith(".json"):
-                continue
-            p = os.path.join(d, fn)
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    item = json.load(f)
-                if isinstance(item, dict) and now - item.get("timestamp", 0) <= 300:
-                    _pending_cron_confirmations.setdefault(fn[:-5], item)
-                else:
-                    try:
-                        os.remove(p)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-
-def _save_cron_pending() -> None:
-    try:
-        d = _cron_pending_dir()
-        os.makedirs(d, exist_ok=True)
-        for token, item in _pending_cron_confirmations.items():
-            p = _cron_token_path(token)
-            tmp = p + ".tmp"
-            try:
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(item, f, ensure_ascii=False)
-                os.replace(tmp, p)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-
-def _remove_cron_pending_file(token: str) -> None:
-    try:
-        p = _cron_token_path(token)
-        if os.path.exists(p):
-            os.remove(p)
-    except Exception:
-        pass
+def generate_token(chat_id: str, action: str, args: str) -> str:
+    """生成一次性確認 token（與 admin 共用同一套）。"""
+    return _confirm.generate_token(chat_id, "cron", action, args)
 
 
 def has_pending_cron_token(token: str) -> bool:
-    _load_cron_pending()
-    return token in _pending_cron_confirmations
+    """（相容舊介面）確認碼是否仍在等待確認。"""
+    return _confirm.is_pending(token)
 
 
-_load_cron_pending()
+def _cron_confirm_warning(warning: str, token: str) -> str:
+    """組出 CONFIRM_SPLIT 警告訊息（TTL 提示與 admin 一致）。"""
+    hint = _confirm.ttl_hint(_confirm.get_ttl())
+    return (
+        "CONFIRM_SPLIT:" + warning + "\n"
+        "🔐 此確認碼用於授權執行上方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n"
+        "請在 " + hint + " 內發送確認碼以執行：\n"
+        "---CONFIRM_SPLIT---\n"
+        "/admin confirm " + token
+    )
 
-def generate_token(chat_id: str, action: str, args: str) -> str:
-    """生成一次性確認 token"""
-    raw = f"{chat_id}_{action}_{args}_{time.time()}_{os.urandom(4).hex()}"
-    return hashlib.md5(raw.encode()).hexdigest()[:12]
 
 def is_admin(chat_id: str, agent_config: dict = None) -> bool:
     """簡易管理員檢查（網頁版放行）"""
@@ -293,29 +250,28 @@ def _get_cron_description(command: str) -> str:
 # ------------------ 公開函數（供 Agent 調用） ------------------
 
 async def confirm_cron_command(chat_id: str, token: str, agent_config: dict = None) -> tuple:
-    """確認 cron 命令，回傳 (成功與否, 結果訊息)"""
-    _load_cron_pending()
-    if token not in _pending_cron_confirmations:
-        return False, "❌ 確認碼無效或已過期。"
-    info = _pending_cron_confirmations[token]
-    if str(info["chat_id"]) != str(chat_id):
-        return False, "❌ 確認碼與用戶不匹配。"
-    if time.time() - info["timestamp"] > 300:
-        del _pending_cron_confirmations[token]
-        _remove_cron_pending_file(token)
-        return False, "❌ 確認碼已超時（5分鐘）。"
+    """確認 cron 命令，回傳 (成功與否, 結果訊息)。統一走 confirm_manager。"""
+    status, info = _confirm.redeem(chat_id, token, agent_config=agent_config)
+    if status != "ok":
+        return False, _confirm.status_message(status, info, agent_config=agent_config)
 
-    action = info["action"]
-    args = info["args"]
-    del _pending_cron_confirmations[token]
-    _remove_cron_pending_file(token)
+    action = info.get("cmd") or info.get("action") or ""
+    if action in ("cron_add", "add"):
+        action = "add"
+    elif action in ("cron_delete", "delete"):
+        action = "delete"
+    args = info.get("args", "")
 
     if action == "add":
         return _execute_cron_add(args)
     elif action == "delete":
-        return _execute_cron_delete(args)
+        try:
+            return _execute_cron_delete(int(str(args).strip()))
+        except Exception:
+            return False, "❌ 刪除失敗：無效的任務編號。"
     else:
-        return False, f"❌ 未知動作: {action}"
+        return False, "❌ 未知動作: " + str(action)
+
 
 def _execute_cron_add(cron_line: str) -> tuple:
     """實際執行新增 cron 任務"""
@@ -404,23 +360,26 @@ async def handle_cron(args, chat_id: str = None, agent_config: dict = None):
         parts = rest.strip().split()
         if len(parts) < 6:
             return "❌ 無效的 cron 格式。請提供完整的 5 個時間欄位 + 指令。"
+        # === 🔒 核心自我保護：cron 指令不得重啟/停止 mokagi 服務 ===
+        import re as _re
+        if _re.search(
+            r"(pm2[ ]+(restart|reload|stop|delete|kill|start|resurrect|save|dump)"
+            r"|restart.{0,20}mok_|mok_.{0,20}restart"
+            r"|systemctl[ ]+(restart|stop).{0,20}(mok|ollama)"
+            r"|pkill.{0,20}(mok_|python)"
+            r"|kill.{0,20}(mok_|launcher))", rest, _re.I):
+            return "❌ 此 cron 指令涉及重啟/停止 mokagi 服務，已被核心自我保護攔截，拒絕新增。"
         # 檢查是否為管理員
         if not is_admin(chat_id, agent_config):
             return "❌ 只有管理員可以新增 cron 任務。"
         # 產生確認碼
         token = generate_token(chat_id, "add", rest)
-        _pending_cron_confirmations[token] = {
-            "action": "add",
-            "args": rest,
-            "chat_id": chat_id,
-            "timestamp": time.time()
-        }
-        _save_cron_pending()
-        warning = f"⚠️ **新增 Cron 任務**\n`{rest}`"
+        _confirm.register(token, "cron", "cron_add", rest, chat_id)
+        warning = "⚠️ **新增 Cron 任務**\n`" + rest + "`"
         _desc = _get_cron_description(rest)
         if _desc:
-            warning += f"\n\n📖 任務說明：\n{_desc}"
-        return f"CONFIRM_SPLIT:{warning}\n🔐 此確認碼用於授權執行上方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n請在 5 分鐘內發送確認碼以執行：\n---CONFIRM_SPLIT---\n/admin confirm {token}"
+            warning += "\n\n📖 任務說明：\n" + _desc
+        return _cron_confirm_warning(warning, token)
 
     # ----- delete (需確認) -----
     elif action == "delete":
@@ -439,18 +398,12 @@ async def handle_cron(args, chat_id: str = None, agent_config: dict = None):
             return "❌ 只有管理員可以刪除 cron 任務。"
         # 產生確認碼
         token = generate_token(chat_id, "delete", rest)
-        _pending_cron_confirmations[token] = {
-            "action": "delete",
-            "args": rest,
-            "chat_id": chat_id,
-            "timestamp": time.time()
-        }
-        _save_cron_pending()
-        warning = f"⚠️ **刪除 Cron 任務**\n`{target_line}`"
+        _confirm.register(token, "cron", "cron_delete", rest, chat_id)
+        warning = "⚠️ **刪除 Cron 任務**\n`" + target_line + "`"
         _desc = _get_cron_description(target_line)
         if _desc:
-            warning += f"\n\n📖 任務說明：\n{_desc}"
-        return f"CONFIRM_SPLIT:{warning}\n🔐 此確認碼用於授權執行上方操作（僅限您本人確認）。若您未發起此操作，請直接忽略。\n請在 5 分鐘內發送確認碼以執行：\n---CONFIRM_SPLIT---\n/admin confirm {token}"
+            warning += "\n\n📖 任務說明：\n" + _desc
+        return _cron_confirm_warning(warning, token)
 
     # ----- log -----
     elif action == "log":
