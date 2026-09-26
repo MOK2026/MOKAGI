@@ -19,3 +19,25 @@ env.env
 # 禁傳路徑（admin 2026-09-26 指定，勿移除）
 gateway/
 pgdata/
+
+# ===== 2026-09-27 主人指定：不需上傳 GitHub =====
+# (1) 本地已刪、遠端仍追蹤 → 移除同步
+frontends/mok_web/Plans後台_202609051030/
+html/static/render_round_blocks.js
+html/webTools/novnc/diag_novnc.sh
+tools/patch_conv_id.py
+tools/repair_server.py
+tools/sandbox_bridge.py
+tools/speech2text.py
+# (2) 不需上傳的內容/專案
+html/project/AI 分身交易所/
+html/project/髮變鑽石/
+html/project/錢搵我/
+html/project/方案_1/
+html/project/ai客服/
+html/project/MoksAv/
+html/project/MokCs/
+html/static/_out.js
+html/jobs/
+html/mokagi設計報告.html
+html/user.html
