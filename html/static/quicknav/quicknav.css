@@ -1,0 +1,124 @@
+/* ============================================================
+   QuickNav v1.0  快捷鍵提示套件  by indexPage
+   ------------------------------------------------------------
+   統一入口：所有快捷鍵（.mok / /工具 / /skill ...）共用此面板
+   命名規範：全部 .qn- 前綴，避免與宿主頁面樣式衝突
+   兼容性：不依賴宿主頁面任何既有 class / id / 樣式
+   ============================================================ */
+
+.qn-panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 8px);   /* 貼在輸入框「上一點點」 */
+    z-index: 99999;
+    max-height: 280px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: #1e1e1e;
+    border: 1px solid #3a3a3a;
+    border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.55);
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13px;
+    color: #d4d4d4;
+    animation: qnFadeIn .12s ease-out;
+    padding: 4px;
+    box-sizing: border-box;
+}
+
+@keyframes qnFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.qn-title {
+    padding: 6px 10px 4px;
+    font-size: 11px;
+    letter-spacing: .5px;
+    color: #8a8a8a;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.qn-title .qn-badge {
+    background: #4ec9b0;
+    color: #101010;
+    font-weight: 700;
+    padding: 0 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    line-height: 16px;
+}
+
+.qn-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.qn-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: background .08s;
+}
+.qn-item:hover,
+.qn-item.qn-active {
+    background: #2d5f5a;
+    color: #ffffff;
+}
+
+.qn-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.qn-label .qn-match {
+    color: #4ec9b0;
+    font-weight: 700;
+}
+.qn-item:hover .qn-label .qn-match,
+.qn-item.qn-active .qn-label .qn-match {
+    color: #7fe6d3;
+}
+
+.qn-hint {
+    font-size: 10px;
+    color: #7a7a7a;
+    flex-shrink: 0;
+}
+.qn-item:hover .qn-hint,
+.qn-item.qn-active .qn-hint {
+    color: #a8a8a8;
+}
+
+.qn-empty {
+    padding: 10px;
+    color: #6a6a6a;
+    text-align: center;
+    user-select: none;
+}
+
+.qn-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 90px;
+    transform: translateX(-50%);
+    background: #2d5f5a;
+    color: #fff;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-family: sans-serif;
+    z-index: 999999;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+    animation: qnFadeIn .12s ease-out;
+    pointer-events: none;
+}

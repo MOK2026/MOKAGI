@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MOKAGI 核心架構審查報告</title>
+<style>
+:root{--bg:#0f1115;--card:#1a1d24;--border:#2a2f3a;--text:#e6e8ec;--muted:#9aa3b2;--green:#3fb27f;--red:#e5534b;--amber:#e3a008;--blue:#4c8dff;--code:#16181d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;line-height:1.7;padding:32px 16px}
+.wrap{max-width:980px;margin:0 auto}
+h1{font-size:26px;margin:0 0 6px;border-left:4px solid var(--blue);padding-left:14px}
+.sub{color:var(--muted);font-size:14px;margin:0 0 28px}
+h2{font-size:20px;margin:36px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+h3{font-size:16px;margin:20px 0 8px;color:var(--blue)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin:12px 0}
+.tag{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;margin-right:6px}
+.ok{background:rgba(63,178,127,.15);color:var(--green);border:1px solid var(--green)}
+.bad{background:rgba(229,83,75,.15);color:var(--red);border:1px solid var(--red)}
+.warn{background:rgba(227,160,8,.15);color:var(--amber);border:1px solid var(--amber)}
+code{background:var(--code);padding:2px 6px;border-radius:4px;font-family:"SF Mono",Consolas,monospace;font-size:13px;color:#7fd0ff}
+pre{background:var(--code);border:1px solid var(--border);border-radius:8px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.5}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#22262f}
+tr:nth-child(even){background:#171a20}
+.verdict{font-size:16px;padding:16px 18px;border-radius:10px;margin:16px 0;border:1px solid}
+.verdict.good{background:rgba(63,178,127,.08);border-color:var(--green)}
+.verdict.bad{background:rgba(229,83,75,.08);border-color:var(--red)}
+ul{margin:8px 0 8px 20px;padding:0}
+li{margin:5px 0}
+.mono{font-family:Consolas,monospace;font-size:13px}
+.foot{margin-top:40px;color:var(--muted);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>MOKAGI 核心架構審查報告</h1>
+<p class="sub">對象：<code>.mok/core/mokagi.py</code>　｜　審查人：mokagi說明　｜　日期：2026-08-13</p>
+
+<div class="verdict good">
+<strong>總結論：</strong>「統一核心」的設計<strong>方向是對的</strong>，但存在 <strong>4 個並發級硬傷</strong> 與 <strong>2 處架構不一致</strong>。若不修復前兩個（asyncio.Lock 綁定 loop、全局 OpenAI client 綁定 loop），「24 小時多工並行」在多用戶同時打 Web 時會<strong>直接崩潰</strong>。
+</div>
+
+<h2>一、你要的架構 vs 現況對照</h2>
+<table>
+<tr><th>你要的</th><th>用途</th><th>現況</th><th>判定</th></tr>
+<tr><td><code>.mok/MOKAGI.sh</code></td><td>安裝到主機</td><td>存在（12KB）</td><td><span class="tag ok">OK</span></td></tr>
+<tr><td><code>frontends/mok_web.py</code></td><td>Web（admin + SSE）</td><td>存在，launcher 有啟動</td><td><span class="tag ok">OK</span></td></tr>
+<tr><td><code>frontends/mok_tg.py</code></td><td>多用戶公開（TG）</td><td>存在，每個 agent 一進程</td><td><span class="tag ok">OK</span></td></tr>
+<tr><td><code>frontends/mok_ws.py</code></td><td>多用戶公開（WebSocket）</td><td><strong>不存在</strong>；實際是 <code>mok_wa.py</code>（WhatsApp）且 launcher 未啟動</td><td><span class="tag bad">不一致</span></td></tr>
+<tr><td><code>html/static/api.js</code></td><td>多用戶公開</td><td>存在（42KB）</td><td><span class="tag ok">OK</span></td></tr>
+<tr><td><code>html/index.html</code></td><td>admin 用</td><td>存在</td><td><span class="tag ok">OK</span></td></tr>
+<tr><td><code>html/project/index.html</code></td><td>多用戶公開</td><td>存在</td><td><span class="tag ok">OK</span></td></tr>
+<tr><td><code>html/game/index.html</code></td><td>多用戶公開</td><td>存在，但同時有 <code>game/</code> 與 <code>game2/</code> 兩套（game2 疑似備份）</td><td><span class="tag warn">需清理</span></td></tr>
+<tr><td>admin 要 agent 24 小時多工並行</td><td>並行多工</td><td>launcher 常駐，但並發有 loop 綁定 bug</td><td><span class="tag bad">有阻礙</span></td></tr>
+</table>
+
+<h2>二、設計正確的部分（建議保留）</h2>
+<div class="card">
+<h3>1. 統一核心抽象 <span class="tag ok">正確</span></h3>
+<p><code>process_message(user_id, text, stream_callback, agent_name, agent_config)</code> 一個入口服務所有前端。前端只需傳異步回調即可拿到 <code>think / reply / done</code> 事件流，TG、Web、未來 WS 共用同一套邏輯，這是對的。</p>
+
+<h3>2. 多用戶隔離 <span class="tag ok">正確</span></h3>
+<p><code>_get_unique_user_id(user_id, agent_name)</code>（<code>mokagi.py:182</code>）把「用戶 + Agent」合成唯一 ID，歷史、記憶、待辦都按此分庫，避免用戶 A 的記憶污染用戶 B。</p>
+
+<h3>3. 多 Agent 參數化 <span class="tag ok">正確</span></h3>
+<p><code>agent_name</code> / <code>agent_config</code> 參數 + <code>_agent_config_cache[agent_name]</code> 按 Agent 隔離配置，Web 進程可動態服務多個 Agent。</p>
+
+<h3>4. 前端進程隔離 <span class="tag ok">正確</span></h3>
+<p><code>launcher.py</code> 為每個 Agent 啟動獨立 TG bot 子進程，Web 獨立進程，單一 agent 掛掉不拖垮全部。</p>
+</div>
+
+<h2>三、設計錯誤 / 缺陷（需修正）</h2>
+
+<div class="card">
+<h3>缺陷 1（致命）：<code>asyncio.Lock()</code> 綁定 event loop，多線程多 loop 下會崩 <span class="tag bad">P0</span></h3>
+<p>位置：<code>core/config.py:38-42</code> → <code>get_config_lock()</code> 返回 <code>asyncio.Lock()</code>；<code>get_agent_config()</code>（<code>config.py:134</code>）內 <code>async with get_config_lock()</code>。</p>
+<p>但 <code>mok_web.py:153</code> 用 <code>async_mode="threading"</code>，且 <code>/api/chat</code>（<code>mok_web.py:495-612</code>）<strong>每請求開一個 thread + <code>asyncio.new_event_loop()</code></strong>。</p>
+<p>當兩個用戶並行、各自在不同 loop 同時觸發 <code>get_agent_config</code> → 第二個 loop 碰到第一個 loop 綁定的 lock → <code>RuntimeError: &lt;Lock&gt; is bound to a different event loop</code>。</p>
+<pre># 現況（錯）
+_config_cache_lock = None
+def get_config_lock():
+    global _config_cache_lock
+    if _config_cache_lock is None:
+        _config_cache_lock = asyncio.Lock()   # ← 綁定當前 loop
+    return _config_cache_lock
+
+# 建議（配置加載是同步檔案 I/O，用同步鎖即可，跨線程/loop 都安全）
+import threading
+_config_cache_lock = threading.Lock()
+def get_config_lock():
+    return _config_cache_lock
+# get_agent_config 改用：with _config_cache_lock:  （去掉 async with）</pre>
+</div>
+
+<div class="card">
+<h3>缺陷 2（致命）：全局單例 <code>_openai_client</code> 綁定 loop，多線程互相覆蓋 <span class="tag bad">P0</span></h3>
+<p>位置：<code>mokagi.py:959-985</code> <code>_get_openai_client()</code>。全局 <code>_openai_client</code> + <code>_openai_client_loop</code>，偵測到 loop 不同就重建。</p>
+<p>多線程並發時會競態：線程 A 重建 client（綁 loop A），線程 B 又偵測不同重建（綁 loop B），線程 A 手裡的 client 實際已被 B 覆蓋 → 跨 loop 呼叫 OpenAI 掛起/報錯。</p>
+<pre># 建議：按 loop 隔離，每個 loop 一個 client
+_openai_clients = {}   # {loop_id: client}
+import threading as _t
+_clients_lock = _t.Lock()
+
+def _get_openai_client(api_key, base_url):
+    loop = asyncio.get_running_loop()
+    lid = id(loop)
+    with _clients_lock:
+        c = _openai_clients.get(lid)
+        if c is None or loop.is_closed():
+            c = openai.AsyncOpenAI(api_key=api_key, base_url=base_url, ...)
+            _openai_clients[lid] = c
+    return c</pre>
+</div>
+
+<div class="card">
+<h3>缺陷 3：launcher 沒啟動 WhatsApp/WS 前端 <span class="tag bad">P1</span></h3>
+<p>位置：<code>core/launcher.py:134-168</code> <code>main()</code> 只呼叫 <code>start_bot()</code>（mok_tg）+ <code>start_web()</code>（mok_web）。<code>mok_wa.py</code> 完全沒被啟動。</p>
+<p>且你寫的 <code>mok_ws.py</code> 並不存在 —— 需要你確認：<strong>ws = WebSocket 前端，還是 wa = WhatsApp？</strong> 若要 WebSocket 公開前端，需另建 <code>mok_ws.py</code> 並在 launcher 加 <code>start_ws()</code>。</p>
+</div>
+
+<div class="card">
+<h3>缺陷 4：mok_web 改寫全域配置，多 Agent 並行污染 <span class="tag warn">P1</span></h3>
+<p>位置：<code>mok_web.py:424-443</code> 直接改 <code>_agent_config["ADMIN_CHAT_ID"]</code> 與 <code>os.environ</code>。多 Agent 並行時，A 請求改寫的環境變量可能在 B 請求讀取時生效（<code>get_agent_config</code> 內也改 <code>os.environ["MOK_AGENT_NAME"]</code>）。</p>
+<p>建議：ADMIN_CHAT_ID 等改為「請求級參數」或「每 agent 獨立快取」，不要碰全域 <code>_agent_config</code>。</p>
+</div>
+
+<div class="card">
+<h3>缺陷 5：<code>_pending_llm_confirm</code> 無 TTL 清理 <span class="tag warn">P2</span></h3>
+<p>位置：<code>mokagi.py:131</code> + <code>1067-1099</code>。全域 dict 存待確認的 LLM 呼叫，context_id 唯一所以不衝突，但<strong>從不清理過期條目</strong>，24 小時常駐會持續漲記憶體。建議加時間戳 + 定時清理。</p>
+</div>
+
+<div class="card">
+<h3>缺陷 6：<code>game/</code> 與 <code>game2/</code> 重複 <span class="tag warn">P2</span></h3>
+<p>兩套遊戲目錄，<code>game2/</code> 疑似舊版備份，建議確認後清理，避免多用戶訪問到舊版。</p>
+</div>
+
+<h2>四、「24 小時多工並行」的落地建議</h2>
+<div class="card">
+<p>真正的並行瓶頸不是「開幾個進程」，而是<strong>共享可變狀態 + event loop 綁定</strong>。修復順序：</p>
+<ol>
+<li><strong>先修 P0 兩項</strong>（config 鎖改 <code>threading.Lock</code>、OpenAI client 按 loop 隔離）——不修，並發一高就崩。</li>
+<li><strong>launcher 補齊前端</strong>：確認 wa/ws 後加 <code>start_wa()</code> 或 <code>start_ws()</code>，統一由 launcher 拉起。</li>
+<li><strong>每 Agent 的 TG bot 已是獨立進程</strong> → 天然並行；Web 端靠 thread + 獨立 loop 並行，修完 P0 後即可穩定多工。</li>
+<li><strong>若要多 Agent 跨進程協作</strong>（一個任務分給多個 agent），目前 <code>job</code>/<code>workflow</code> 工具已有 handover/takeover 概念，但需驗證其多進程安全性。</li>
+<li>加 <code>pm2 start launcher.py</code> 或 systemd 常駐 + 自動重啟，確保 24 小時不中斷（目前主機上 pm2 未安裝、且無 mok_* 進程在跑）。</li>
+</ol>
+</div>
+
+<h2>五、結論一句話</h2>
+<div class="verdict good">
+<code>mokagi.py</code> 的「統一核心 + 多用戶/多 Agent 參數化」骨架<strong>沒有錯</strong>，錯在<strong>全域共享狀態用了綁定 event loop 的 asyncio 物件</strong>（config 鎖、OpenAI client），以及<strong>launcher 沒有把你要的公開前端全部拉起</strong>。修掉 P0 兩項，就能安全支撐「24 小時多工並行」。
+</div>
+
+<div class="foot">mokagi說明 · 自動審查報告 · 2026-08-13</div>
+</div>
+</body>
+</html>

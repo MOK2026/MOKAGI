@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>整合管理後台</title>
+<style>
+:root{
+  --bg:#0b0f1a;--card:#141a29;--card2:#1b2438;--line:#27324a;
+  --txt:#e8eefc;--sub:#8ea0c0;--acc:#7c5cff;--acc2:#ff5ca8;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--txt);
+  font-family:-apple-system,"PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+#wrap{display:flex;flex-direction:column;height:100vh;height:100dvh}
+#nav{display:flex;align-items:center;gap:6px;padding:8px 10px;
+  background:linear-gradient(180deg,#161d30,#111726);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{padding:7px 12px;border-radius:10px;background:var(--card2);border:1px solid var(--line);
+  color:var(--sub);cursor:pointer;font-size:13px;white-space:nowrap;user-select:none;transition:.15s}
+.tab:hover{color:#fff;border-color:#3a466b}
+.tab.act{color:#fff;background:linear-gradient(135deg,var(--acc),var(--acc2));border-color:transparent;font-weight:600}
+.sep{width:1px;height:20px;background:var(--line);margin:0 3px}
+#spacer{flex:1}
+#logout{padding:7px 13px;border-radius:10px;background:#3a1b24;border:1px solid #5a2733;
+  color:#ff9fb0;cursor:pointer;font-size:13px;white-space:nowrap}
+#logout:hover{background:#4a2029;color:#fff}
+#content{flex:1;width:100%;border:none;background:#0b0f1a}
+#tip{display:none;padding:10px 14px;font-size:13px;color:#ffb3c1}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="nav">
+    <div class="tab act" data-kind="member" data-url="/admin/member">&#128101; 會員列表</div>
+    <div class="tab" data-kind="member" data-url="/admin/plans">&#128179; 方案設定</div>
+    <div class="sep"></div>
+    <div class="tab" data-kind="live" data-tab="guard">&#128220; 直播守則</div>
+    <div class="tab" data-kind="live" data-tab="files">&#128194; 檔案管理</div>
+    <div class="tab" data-kind="live" data-tab="svc">&#9881;&#65039; 服務與日誌</div>
+    <div class="tab" data-kind="live" data-tab="adv">&#129513; 全部設定</div>
+    <div class="sep"></div>
+    <div class="tab" data-kind="social">&#128241; 社交平台</div>
+    <div id="spacer"></div>
+    <button id="logout" onclick="location.href='/logout'">&#128682; 登出</button>
+  </div>
+  <iframe id="content" src="/admin/member" allow="clipboard-read; clipboard-write; clipboard-write"></iframe>
+</div>
+<script>
+(function(){
+  var ifr = document.getElementById('content');
+  var LIVE_URL = '/直播房3/admin.html';
+  var CURRENT = 'guard';
+
+  function setActive(el){
+    document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('act');});
+    el.classList.add('act');
+  }
+
+  // 在直播房3 iframe（同源）內點擊對應分頁，並隱藏它自帶的標題列與分頁列（改用本頁頂導航統一控制）
+  function clickLiveTab(tab){
+    try{
+      var d = ifr.contentDocument;
+      if(!d) return;
+      var hdr = d.querySelector('.hdr'); if(hdr) hdr.style.display = 'none';
+      var tb  = d.querySelector('.tabs'); if(tb) tb.style.display = 'none';
+      var t = d.querySelector('.tab[data-p="' + tab + '"]');
+      if(t) t.click();
+    }catch(e){}
+  }
+
+  function openLive(tab){
+    CURRENT = tab;
+    if(ifr.dataset.kind === 'live'){          // 已載入直播房3，直接切內部頁籤
+      clickLiveTab(tab);
+      return;
+    }
+    ifr.dataset.kind = 'live';
+    ifr.onload = function(){ clickLiveTab(tab); ifr.onload = null; };
+    ifr.src = LIVE_URL;
+  }
+
+  function openMember(url){
+    ifr.dataset.kind = 'member';
+    ifr.onload = null;
+    ifr.src = url;
+  }
+
+  // 整合 mokagi 社交平台管理頁（自動搜尋／熱門榜／資訊流設定）
+  // 以 /report/ 直連 job 目錄，永遠讀到最新版本；其 /api/* 呼叫會走本服務的社交平台反向代理
+  var SOCIAL_URL = '/report/' + encodeURIComponent('春') + '/'
+                 + encodeURIComponent('mokagi社交平台2') + '/admin.html';
+
+  function hideSocialChrome(){
+    try{
+      var d = ifr.contentDocument;
+      if(!d) return;
+      var hdr = d.querySelector('.hdr'); if(hdr) hdr.style.display = 'none';
+    }catch(e){}
+  }
+
+  function openSocial(){
+    ifr.dataset.kind = 'social';
+    if(ifr.dataset.socialLoaded === '1'){    // 已載入過，避免重新載入
+      hideSocialChrome();
+      return;
+    }
+    ifr.onload = function(){
+      ifr.dataset.socialLoaded = '1';
+      hideSocialChrome();
+      ifr.onload = null;
+    };
+    ifr.src = SOCIAL_URL;
+  }
+
+  document.querySelectorAll('.tab').forEach(function(t){
+    t.addEventListener('click', function(){
+      setActive(t);
+      if(t.dataset.kind === 'live') openLive(t.dataset.tab);
+      else if(t.dataset.kind === 'social') openSocial();
+      else openMember(t.dataset.url);
+    });
+  });
+})();
+</script>
+</body>
+</html>

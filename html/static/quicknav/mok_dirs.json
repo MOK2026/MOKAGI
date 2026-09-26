@@ -1,0 +1,21 @@
+{
+  "generator": "indexPage",
+  "root": ".mok",
+  "updated_at": "2026-08-13T17:19:57",
+  "dirs": [
+    { "name": "agent", "path": ".mok/agent", "display": ".mok/agent/" },
+    { "name": "backups", "path": ".mok/backups", "display": ".mok/backups/" },
+    { "name": "browser_profile", "path": ".mok/browser_profile", "display": ".mok/browser_profile/" },
+    { "name": "core", "path": ".mok/core", "display": ".mok/core/" },
+    { "name": "frontends", "path": ".mok/frontends", "display": ".mok/frontends/" },
+    { "name": "html", "path": ".mok/html", "display": ".mok/html/" },
+    { "name": "playwright-browsers", "path": ".mok/playwright-browsers", "display": ".mok/playwright-browsers/" },
+    { "name": "skill", "path": ".mok/skill", "display": ".mok/skill/" },
+    { "name": "tools", "path": ".mok/tools", "display": ".mok/tools/" },
+    { "name": "work", "path": ".mok/work", "display": ".mok/work/" },
+    { "name": ".chroma_data", "path": ".mok/.chroma_data", "display": ".mok/.chroma_data/" },
+    { "name": ".memory", "path": ".mok/.memory", "display": ".mok/.memory/" },
+    { "name": ".pending_cron_confirm", "path": ".mok/.pending_cron_confirm", "display": ".mok/.pending_cron_confirm/" },
+    { "name": ".speech2text_models", "path": ".mok/.speech2text_models", "display": ".mok/.speech2text_models/" }
+  ]
+}

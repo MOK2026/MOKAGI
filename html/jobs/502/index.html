@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>⚠ MOKAGI 502 救援頁</title>
+<style>
+  :root{--bg:#0f1115;--card:#171a21;--line:#2a2f3a;--fg:#e6e8ee;--mut:#98a0b3;--warn:#ffb020;--bad:#ff5566;--ok:#31c48d;--acc:#4c8dff;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif}
+  .wrap{max-width:1040px;margin:0 auto;padding:22px 16px 60px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--mut);font-size:13px;margin-bottom:16px}
+  .banner{background:linear-gradient(90deg,#3a1418,#1a1d24);border:1px solid #5a2530;border-radius:12px;padding:14px 16px;margin-bottom:18px}
+  .banner b{color:var(--bad)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:16px}
+  .card h2{font-size:15px;margin:0 0 10px;color:var(--acc)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mut);font-weight:500;white-space:nowrap}
+  td.path{font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
+  .tag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;border:1px solid var(--line);color:var(--mut)}
+  .tag.hot{color:#111;background:var(--warn);border-color:var(--warn);font-weight:700}
+  button{background:#232838;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:12.5px}
+  button:hover{border-color:var(--acc)}
+  button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+  button.danger{background:#3a1418;border-color:#5a2530;color:#ffb3bc}
+  select{background:#1d2129;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:4px 6px;max-width:240px}
+  .mut{color:var(--mut)}
+  .log{white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;background:#0b0d11;border:1px solid var(--line);border-radius:8px;padding:10px;min-height:44px;max-height:260px;overflow:auto}
+  a{color:var(--acc)}
+  .spin{animation:sp 1s linear infinite;display:inline-block}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚠ MOKAGI 502 救援頁</h1>
+  <div class="sub">當 mokagi 出現任何 502，首頁會自動轉來這裡。掃描範圍：<b>core/</b> + <b>frontends/</b>；還原來源：<b>/backup 系統</b>。</div>
+
+  <div class="banner">
+    <div><b>系統目前處於 502 狀態</b> <span id="since" class="mut"></span></div>
+    <div class="mut" id="reason" style="margin-top:2px"></div>
+  </div>
+
+  <div class="card">
+    <h2>① 最近修改的文件（最可疑的元凶）</h2>
+    <div class="row" style="margin-bottom:10px">
+      <button class="pri" onclick="load()">🔄 重新掃描</button>
+      <button onclick="clearState()">✅ 解除 502 狀態並返回首頁</button>
+      <button class="danger" onclick="flagTest()">🧪 模擬 502（測試用）</button>
+      <span class="mut" id="scanInfo"></span>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>檔案</th><th>修改時間</th><th>大小</th><th>還原</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="5" class="mut">載入中…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>② 完整備份（~/.mok/backups，/backup 系統）</h2>
+    <table>
+      <thead><tr><th>備份檔</th><th>時間</th><th>大小</th></tr></thead>
+      <tbody id="bks"><tr><td colspan="3" class="mut">載入中…</td></tr></tbody>
+    </table>
+    <div class="mut" style="margin-top:6px">提示：於 ① 按「從最新完整備份還原」，會自動從上面最新的備份檔抽出該檔（找不到會往下找）。</div>
+  </div>
+
+  <div class="card">
+    <h2>③ 執行紀錄</h2>
+    <div class="log" id="log">待命。</div>
+  </div>
+</div>
+
+<script>
+function log(s){var e=document.getElementById('log');e.textContent='['+new Date().toLocaleTimeString()+'] '+s+'\n'+e.textContent;}
+function hm(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';if(n<1073741824)return (n/1048576).toFixed(1)+' MB';return (n/1073741824).toFixed(2)+' GB';}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+async function load(){
+  document.getElementById('rows').innerHTML='<tr><td colspan="5" class="mut"><span class="spin">⏳</span> 掃描中…</td></tr>';
+  try{
+    var r=await fetch('/api/502/recent?n=10',{cache:'no-store'});
+    var d=await r.json();
+    document.getElementById('scanInfo').textContent='掃描時間：'+new Date().toLocaleTimeString();
+    fillRows(d.files||[]);
+    fillBks(d.backups||[]);
+    var st=d.state||{};
+    document.getElementById('since').textContent = st.since? ('（自 '+st.since+' 起，累計 '+st.count+' 次）'):'(未偵測到 502 事件)';
+    document.getElementById('reason').textContent = st.last_reason? ('最近事件：'+st.last_reason):'';
+    log('掃描完成，取回 '+(d.files||[]).length+' 個最近修改檔案。');
+  }catch(e){log('掃描失敗：'+e);}
+}
+function fillRows(files){
+  var tb=document.getElementById('rows');
+  if(!files.length){tb.innerHTML='<tr><td colspan="5" class="mut">沒有符合條件的檔案。</td></tr>';return;}
+  tb.innerHTML=files.map(function(f,i){
+    var bks=f.backups||[];
+    var opts=bks.map(function(b){return '<option value="'+esc(b.name)+'">'+esc(b.name)+'（'+b.mtime_str+'）</option>';}).join('');
+    var sel=bks.length? ('<select id="sel'+i+'">'+opts+'</select> <button onclick="restoreSib(\''+esc(f.rel)+'\','+i+')">還原此版</button>')
+                      : '<span class="mut">無同層 .bak</span>';
+    return '<tr><td>'+(i===0?'<span class="tag hot">最新</span>':'<span class="tag">'+(i+1)+'</span>')+'</td>'
+      +'<td class="path">'+esc(f.rel)+'</td>'
+      +'<td class="mut">'+esc(f.mtime_str)+'<br>'+esc(f.ago)+'</td>'
+      +'<td class="mut">'+hm(f.size)+'</td>'
+      +'<td>'+sel+'<br><button class="pri" style="margin-top:5px" onclick="restoreLatest(\''+esc(f.rel)+'\')">從最新完整備份還原</button></td></tr>';
+  }).join('');
+}
+function fillBks(bks){
+  var tb=document.getElementById('bks');
+  if(!bks.length){tb.innerHTML='<tr><td colspan="3" class="mut">沒有完整備份。</td></tr>';return;}
+  tb.innerHTML=bks.map(function(b){return '<tr><td class="path">'+esc(b.name)+'</td><td class="mut">'+esc(b.mtime_str)+'</td><td class="mut">'+hm(b.size)+'</td></tr>';}).join('');
+}
+async function restoreSib(rel,i){
+  var sel=document.getElementById('sel'+i); if(!sel)return;
+  if(!confirm('確定要用 '+sel.value+' 還原 '+rel+' ？（現行檔會先另存 .bak_502restore_*）'))return;
+  await doRestore(rel, sel.value);
+}
+async function restoreLatest(rel){
+  if(!confirm('確定要從最新完整備份還原 '+rel+' ？（需要解壓備份，可能數十秒）'))return;
+  await doRestore(rel,'latest');
+}
+async function doRestore(rel,source){
+  log('還原中：'+rel+'  ← '+(source==='latest'?'最新完整備份':source));
+  try{
+    var r=await fetch('/api/502/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:rel,source:source})});
+    var d=await r.json();
+    if(d.ok){log('✅ 還原成功：'+d.file+'  ← '+d.from+'（現行檔已另存 '+d.safety+'）');alert('還原成功：'+d.file+'\n來源：'+d.from+'\n現行檔已另存：'+d.safety);}
+    else{log('❌ 還原失敗：'+d.error);alert('還原失敗：'+d.error);}
+  }catch(e){log('❌ 還原請求失敗：'+e);}
+  load();
+}
+async function clearState(){
+  try{await fetch('/api/502/clear',{method:'POST'});log('已解除 502 狀態。');}catch(e){log('解除失敗：'+e);}
+  location.href='/?real=1';
+}
+async function flagTest(){
+  try{await fetch('/api/502/flag?reason=manual-test',{method:'POST'});log('已模擬 502 狀態。');}catch(e){log('模擬失敗：'+e);}
+  load();
+}
+load();
+</script>
+</body>
+</html>

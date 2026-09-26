@@ -1,0 +1,261 @@
+[
+  {
+    "conv_id": "24723",
+    "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n先讀取現有檔案，了解結構。完整讀取 index.html，及 html 目錄結構：需要完整讀取 index.html 和相關 JS 檔案：內容被截斷了，分段讀取：現在看 main.js 了解對話框渲染邏輯：查看現有工具（搜尋）的實作結構：",
+    "agent": "🤖 · indexPage .mok/html/工程師",
+    "role": "assistant",
+    "timestamp": 1786502480.443
+  },
+  {
+    "conv_id": "24719",
+    "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n讓我同時看看本地檔案和遠端網頁的實際內容，來找出問題。明顯差異！本地 971 行豐富內容，遠端只抓到一句。讓我直接看伺服器返回的原始 HTML，確認是提取問題還是渲染問題。curl 沒輸出，換個方式試：用 Python 來抓原始回應：讓我",
+    "agent": "🤮 · 稚 修bug侍女",
+    "role": "assistant",
+    "timestamp": 1786502566.383
+  },
+  {
+    "conv_id": "24837",
+    "snippet": "💭 思考過程（點擊展開）\n🏗️ 靜 思考中...\n使用者用粵語/中文混雜的語言告訴我，`.mok/html/index.html` 這個 HTML 檔案右側“卓面”（桌面）顯示的是“斷線”，而不是主機內容。他們希望我修復這個問題。\n\n`.mok/html/webTools/novnc*` 中已經",
+    "agent": "🏗️ · 靜 後端架構師",
+    "role": "assistant",
+    "timestamp": 1786569640.003
+  },
+  {
+    "conv_id": "25001",
+    "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n\ntotal 76\ndrwxrwxrwx 9 ubuntu ubuntu 4096 Aug 13 14:56 .\ndrwx------ 16 1001 1001 4096 Aug 13 14:05 ..\ndrwxrwxrwx 2 ubun",
+    "agent": "🤖 · indexPage .mok/html/工程師",
+    "role": "assistant",
+    "timestamp": 1786642011.511
+  },
+  {
+    "conv_id": "24993",
+    "snippet": ".mok/core/mokagi.py\n的設計是否錯了\n我是想用\n\n\n.mok/MOKAGI.sh\n安裝到主機\n\n.mok/frontends/mok_web.py\n.mok/frontends/mok_tg.py（這個是多用戶公開用）\n.mok/frontends/mok_ws.py（這個是多用戶",
+    "agent": "🤖 · mokagi說明 mokagi專家",
+    "role": "user",
+    "timestamp": 1786644326.166
+  },
+  {
+    "conv_id": "25093",
+    "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n\n用法: /admin htop <action>\n例：/admin htop action\n\n查看系統負載（top 前5行）。無需參數。\n\n\n用法: /admin htop <action>\n例：/admin htop action\n\n",
+    "agent": "🤖 · API平台工程師 API平台工程師",
+    "role": "assistant",
+    "timestamp": 1786733072.004
+  },
+  {
+    "conv_id": "25083",
+    "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n\n\n# security-engineer-wang · Work Skill\n\n## Core Skills\n\n- Web 安全审计（SQL注入/XSS/CSRF）\n\n- 代码 Review：鉴权、输入校验、依赖安全\n\n- 安全架构设计",
+    "agent": "🌻 · 春 網頁前端",
+    "role": "assistant",
+    "timestamp": 1786734686.401
+  },
+  {
+    "conv_id": "25097",
+    "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n主人: <引用對話: [ID:25087]> `references/research/` 是甚麼重要必須的東西嗎?\nindexPage: 主人: 建立新Agent\n可否加入這\nhttps://github.com/alchaincyf/",
+    "agent": "🤖 · indexPage .mok/html/工程師",
+    "role": "assistant",
+    "timestamp": 1786736387.862
+  },
+  {
+    "conv_id": "25199",
+    "snippet": "",
+    "agent": "🤖 · 312",
+    "role": "assistant",
+    "timestamp": 1786801102.159
+  },
+  {
+    "conv_id": "25201",
+    "snippet": "",
+    "agent": "🤖 · 312",
+    "role": "assistant",
+    "timestamp": 1786801121.4
+  },
+  {
+    "conv_id": "26189",
+    "snippet": "",
+    "agent": "🤖 · 賺錢王 自動營商程式",
+    "role": "assistant",
+    "timestamp": 1787511815.651
+  },
+  {
+    "conv_id": "26565",
+    "snippet": "",
+    "agent": "🎩 · 懂王 談判與權力分析師",
+    "role": "assistant",
+    "timestamp": 1787856642.831
+  },
+  {
+    "conv_id": "26541",
+    "snippet": "",
+    "agent": "🎩 · 懂王 短影音帶貨",
+    "role": "assistant",
+    "timestamp": 1788003772.279
+  },
+  {
+    "conv_id": "27079",
+    "snippet": "",
+    "agent": "🤖 · 影片女 影片生成",
+    "role": "assistant",
+    "timestamp": 1788017099.204
+  },
+  {
+    "conv_id": "27093",
+    "snippet": "",
+    "agent": "🤖 · 影片女 影片生成",
+    "role": "assistant",
+    "timestamp": 1788024377.897
+  },
+  {
+    "conv_id": "34043",
+    "snippet": "",
+    "agent": "🤮 · 稚 修bug侍女",
+    "role": "assistant",
+    "timestamp": 1788291469.195
+  },
+  {
+    "conv_id": "45447",
+    "snippet": "",
+    "agent": "🤰 · 泠 生產女",
+    "role": "assistant",
+    "timestamp": 1788534085.784
+  },
+  {
+    "conv_id": "58775",
+    "snippet": "",
+    "agent": "🤮 · 稚 修bug侍女",
+    "role": "assistant",
+    "timestamp": 1788682947.773
+  },
+  {
+    "conv_id": "58261",
+    "snippet": "<引用對話: [ID:58203]> 去 civitai 找 MiniMax-H3 專用 deepthroat/喉嚨鼓包 影片生成的模型\n\n===\n\n[出靜態圖] SDXL/底模 主鏡頭 / 全身動作段\n│ └─ H3（vast.ai 喉嚨特寫段 ⭐\n└─ Wan 2.2 + 1497390 LoR",
+    "agent": "🤮 · 稚 修bug侍女",
+    "role": "user",
+    "timestamp": 1788684604.551,
+    "title": "vast.ai 喉嚨特寫段"
+  },
+  {
+    "conv_id": "55799",
+    "snippet": "<引用對話: [ID:55531]>我想做到像真人主播一樣 網頁看到是虛幻引擎生成的真實人類 但發出聲音時會開口 滑鼠移動角色也會看著\n這應如何做? 📋",
+    "agent": "🤮 · 稚 修bug侍女",
+    "role": "user",
+    "timestamp": 1788684714.46,
+    "title": ""
+  },
+  {
+    "conv_id": "64785",
+    "snippet": "",
+    "agent": "🤮 · 稚 修bug侍女",
+    "role": "assistant",
+    "title": "gpuLlm等主人一句「開跑」）",
+    "timestamp": 1788791161.697
+  },
+  {
+    "conv_id": "65671",
+    "snippet": "",
+    "agent": "🏗️·靜 架構師",
+    "role": "assistant",
+    "title": "記憶流優化0908",
+    "timestamp": 1788804812.011
+  },
+  {
+    "conv_id": "65719",
+    "snippet": "",
+    "agent": "🏗️ · 靜 後端架構師",
+    "role": "assistant",
+    "title": "kd快取原理",
+    "timestamp": 1788807760.348
+  },
+  {
+    "conv_id": "64029",
+    "snippet": "",
+    "agent": "🔒 · 凜 權限女",
+    "role": "assistant",
+    "title": "演奏音楽芸術中心",
+    "timestamp": 1788812397.443
+  },
+  {
+    "conv_id": "69559",
+    "snippet": "",
+    "agent": "🤮 · 稚 修bug侍女",
+    "role": "assistant",
+    "title": "`enable_thinking:false`（所有 agent",
+    "timestamp": 1788895817.864
+  },
+  {
+    "conv_id": "69601",
+    "snippet": "",
+    "agent": "🤮 · 稚 修bug侍女",
+    "role": "assistant",
+    "title": "要修",
+    "timestamp": 1788896215.196
+  },
+  {
+    "conv_id": "246283",
+    "snippet": "",
+    "agent": "🤖 · 影片女 影片生成",
+    "role": "assistant",
+    "title": "mokagi日常短劇",
+    "timestamp": 1789203234.127
+  },
+  {
+    "conv_id": "252855",
+    "snippet": "",
+    "agent": "🤖 · mokagi說明 mokagi專家",
+    "role": "assistant",
+    "title": "core 這 5 個模組目前**全系統找不到任何引用**，疑似孤兒檔",
+    "timestamp": 1789247731.423
+  },
+  {
+    "conv_id": "253131",
+    "snippet": "",
+    "agent": "🤖 · 影片女 影片生成",
+    "role": "assistant",
+    "timestamp": 1789506160.323
+  },
+  {
+    "conv_id": "253405",
+    "snippet": "",
+    "agent": "🤖 · 備 備份中心負責",
+    "role": "assistant",
+    "timestamp": 1789528695.393
+  },
+  {
+    "conv_id": "253443",
+    "snippet": "",
+    "agent": "🤖 · mokagi說明 mokagi專家",
+    "role": "assistant",
+    "timestamp": 1789545506.358
+  },
+  {
+    "conv_id": "253931",
+    "snippet": "",
+    "agent": "🤰 · 泠 生產女",
+    "role": "assistant",
+    "title": "agent互動",
+    "timestamp": 1789876527.388
+  },
+  {
+    "conv_id": "254267",
+    "snippet": "",
+    "agent": "🤖 · mokagi說明 mokagi專家",
+    "role": "assistant",
+    "title": "預設 6 輪 LLM 摘要",
+    "timestamp": 1790093522.854
+  },
+  {
+    "conv_id": "254837",
+    "snippet": "",
+    "agent": "🤰 · 泠 生產女",
+    "role": "assistant",
+    "title": "免註冊、免金鑰、社群算力供養的開放式生成 API，可生圖／文／音／影",
+    "timestamp": 1790264189.215
+  },
+  {
+    "conv_id": "255215",
+    "snippet": "",
+    "agent": "🤰 · 泠 生產女",
+    "role": "assistant",
+    "title": "mokagi token選擇",
+    "timestamp": 1790379362.467
+  }
+]

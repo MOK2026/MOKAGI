@@ -1,0 +1,248 @@
+/* ══════════════════════════════════════════════════════════════
+   mok-polish.css  ·  春房間 / indexPage 視覺整潔層
+   疊在 style.css 之後，只做「美化」：
+   · 統一頂部膠囊按鈕的高度／字級／形狀（顏色以 --tone 保留各自識別）
+   · 工具列改為單列橫向捲動，不再擠壓換行
+   · 統一圓角、間距、hover / active 回饋、捲軸樣式
+   不改任何 DOM 結構、id、class 或 JS 行為。
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+    --mok-bg:        #1b1b1e;
+    --mok-surface:   #232327;
+    --mok-surface-2: #2b2b31;
+    --mok-line:      #3a3a42;
+    --mok-text:      #e6e6ea;
+    --mok-muted:     #9a9aa6;
+    --mok-accent:    #4ec9b0;
+    --mok-danger:    #e05561;
+    --mok-r:         12px;
+    --mok-pill-h:    26px;
+    --mok-pill-fs:   0.78rem;
+}
+
+/* ─────────────────────────────────────────────
+   1. 通用膠囊按鈕（頂部列、側欄標頭）
+   ───────────────────────────────────────────── */
+button.mok-pill {
+    --tone: #4ec9b0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+
+    height: var(--mok-pill-h);
+    padding: 0 12px;
+    border-radius: 999px;
+
+    font-family: inherit;
+    font-size: var(--mok-pill-fs);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: .2px;
+    white-space: nowrap;
+
+    color: #eef0f4;
+    background: #2f2f36;                                    /* fallback */
+    background: color-mix(in srgb, var(--tone) 20%, #26262c);
+    border: 1px solid #45454f;                              /* fallback */
+    border-color: color-mix(in srgb, var(--tone) 55%, transparent);
+    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset;
+
+    cursor: pointer;
+    transition: background .15s ease, border-color .15s ease,
+                box-shadow .15s ease, transform .1s ease;
+}
+
+button.mok-pill:hover {
+    background: color-mix(in srgb, var(--tone) 34%, #26262c);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent);
+}
+
+button.mok-pill:active { transform: translateY(1px); }
+
+button.mok-pill:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 35%, transparent);
+}
+
+/* 危險 / 強調款（緊急重啟、清空 Jobs） */
+button.mok-pill--danger {
+    color: #ffe9eb;
+    background: #46262a;
+    background: color-mix(in srgb, var(--tone) 34%, #2a1c1e);
+    border-color: color-mix(in srgb, var(--tone) 70%, transparent);
+}
+button.mok-pill--danger:hover {
+    background: color-mix(in srgb, var(--tone) 52%, #2a1c1e);
+}
+
+/* 幽靈款（⋯ 更多） */
+button.mok-pill--ghost {
+    color: var(--mok-muted);
+    background: transparent;
+    border-color: #4a4a55;
+}
+button.mok-pill--ghost:hover { color: #fff; border-color: #6a6a78; }
+
+/* 摺疊收藏時隱藏的按鈕（沿用原邏輯，只補強） */
+.agent-header-btns button.header-folded { display: none !important; }
+
+/* ─────────────────────────────────────────────
+   2. 左側 Agent 側欄標頭
+   ───────────────────────────────────────────── */
+.agent-header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+/* ─────────────────────────────────────────────
+   3. 中央頂部列（chat-header）
+   ───────────────────────────────────────────── */
+.chat-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: linear-gradient(180deg, #26262b, #202024);
+    border-bottom: 1px solid var(--mok-line);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+}
+
+.chat-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+#agentHeaderDisplay {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 700;
+    color: var(--mok-text);
+}
+
+/* 按鈕群：單列、可橫向捲動，永不擠成一團 */
+.agent-header-btns {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding: 2px 1px;
+}
+.agent-header-btns::-webkit-scrollbar { display: none; height: 0; }
+
+.header-stop-btn { margin-left: auto; flex: 0 0 auto; }
+.header-more-btn { flex: 0 0 auto; }
+
+/* 「更多」下拉：統一風格 */
+.header-btns-dropdown {
+    background: var(--mok-surface-2);
+    border: 1px solid var(--mok-line);
+    border-radius: var(--mok-r);
+    box-shadow: 0 10px 28px rgba(0,0,0,.45);
+    padding: 8px;
+}
+
+/* ─────────────────────────────────────────────
+   4. 右側工具列 / 浮動工具列
+   ───────────────────────────────────────────── */
+.tools-header,
+.tools-header-float {
+    gap: 6px;
+    flex-wrap: nowrap;
+}
+
+.tools-header-buttons {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: nowrap;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding: 3px 2px;
+}
+.tools-header-buttons::-webkit-scrollbar { display: none; height: 0; }
+
+.tools-header-buttons button {
+    flex: 0 0 auto;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: #2c2c33;
+    color: #c9c9d2;
+    font-family: inherit;
+    font-size: 0.76rem;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.tools-header-buttons button:hover {
+    background: #37373f;
+    color: #fff;
+    border-color: #4a4a55;
+}
+.tools-header-buttons button.active {
+    background: var(--mok-accent);
+    color: #14211e;
+    border-color: transparent;
+    font-weight: 700;
+}
+
+/* 工具列右側的小圓鈕（🌸 ➕ 📝 ❌） */
+.tools-header > button,
+.tools-header-float > button:not(.tools-header-buttons button) {
+    flex: 0 0 auto;
+    height: 24px;
+    min-width: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid var(--mok-line);
+    background: #2c2c33;
+    color: #d5d5dd;
+    font-size: 0.76rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+}
+.tools-header > button:hover,
+.tools-header-float > button:hover { background: #3a3a44; color: #fff; }
+
+/* ─────────────────────────────────────────────
+   5. 全域細節
+   ───────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: #3f3f49;
+    border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: #55555f; }
+
+/* 手機：縮小膠囊、隱藏次要文字，只留 emoji */
+@media (max-width: 560px) {
+    :root { --mok-pill-h: 24px; --mok-pill-fs: 0.72rem; }
+    button.mok-pill { padding: 0 9px; }
+    .chat-header { padding: 5px 7px; gap: 6px; }
+    .agent-header-btns { gap: 5px; }
+    .chat-header .btn-label,
+    .agent-header-btns .btn-label { display: none; }
+}

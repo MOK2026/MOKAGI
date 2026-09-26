@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>VNC 診斷</title></head>
+<body style="background:#111;color:#0f0;font-family:monospace;padding:20px">
+<h2>VNC 連線診斷 v3</h2>
+<pre id="log">開始...</pre>
+<script>
+const log = [];
+function L(msg){ log.push(new Date().toISOString().slice(11,19)+' '+msg); document.getElementById('log').textContent = log.join('\n'); }
+async function testFetch(url){
+  const c = new AbortController(); const t = setTimeout(()=>c.abort(), 2500);
+  try { const r = await fetch(url, {mode:'no-cors', signal:c.signal}); clearTimeout(t); L('HTTP '+url+' -> status='+r.status); }
+  catch(e){ clearTimeout(t); L('HTTP '+url+' -> fail: '+e.message); }
+}
+function testWS(url){
+  return new Promise(res => {
+    let ws;
+    try { ws = new WebSocket(url); }
+    catch(e){ L('WS '+url+' -> blocked: '+e.message); res(); return; }
+    const t = setTimeout(()=>{ L('WS '+url+' -> 逾時'); try{ws.close();}catch(e){} res(); }, 2500);
+    ws.onopen = ()=>{ clearTimeout(t); L('WS '+url+' -> OK 連線成功'); try{ws.close();}catch(e){} res(); };
+    ws.onerror = ()=>{ clearTimeout(t); L('WS '+url+' -> ERROR'); res(); };
+    ws.onclose = (e)=>{ clearTimeout(t); L('WS '+url+' -> close code='+e.code); res(); };
+  });
+}
+(async () => {
+  // srcdoc 的 location.origin/host 可能是 null，優先使用父頁 referrer。
+  const pageUrl = document.referrer && /^https?:\/\//.test(document.referrer)
+    ? new URL(document.referrer)
+    : (/^https?:$/.test(window.location.protocol) && window.location.host
+      ? window.location
+      : null);
+  const base = pageUrl ? pageUrl.origin : '';
+  const wsUrl = pageUrl
+    ? (pageUrl.protocol === 'https:' ? 'wss://' : 'ws://') + pageUrl.host + '/novnc-ws'
+    : '';
+  L('=== HTTP ===');
+  if (base) await testFetch(base + '/');
+  else L('HTTP skipped: 找不到父頁網址');
+  L('=== WS ===');
+  if (wsUrl) await testWS(wsUrl);
+  else L('WS skipped: 找不到父頁網址');
+  L('=== 完成 ===');
+})();
+</script>
+</body>
+</html>

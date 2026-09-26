@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>客戶服務</title>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+  :root {
+    --theme: #e0527a;
+    --theme2: #ff9a5c;
+    --bg: #f6f5f8;
+    --card: #ffffff;
+    --ink: #2b2b33;
+    --sub: #8a8a96;
+    --ok: #22c55e;
+    --line: #eceaf1;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* ===== 頂欄 ===== */
+  header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: linear-gradient(135deg, var(--theme), var(--theme2));
+    color: #fff;
+    box-shadow: 0 2px 10px rgba(224, 82, 122, .25);
+    z-index: 5;
+  }
+  header .avatar {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: rgba(255,255,255,.22);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; flex-shrink: 0;
+  }
+  header .title-wrap { flex: 1; min-width: 0; }
+  header .title { font-size: 17px; font-weight: 700; line-height: 1.2; }
+  header .subtitle { font-size: 12px; opacity: .92; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .status {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12px; background: rgba(255,255,255,.2);
+    padding: 5px 10px; border-radius: 20px; white-space: nowrap;
+  }
+  header .status .dot { width: 8px; height: 8px; border-radius: 50%; background: #ffd24a; }
+  header .status.on .dot { background: var(--ok); }
+  header .pro-btn {
+    flex-shrink: 0;
+    background: rgba(255,255,255,.18);
+    color: #fff; border: 1px solid rgba(255,255,255,.35);
+    padding: 8px 12px; border-radius: 10px;
+    font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;
+    transition: background .2s;
+  }
+  header .pro-btn:active { background: rgba(255,255,255,.32); }
+
+  /* ===== 訊息區 ===== */
+  #messages {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 16px 14px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .msg { max-width: 86%; display: flex; animation: pop .25s ease; }
+  .msg.user { align-self: flex-end; justify-content: flex-end; }
+  .msg.bot { align-self: flex-start; }
+  .msg .bubble {
+    padding: 11px 15px; border-radius: 18px;
+    font-size: 15px; line-height: 1.55;
+    word-break: break-word; white-space: pre-wrap;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .msg.user .bubble {
+    background: linear-gradient(135deg, var(--theme), var(--theme2));
+    color: #fff; border-bottom-right-radius: 6px;
+  }
+  .msg.bot .bubble {
+    background: var(--card); color: var(--ink);
+    border: 1px solid var(--line); border-bottom-left-radius: 6px;
+  }
+  .typing { display: inline-flex; gap: 4px; align-items: center; }
+  .typing i { width: 7px; height: 7px; border-radius: 50%; background: #c6c4cf; animation: blink 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s; }
+  .typing i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%,60%,100% { opacity:.3; } 30% { opacity:1; } }
+  @keyframes pop { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
+
+  /* ===== 底部面板 ===== */
+  #panel {
+    flex-shrink: 0;
+    background: var(--card);
+    border-top: 1px solid var(--line);
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 12px;
+    box-shadow: 0 -3px 16px rgba(0,0,0,.05);
+  }
+  .input-bar { display: flex; gap: 8px; align-items: stretch; }
+  #input {
+    flex: 1; min-height: 52px; max-height: 120px;
+    border: 1.5px solid var(--line); border-radius: 14px;
+    padding: 12px 14px; font-size: 15px; line-height: 1.5;
+    font-family: inherit; color: var(--ink); resize: none;
+    background: #fbfbfd; outline: none; transition: border .2s;
+  }
+  #input:focus { border-color: var(--theme); }
+  .mini-btn {
+    border: 1.5px solid var(--line); background: #fff; color: var(--sub);
+    border-radius: 14px; padding: 0 14px; font-size: 14px; cursor: pointer;
+    transition: all .15s; white-space: nowrap;
+  }
+  .mini-btn:active { background: #f1f0f5; transform: scale(.96); }
+
+  /* 大按鍵 */
+  .btn-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 10px;
+  }
+  .big-btn {
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 16px;
+    padding: 14px 8px 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    cursor: pointer;
+    transition: all .15s;
+    min-height: 76px; justify-content: center;
+  }
+  .big-btn:active { transform: scale(.94); border-color: var(--theme); box-shadow: 0 4px 14px rgba(224,82,122,.18); }
+  .big-btn .ico { font-size: 26px; line-height: 1; }
+  .big-btn .lb { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .big-btn.selected { border-color: var(--theme); background: #fff5f8; }
+
+  /* 發送大鍵 */
+  #sendBtn {
+    border: none; cursor: pointer;
+    background: linear-gradient(135deg, var(--theme), var(--theme2));
+    color: #fff; font-size: 18px; font-weight: 700;
+    border-radius: 16px; padding: 16px;
+    letter-spacing: 2px; box-shadow: 0 6px 18px rgba(224,82,122,.3);
+    transition: all .15s;
+  }
+  #sendBtn:active { transform: scale(.97); box-shadow: 0 3px 10px rgba(224,82,122,.25); }
+  #sendBtn:disabled { opacity: .55; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+  <header>
+    <div class="avatar">💬</div>
+    <div class="title-wrap">
+      <div class="title">客戶服務</div>
+      <div class="subtitle" id="agentSub">客服小幫手 為您服務</div>
+    </div>
+    <div class="status" id="status"><span class="dot"></span><span id="statusText">連線中</span></div>
+    <a class="pro-btn" id="proBtn" href="/">⚙️ 專業版</a>
+  </header>
+
+  <div id="messages"></div>
+
+  <div id="panel">
+    <div class="input-bar">
+      <textarea id="input" rows="2" placeholder="點下方按鈕，或直接輸入您的需求…"></textarea>
+      <button class="mini-btn" id="undoBtn" title="刪除最後一項">↩︎</button>
+      <button class="mini-btn" id="clearBtn" title="清空">✕</button>
+    </div>
+
+    <div class="btn-grid" id="btnGrid"></div>
+
+    <button id="sendBtn">發 送 ➤</button>
+  </div>
+
+<script>
+/* ============================================================
+   user.html — mokagi 客戶介面（大按鍵版）
+   文件名：user.html   路徑：~/.mok/html/user.html
+   網址： /user.html   （可加 ?agent=綺 指定服務 Agent）
+   返回專業版 = 點右上角「⚙️ 專業版」→ 回到完整對話框 admin 模式
+   ============================================================ */
+
+/* ===== 基本設定 ===== */
+const CONFIG = {
+  agent: new URLSearchParams(location.search).get('agent') || '客服',
+  server: location.origin,
+  proUrl: '/',
+  context_files: ['agent.md'],
+  sayHi: '您好～我是客服小幫手。請點選下方大按鍵告訴我您的需求，我會立刻為您處理 😊'
+};
+
+/* ===== 大按鍵列表：每鍵 = 一個「提示詞」 =====
+   點選後會把 prompt 追加到輸入框，全部文字會一起送給 LLM */
+const BUTTONS = [
+  { ico: '🛒', label: '想下單',    prompt: '我想下單' },
+  { ico: '📦', label: '查訂單',    prompt: '查詢訂單狀態' },
+  { ico: '💰', label: '查價格',    prompt: '我想查詢價格' },
+  { ico: '🚚', label: '運送方式',  prompt: '運送方式和到貨時間' },
+  { ico: '💳', label: '付款方式',  prompt: '有什麼付款方式' },
+  { ico: '🔁', label: '退換貨',    prompt: '退換貨政策' },
+  { ico: '🕒', label: '營業時間',  prompt: '營業時間和地址' },
+  { ico: '🔧', label: '技術支援',  prompt: '我需要技術支援' },
+  { ico: '👤', label: '找真人',    prompt: '我要聯絡真人客服' },
+  { ico: '⭐', label: '其他問題',  prompt: '其他問題' },
+];
+
+/* ===== DOM ===== */
+const $ = (id) => document.getElementById(id);
+const messagesEl = $('messages'), inputEl = $('input'), btnGrid = $('btnGrid');
+const sendBtn = $('sendBtn'), statusEl = $('status'), statusText = $('statusText');
+
+/* ===== 工具：UUID ===== */
+function genUUID() {
+  let id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+  localStorage.setItem('mokagi_user_id', id);
+  return id;
+}
+const USER_ID = localStorage.getItem('mokagi_user_id') || genUUID();
+
+/* 顯示服務 Agent */
+$('agentSub').textContent = '由「' + CONFIG.agent + '」為您服務';
+
+/* ===== 渲染大按鍵 ===== */
+BUTTONS.forEach((b, i) => {
+  const btn = document.createElement('div');
+  btn.className = 'big-btn';
+  btn.innerHTML = '<span class="ico">' + b.ico + '</span><span class="lb">' + b.label + '</span>';
+  btn.addEventListener('click', () => addPrompt(b.prompt, btn));
+  btnGrid.appendChild(btn);
+});
+
+/* 追加提示詞到輸入框（all文字） */
+function addPrompt(prompt, btnEl) {
+  const cur = inputEl.value.trim();
+  inputEl.value = cur ? cur + '\n' + prompt : prompt;
+  inputEl.focus();
+  if (btnEl) {
+    btnEl.classList.add('selected');
+    setTimeout(() => btnEl.classList.remove('selected'), 220);
+  }
+}
+
+/* 清空 / 刪除最後一項 */
+$('clearBtn').addEventListener('click', () => { inputEl.value = ''; inputEl.focus(); });
+$('undoBtn').addEventListener('click', () => {
+  const lines = inputEl.value.split('\n');
+  lines.pop();
+  inputEl.value = lines.join('\n');
+  inputEl.focus();
+});
+
+/* ===== 訊息顯示 ===== */
+function addMsg(role, html) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + role;
+  const b = document.createElement('div');
+  b.className = 'bubble';
+  b.textContent = html || '';
+  d.appendChild(b);
+  messagesEl.appendChild(d);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return b;
+}
+
+function addTyping() {
+  const d = document.createElement('div');
+  d.className = 'msg bot';
+  d.id = 'typing';
+  d.innerHTML = '<div class="bubble"><span class="typing"><i></i><i></i><i></i></span></div>';
+  messagesEl.appendChild(d);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+function removeTyping() {
+  const t = $('typing');
+  if (t) t.remove();
+}
+
+/* ===== 串流事件處理 ===== */
+let streamBubble = null;
+function handleStreamEvent(ev) {
+  if (ev.type === 'reply') {
+    const c = ev.content || '';
+    if (!c) return;
+    if (!streamBubble) {
+      removeTyping();
+      streamBubble = addMsg('bot', '');
+    }
+    streamBubble.textContent += c;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  } else if (ev.type === 'done') {
+    streamBubble = null;
+    window._sseActive = false;
+    setSending(false);
+  }
+}
+
+/* ===== 連線狀態 ===== */
+function setStatus(on, text) {
+  statusEl.className = 'status' + (on ? ' on' : '');
+  statusText.textContent = text;
+}
+
+/* ===== 發送狀態 ===== */
+function setSending(v) {
+  sendBtn.disabled = v;
+  sendBtn.textContent = v ? '處理中…' : '發 送 ➤';
+}
+
+/* ===== SSE 發送（主要） ===== */
+async function sendViaSSE(text) {
+  const ctrl = new AbortController();
+  window._abort = ctrl;
+  try {
+    const resp = await fetch(CONFIG.server + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        agent: CONFIG.agent,
+        user_id: USER_ID,
+        context_files: CONFIG.context_files,
+      }),
+      signal: ctrl.signal
+    });
+    if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const s = line.slice(6);
+          if (!s || s === '[DONE]') continue;
+          try { handleStreamEvent(JSON.parse(s)); } catch (e) {}
+        }
+      }
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') { /* 已取消 */ }
+    else { window._sseActive = false; console.error('SSE 失敗，改用 Socket.IO', err); sendViaSocket(text); }
+  }
+}
+
+/* ===== Socket.IO 備援 ===== */
+let socket = null;
+function initSocket() {
+  if (typeof io === 'undefined') return;
+  socket = io(CONFIG.server, { transports: ['websocket', 'polling'] });
+  socket.on('connect', () => {
+    socket.emit('join_room', { user_id: USER_ID, agent: CONFIG.agent });
+    setStatus(true, '已連線');
+  });
+  socket.on('disconnect', () => setStatus(false, '連線中斷'));
+  socket.on('chat_stream', (ev) => {
+    if (!window._sseActive) handleStreamEvent(ev);
+  });
+}
+function sendViaSocket(text) {
+  if (socket && socket.connected) {
+    socket.emit('chat_message', { message: text, agent: CONFIG.agent, user_id: USER_ID, context_files: CONFIG.context_files });
+  } else {
+    removeTyping();
+    addMsg('bot', '⚠️ 連線失敗，請稍後重試或刷新頁面。');
+    setSending(false);
+  }
+}
+
+/* ===== 發送 ===== */
+sendBtn.addEventListener('click', () => {
+  const text = inputEl.value.trim();
+  if (!text || sendBtn.disabled) return;
+  addMsg('user', text);
+  inputEl.value = '';
+  addTyping();
+  setSending(true);
+  window._sseActive = true;
+  sendViaSSE(text);
+});
+
+/* 自行輸入時 Enter 換行、Ctrl/⌘+Enter 發送 */
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendBtn.click(); }
+});
+
+/* ===== 啟動 ===== */
+initSocket();
+addMsg('bot', CONFIG.sayHi);
+</script>
+</body>
+</html>

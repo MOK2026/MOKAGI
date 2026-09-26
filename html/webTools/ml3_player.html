@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎬 .ml3 媒體播放器</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,'PingFang TC','Microsoft JhengHei',sans-serif; background:#141417; color:#eaeaea; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+.topbar { display:flex; align-items:center; gap:12px; padding:10px 16px; background:#1d1d22; border-bottom:1px solid rgba(255,255,255,.08); flex-shrink:0; }
+.topbar h1 { font-size:1rem; font-weight:600; white-space:nowrap; }
+.topbar .count { font-size:.75rem; color:#8a8a93; }
+#searchInput { flex:1; max-width:340px; background:rgba(255,255,255,.06); border:1px solid rgba(78,201,176,.35); border-radius:14px; padding:7px 12px; color:#eaeaea; font-size:.8rem; outline:none; }
+.main { flex:1; display:flex; min-height:0; }
+.sidebar { width:300px; min-width:200px; background:#18181c; border-right:1px solid rgba(255,255,255,.08); overflow-y:auto; flex-shrink:0; padding:8px; }
+.file-item { padding:9px 11px; border-radius:10px; cursor:pointer; margin-bottom:3px; transition:background .15s; }
+.file-item:hover { background:rgba(255,255,255,.06); }
+.file-item.active { background:rgba(78,201,176,.16); border:1px solid rgba(78,201,176,.4); }
+.fi-name { font-size:.8rem; word-break:break-all; }
+.fi-meta { font-size:.68rem; color:#7a7a84; margin-top:2px; }
+.viewer { flex:1; overflow-y:auto; padding:20px 26px; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.viewer .empty { text-align:center; color:#5a5a63; margin-top:40px; font-size:.9rem; }
+.player-card { width:100%; max-width:900px; background:#1d1d22; border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:16px; }
+.player-card .p-title { font-size:.9rem; color:#4ec9b0; margin-bottom:10px; word-break:break-all; }
+.player-card video { width:100%; max-height:60vh; background:#000; border-radius:10px; outline:none; }
+.player-card audio { width:100%; margin-top:8px; }
+.player-card .p-actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.player-card .p-actions a, .player-card .p-actions button { background:rgba(78,201,176,.15); color:#4ec9b0; border:1px solid rgba(78,201,176,.4); border-radius:10px; padding:6px 14px; font-size:.78rem; cursor:pointer; text-decoration:none; }
+.player-card .p-actions a:hover, .player-card .p-actions button:hover { background:rgba(78,201,176,.3); }
+.player-card .p-err { color:#e05561; font-size:.78rem; margin-top:10px; }
+.empty-msg { color:#5a5a63; text-align:center; margin-top:60px; font-size:.85rem; }
+</style>
+</head>
+<body>
+<div class="topbar">
+    <h1>🎬 .ml3 媒體播放器</h1>
+    <span class="count" id="count">載入中…</span>
+    <input id="searchInput" placeholder="🔍 搜尋檔案…">
+</div>
+<div class="main">
+    <div class="sidebar" id="fileList">
+        <div class="empty-msg">載入中…</div>
+    </div>
+    <div class="viewer" id="viewer">
+        <div class="empty">👈 點擊左側 .ml3 檔案開始播放</div>
+    </div>
+</div>
+<script>
+let allFiles = [];
+async function loadList() {
+    const list = document.getElementById('fileList');
+    try {
+        const res = await fetch('/api/ml3/list');
+        const data = await res.json();
+        allFiles = data.files || [];
+        document.getElementById('count').textContent = allFiles.length + ' 個';
+        renderList(allFiles);
+    } catch(e) {
+        list.innerHTML = '<div class="empty-msg">載入失敗: ' + e.message + '</div>';
+    }
+}
+function renderList(files) {
+    const list = document.getElementById('fileList');
+    if (!files.length) { list.innerHTML = '<div class="empty-msg">沒有找到 .ml3 檔案</div>'; return; }
+    list.innerHTML = '';
+    files.forEach(f => {
+        const item = document.createElement('div');
+        item.className = 'file-item';
+        const size = f.size > 1024*1024 ? (f.size/1024/1024).toFixed(2) + ' MB' : (f.size > 1024 ? (f.size/1024).toFixed(1) + ' KB' : f.size + ' B');
+        const d = new Date(f.mtime * 1000);
+        const ds = d.toLocaleDateString('zh-TW') + ' ' + d.toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'});
+        item.innerHTML = '<div class="fi-name">🎬 ' + f.name + '</div><div class="fi-meta">' + ds + ' · ' + size + '</div>';
+        item.onclick = () => playFile(f, item);
+        item.title = f.path;
+        list.appendChild(item);
+    });
+}
+document.getElementById('searchInput').addEventListener('input', function(e) {
+    const kw = e.target.value.toLowerCase();
+    renderList(allFiles.filter(f => (f.name + ' ' + f.path).toLowerCase().includes(kw)));
+});
+async function playFile(f, item) {
+    document.querySelectorAll('.file-item').forEach(i => i.classList.remove('active'));
+    if (item) item.classList.add('active');
+    const viewer = document.getElementById('viewer');
+    viewer.innerHTML = '<div class="empty">載入中…</div>';
+    try {
+        const res = await fetch('/api/raw/' + encodeURIComponent(f.path));
+        if (!res.ok) { viewer.innerHTML = '<div class="empty">❌ 無法讀取檔案 (HTTP ' + res.status + ')</div>'; return; }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        viewer.innerHTML =
+            '<div class="player-card">' +
+            '<div class="p-title">🎬 ' + f.name + '</div>' +
+            '<video id="ml3Video" controls autoplay playsinline></video>' +
+            '<audio id="ml3Audio" controls style="display:none;"></audio>' +
+            '<div class="p-actions">' +
+            '<a href="/api/raw/' + encodeURIComponent(f.path) + '" download="' + f.name + '">⬇️ 下載</a>' +
+            '<button onclick="document.getElementById(\'ml3Video\').play()">▶️ 播放</button>' +
+            '<button onclick="document.getElementById(\'ml3Video\').pause()">⏸️ 暫停</button>' +
+            '</div>' +
+            '<div class="p-err" id="ml3Err" style="display:none;"></div>' +
+            '</div>';
+        const video = document.getElementById('ml3Video');
+        const audio = document.getElementById('ml3Audio');
+        const errBox = document.getElementById('ml3Err');
+        // 先用 video 嘗試；失敗則嘗試 audio；再失敗顯示錯誤
+        video.src = url;
+        video.onerror = () => {
+            try { video.pause(); } catch(e2) {}
+            video.style.display = 'none';
+            audio.src = url;
+            audio.style.display = 'block';
+            audio.play().catch(() => {});
+            audio.onerror = () => {
+                errBox.style.display = 'block';
+                errBox.textContent = '⚠️ 瀏覽器無法直接播放此 .ml3 檔（編碼不受支援），請按「⬇️ 下載」用本機播放器開啟。';
+            };
+        };
+        video.play().catch(() => {});
+    } catch(e) {
+        viewer.innerHTML = '<div class="empty">❌ 播放失敗: ' + e.message + '</div>';
+    }
+}
+loadList();
+</script>
+</body>
+</html>

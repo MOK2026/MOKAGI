@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📧 .eml 郵件檢視器</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,'PingFang TC','Microsoft JhengHei',sans-serif; background:#141417; color:#eaeaea; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+.topbar { display:flex; align-items:center; gap:12px; padding:10px 16px; background:#1d1d22; border-bottom:1px solid rgba(255,255,255,.08); flex-shrink:0; }
+.topbar h1 { font-size:1rem; font-weight:600; white-space:nowrap; }
+.topbar .count { font-size:.75rem; color:#8a8a93; }
+#searchInput { flex:1; max-width:340px; background:rgba(255,255,255,.06); border:1px solid rgba(78,201,176,.35); border-radius:14px; padding:7px 12px; color:#eaeaea; font-size:.8rem; outline:none; }
+.main { flex:1; display:flex; min-height:0; }
+.sidebar { width:300px; min-width:200px; background:#18181c; border-right:1px solid rgba(255,255,255,.08); overflow-y:auto; flex-shrink:0; padding:8px; }
+.file-item { padding:9px 11px; border-radius:10px; cursor:pointer; margin-bottom:3px; transition:background .15s; }
+.file-item:hover { background:rgba(78,201,176,.08); }
+.file-item.active { background:rgba(78,201,176,.18); border-left:3px solid #4ec9b0; }
+.fi-name { font-size:.82rem; word-break:break-all; color:#d5f5ef; }
+.fi-meta { font-size:.68rem; color:#7a7a84; margin-top:2px; }
+.viewer { flex:1; overflow-y:auto; padding:20px 26px; min-width:0; }
+.viewer .empty { text-align:center; color:#5a5a63; margin-top:80px; font-size:.9rem; }
+.card { background:#1d1d22; border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:16px 20px; margin-bottom:14px; }
+.card h2 { font-size:1.05rem; margin-bottom:10px; color:#4ec9b0; }
+.meta-row { display:flex; margin-bottom:6px; font-size:.82rem; }
+.meta-row .k { color:#8a8a93; width:60px; flex-shrink:0; }
+.meta-row .v { color:#eaeaea; word-break:break-all; }
+.body-card { background:#1d1d22; border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:16px 20px; }
+.body-card h2 { font-size:1.05rem; margin-bottom:10px; color:#4ec9b0; }
+#viewBody { font-size:.88rem; line-height:1.7; white-space:pre-wrap; word-break:break-word; }
+#viewBody img { max-width:100%; }
+.attach { font-size:.75rem; color:#c9a86a; margin-top:8px; }
+.empty-msg { color:#5a5a63; text-align:center; margin-top:60px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+    <h1>📧 .eml 郵件檢視器</h1>
+    <span class="count" id="count">載入中…</span>
+    <input id="searchInput" placeholder="🔍 搜尋檔案…">
+</div>
+<div class="main">
+    <div class="sidebar" id="fileList">
+        <div class="empty-msg">載入中…</div>
+    </div>
+    <div class="viewer" id="viewer">
+        <div class="empty">👈 點擊左側 .eml 檔案查看郵件內容</div>
+    </div>
+</div>
+<script>
+let allFiles = [];
+async function loadList() {
+    const list = document.getElementById('fileList');
+    try {
+        const res = await fetch('/api/eml/list');
+        const data = await res.json();
+        allFiles = data.files || [];
+        document.getElementById('count').textContent = allFiles.length + ' 封';
+        renderList(allFiles);
+    } catch(e) {
+        list.innerHTML = '<div class="empty-msg">載入失敗: ' + e.message + '</div>';
+    }
+}
+function renderList(files) {
+    const list = document.getElementById('fileList');
+    if (!files.length) { list.innerHTML = '<div class="empty-msg">沒有找到 .eml 檔案</div>'; return; }
+    list.innerHTML = '';
+    files.forEach(f => {
+        const item = document.createElement('div');
+        item.className = 'file-item';
+        const size = f.size > 1024 ? (f.size/1024).toFixed(1) + ' KB' : f.size + ' B';
+        const d = new Date(f.mtime * 1000);
+        const ds = d.toLocaleDateString('zh-TW') + ' ' + d.toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'});
+        item.innerHTML = '<div class="fi-name">📧 ' + f.name + '</div><div class="fi-meta">' + ds + ' · ' + size + '</div>';
+        item.onclick = () => loadEml(f.path, item);
+        item.title = f.path;
+        list.appendChild(item);
+    });
+}
+document.getElementById('searchInput').addEventListener('input', function(e) {
+    const kw = e.target.value.toLowerCase();
+    renderList(allFiles.filter(f => (f.name + ' ' + f.path).toLowerCase().includes(kw)));
+});
+async function loadEml(path, item) {
+    document.querySelectorAll('.file-item').forEach(i => i.classList.remove('active'));
+    if (item) item.classList.add('active');
+    const viewer = document.getElementById('viewer');
+    viewer.innerHTML = '<div class="empty">載入中…</div>';
+    try {
+        const res = await fetch('/api/eml/view/' + encodeURIComponent(path));
+        const data = await res.json();
+        if (data.error) { viewer.innerHTML = '<div class="empty">❌ ' + data.error + '</div>'; return; }
+        const att = (data.attachments && data.attachments.length) ? '<div class="attach">📎 附件: ' + data.attachments.join(', ') + '</div>' : '';
+        let bodyHtml;
+        if (data.body_html && !data.body_text) {
+            bodyHtml = '<div id="viewBody">' + data.body_html + '</div>';
+        } else {
+            bodyHtml = '<div id="viewBody"></div>';
+        }
+        viewer.innerHTML =
+            '<div class="card"><h2>' + (data.subject || '(無主旨)') + '</h2>' +
+            '<div class="meta-row"><div class="k">寄件人</div><div class="v">' + (data.from || '-') + '</div></div>' +
+            '<div class="meta-row"><div class="k">收件人</div><div class="v">' + (data.to || '-') + '</div></div>' +
+            '<div class="meta-row"><div class="k">副本</div><div class="v">' + (data.cc || '-') + '</div></div>' +
+            '<div class="meta-row"><div class="k">時間</div><div class="v">' + (data.date || '-') + '</div></div>' +
+            att + '</div>' +
+            '<div class="body-card"><h2>📄 內容</h2>' + bodyHtml + '</div>';
+        const bodyEl = document.getElementById('viewBody');
+        if (!(data.body_html && !data.body_text)) {
+            bodyEl.textContent = data.body_text || '(無內容)';
+        }
+    } catch(e) {
+        viewer.innerHTML = '<div class="empty">❌ 載入失敗: ' + e.message + '</div>';
+    }
+}
+loadList();
+</script>
+</body>
+</html>
