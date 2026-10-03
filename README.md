@@ -9,7 +9,7 @@
 ![tools](https://img.shields.io/badge/tools-50%2B-purple)
 ![license](https://img.shields.io/badge/license-Commercial-lightgrey)
 
-[🎮 線上試玩](https://64071181.xyz/game)　·　[📺 開發日常](https://youtu.be/k89e-dwZV7k)　·　[⭐ Star 本項目](#)
+[🌐 官方網站](https://64071181.xyz/)　·　[🎮 線上試玩](https://64071181.xyz/game)　·　[📺 開發日常](https://youtu.be/k89e-dwZV7k)　·　[⭐ Star 本項目](#)
 
 > **她不是聊天機器人。她是有記憶、有性格、能動手的 AI 夥伴。**
 > **你的每一次互動,都在決定她是誰。**
@@ -164,6 +164,17 @@ bash MOKAGI.sh
 [![MOKAGI 開發日常](https://i.ytimg.com/an_webp/k89e-dwZV7k/mqdefault_6s.webp)](https://youtu.be/k89e-dwZV7k)
 
 我們把開發過程公開 —— 功能怎麼長出來、踩了哪些坑,都在影片裡。
+
+---
+
+## 🔗 相關連結
+
+| 連結 | 說明 |
+|---|---|
+| 🌐 [**官方網站**](https://64071181.xyz/) | MOKAGI 官方網站：方案、資訊與線上試玩 |
+| 🎮 [線上試玩](https://64071181.xyz/game) | 免註冊，直接體驗 |
+| 📺 [開發日常](https://youtu.be/k89e-dwZV7k) | YouTube 開發紀錄 |
+| 💻 [GitHub 原始碼](https://github.com/MOK2026/MOKAGI) | 本專案 |
 
 ---
 
