@@ -468,7 +468,7 @@ function getIntersections(e){
 let socket = null;
 function initSocket(){
   try{
-    socket = io(window.location.origin,{transports:['websocket','polling'],reconnection:true,reconnectionAttempts:5});
+    socket = io(window.location.origin,{transports:['polling'],reconnection:true,reconnectionAttempts:5});  // [修 2026-10-05 mokagi說明] 服務端已停用 websocket，只走 polling
     socket.on('connect',()=>console.log('✅ SocketIO 已連線'));
     socket.on('connect_error',(err)=>{console.warn('⚠️ SocketIO 連線失敗，切換 HTTP API：',err.message);});
     socket.on('disconnect',(reason)=>{console.log('🔌 SocketIO 離線：',reason);});

@@ -1271,7 +1271,7 @@
         }
         console.log('MOKAGI_SERVER:', CONFIG.server);
         socket = io(CONFIG.server, {
-            transports: ['websocket', 'polling'],
+            transports: ['polling'],  // [P1-9 2026-10-04 稚] 只走 polling
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 10000,
