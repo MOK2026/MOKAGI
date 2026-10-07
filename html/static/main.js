@@ -278,7 +278,8 @@
         const ioFn = typeof window !== 'undefined' ? window.io : undefined;
         if (typeof ioFn === 'function') {
             return ioFn({
-                transports: ['websocket', 'polling'],
+                // [修 2026-10-05 mokagi說明] 服務端已停用 websocket（P1-9 socketio輪詢）；前端必須只走 polling，否則連線永遠卡在 websocket error 且不 fallback → Soul/Jobs/Logs/設定 8 秒逾時。
+                transports: ['polling'],
                 reconnection: true,
                 reconnectionDelay: 1000,
                 reconnectionDelayMax: 10000,
