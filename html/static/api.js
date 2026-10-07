@@ -6,7 +6,7 @@
 // ============================================================
 (function() {
     // 🔖 目前版本號（改版必改）
-    const __MOKAGI_VER__ = "2026092404";
+    const __MOKAGI_VER__ = "2026100801";
 
     // 🚀 啟動時自我檢查：若瀏覽器/CDN 快取了舊版，自動換成最新版
     (function selfCheck() {
@@ -1411,14 +1411,14 @@
                         } catch(e) {}
                     }
                     if (navigator.sendBeacon) {
-                        navigator.sendBeacon('/api/track',
+                        navigator.sendBeacon(CONFIG.server + '/api/track',
                             new Blob([data], { type: 'application/json' }));
                         return;
                     }
                 } catch (e) {}
                 try {
                     var xhr = new XMLHttpRequest();
-                    xhr.open('POST', '/api/track', true);
+                    xhr.open('POST', CONFIG.server + '/api/track', true);
                     xhr.setRequestHeader('Content-Type', 'application/json');
                     xhr.send(data);
                 } catch (e) {}
