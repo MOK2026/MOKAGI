@@ -6,7 +6,7 @@
 // ============================================================
 (function() {
     // 🔖 目前版本號（改版必改）
-    const __MOKAGI_VER__ = "2026100801";
+    const __MOKAGI_VER__ = "2026100802";
 
     // 🚀 啟動時自我檢查：若瀏覽器/CDN 快取了舊版，自動換成最新版
     (function selfCheck() {
@@ -50,7 +50,7 @@
         
         // 後端必須配置
         agent: window.MOKAGI_AGENT || '客服',                    // 默認使用莫氏 Agent
-        user_id: window.MOKAGI_USER_ID || localStorage.getItem('web_user_id') || localStorage.getItem('mokagi_user_id') || generateUUID(),
+        user_id: resolveWidgetUserId(),
         server: window.MOKAGI_SERVER || window.location.origin, // 後端服務器地址
 
         // 其他配置可選
@@ -657,6 +657,37 @@
 
 
 
+
+    // ----------------------------------------------------------------------
+    // 2026-10-08 fix: external-site AI widget returned 401 because its
+    // fallback identity was a bare UUID, while the backend only accepts
+    // 'web_guest_' or 'guest:' prefixed guests. This resolver returns a valid
+    // tenant id and self-heals already-poisoned localStorage values.
+    // Member identities are left untouched.
+    // ----------------------------------------------------------------------
+    function _isValidTenantId(u) {
+        return !!u && (u.indexOf('web_guest_') === 0 || u.indexOf('guest:') === 0);
+    }
+    function _looksLikeLegacyWidgetUUID(u) {
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(u);
+    }
+    function resolveWidgetUserId() {
+        try {
+            var _w = window.MOKAGI_USER_ID;
+            if (_w && (_isValidTenantId(_w) || !_looksLikeLegacyWidgetUUID(_w))) { return String(_w); }
+            var _k = ['mokagi_user_id', 'web_user_id'];
+            for (var _i = 0; _i < _k.length; _i++) {
+                var _v = localStorage.getItem(_k[_i]) || '';
+                if (!_v) continue;
+                if (_isValidTenantId(_v)) return _v;
+                if (_looksLikeLegacyWidgetUUID(_v)) continue;
+                return _v;
+            }
+        } catch (e) { }
+        var _g = 'web_guest_' + generateUUID();
+        try { localStorage.setItem('mokagi_user_id', _g); } catch (e) { }
+        return _g;
+    }
 
     // 生成唯一用戶 ID（持久保存在 localStorage）
     function generateUUID() {
