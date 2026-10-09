@@ -41,3 +41,7 @@ html/static/_out.js
 html/jobs/
 html/mokagi設計報告.html
 html/user.html
+
+# ===== 2026-10-09 admin：隱私保護（內部狀態檔 / 含個資說明檔） =====
+html/webTools/gpu_status_snapshot.json
+html/static/Mok6407Nav/README.md

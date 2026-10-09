@@ -1,0 +1,63 @@
+{
+  "updated": "2026-10-09 08:20:01",
+  "source_db": "/home/ubuntu/.mok/frontends/mok_web/會員系統_202608311340/member.db",
+  "note": "各層級「可瀏覽頁面(pages)」白名單快照，供 /admin/tools 一致性提示。guest＝公開層(requires_login=0)聯集。'*' ＝ 不限頁面。",
+  "gated_prefixes": [
+    "/report"
+  ],
+  "levels": {
+    "free": [
+      "/index.html",
+      "/report/春/mokagi社交平台2/",
+      "/report/病毒引擎/直播房3/",
+      "/game/",
+      "/project/",
+      "/report/衍/48call_老人陪伴房/web/index.html",
+      "/report/賺錢王/傳單王/index.html",
+      "/report/賺錢王/傳單王/sell.html",
+      "/report/履歷之神/履歷生成網/",
+      "/report/春/2026-10-05/私影平台/index.html"
+    ],
+    "pro": [
+      "/index.html",
+      "/report/春/mokagi社交平台2/",
+      "/report/病毒引擎/直播房3/",
+      "/game/",
+      "/project/",
+      "/report/衍/48call_老人陪伴房/web/index.html",
+      "/report/莫氏集團/mokagi預告/index.html",
+      "/report/indexPage/頻道清單/index.html",
+      "/report/履歷之神/履歷生成網/",
+      "/report/春/2026-10-05/私影平台/index.html"
+    ],
+    "vip": [
+      "/index.html",
+      "/report/春/mokagi社交平台2/",
+      "/report/病毒引擎/直播房3/",
+      "/game/",
+      "/project/",
+      "/report/衍/48call_老人陪伴房/web/index.html",
+      "/report/莫氏集團/mokagi預告/index.html",
+      "/report/indexPage/頻道清單/index.html",
+      "/report/賺錢王/傳單王/index.html",
+      "/report/衍/夢/index.html",
+      "/report/履歷之神/履歷生成網/",
+      "/report/春/2026-10-05/私影平台/index.html"
+    ],
+    "admin": [
+      "*"
+    ],
+    "guest": [
+      "/index.html",
+      "/report/春/mokagi社交平台2/",
+      "/report/病毒引擎/直播房3/",
+      "/game/",
+      "/project/",
+      "/report/衍/48call_老人陪伴房/web/index.html",
+      "/report/賺錢王/傳單王/index.html",
+      "/report/賺錢王/傳單王/sell.html",
+      "/report/履歷之神/履歷生成網/",
+      "/report/春/2026-10-05/私影平台/index.html"
+    ]
+  }
+}

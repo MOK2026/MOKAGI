@@ -658,6 +658,7 @@
 
 
 
+
     // ----------------------------------------------------------------------
     // 2026-10-08 fix: external-site AI widget returned 401 because its
     // fallback identity was a bare UUID, while the backend only accepts

@@ -229,13 +229,18 @@ def _handle_build(directory: str, output_dir: str = "") -> str:
     
     logger.info(f"開始為目錄建圖: {directory}")
     
+    # 2026-09-27 衍：新版 graphify CLI 已無 build 子命令（改叫 extract），故加 fallback
     cmd = ["graphify", "build", directory]
+    _fallback_cmd = ["graphify", "extract", directory, "--code-only"]
     
     if output_dir:
         output_dir = os.path.abspath(os.path.expanduser(output_dir))
         cmd.extend(["--output", output_dir])
     
     result = _run_graphify(cmd, cwd=directory, timeout=600)
+    if not result.get("success"):
+        # 新版 CLI 無 build 子命令 → 用 extract --code-only 重試（不需 LLM）
+        result = _run_graphify(_fallback_cmd, cwd=directory, timeout=600)
     
     if result["success"]:
         # 檢查輸出檔案

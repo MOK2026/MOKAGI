@@ -1,29 +1,258 @@
 {
   "_comment": "管理頻道清單（右側工具面板 tools-header 內的鍵）by indexPage 2026-09-26",
   "tools": [
-    { "id": "agentInfo",  "icon": "🌸", "label": "Agent 資訊", "panel": 1, "type": "inline" },
-    { "id": "room",       "icon": "🏠", "label": "房間",       "panel": 1, "type": "inline" },
-    { "id": "bookmark",   "icon": "📑", "label": "書籤",       "panel": 1, "type": "iframe", "page": "/webTools/書籤/書籤.html" },
-    { "id": "search",     "icon": "🔍", "label": "搜尋",       "panel": 1, "type": "inline" },
-    { "id": "files",      "icon": "📁", "label": "文件",       "panel": 1, "type": "inline" },
-    { "id": "tools",      "icon": "🔧", "label": "工具",       "panel": 1, "type": "inline" },
-    { "id": "tokenstats", "icon": "📈", "label": "Token 統計", "panel": 1, "type": "inline" },
-    { "id": "gpu",        "icon": "💻", "label": "GPU",        "panel": 1, "type": "inline" },
-    { "id": "進化",       "icon": "🧬", "label": "進化",       "panel": 1, "type": "inline", "adminOnly": true },
-    { "id": "admin",      "icon": "🧑‍💼", "label": "admin",    "panel": 1, "type": "inline", "adminOnly": true },
-    { "id": "game",       "icon": "🎮", "label": "game",       "panel": 1, "type": "inline" },
-    { "id": "logs",       "icon": "📋", "label": "日誌",       "panel": 1, "type": "inline" },
-    { "id": "monitor",    "icon": "📊", "label": "監控",       "panel": 1, "type": "inline" },
-    { "id": "ascii",      "icon": "🎨", "label": "ASCII",      "panel": 1, "type": "inline" },
-    { "id": "novnc",      "icon": "🖥️", "label": "桌面",      "panel": 1, "type": "iframe", "page": "/webTools/novnc/index.html", "adminOnly": true },
-    { "id": "backup",     "icon": "💾", "label": "備份",       "panel": 1, "type": "inline", "adminOnly": true },
-    { "id": "panel2",     "icon": "🧰", "label": "面板2",      "panel": 1, "type": "action" },
-    { "id": "notebook",   "icon": "📝", "label": "筆記",       "panel": 1, "type": "action" },
-    { "id": "member",     "icon": "👥", "label": "成員",       "panel": 1, "type": "action" },
-    { "id": "復活",       "icon": "✨", "label": "復活",       "panel": 1, "type": "iframe", "page": "/report/mokagi說明/復活/index.html", "adminOnly": true },
-    { "id": "頻道清單",   "icon": "📡", "label": "頻道清單",   "panel": 1, "type": "iframe", "page": "/report/indexPage/頻道清單/index.html", "adminOnly": true },
-    { "id": "夢",         "icon": "🌙", "label": "夢",         "panel": 1, "type": "iframe", "page": "/report/衍/夢/index.html", "adminOnly": true },
-    { "id": "github使用", "icon": "🐙", "label": "github 使用", "panel": 1, "type": "iframe", "page": "/report/github/github使用/index.html", "adminOnly": true },
-    { "id": "p3a-wallet", "icon": "💼", "label": "p3a-wallet", "panel": 1, "type": "iframe", "page": "/report/市場調查侍女/p3a-wallet/dashboard.html", "adminOnly": true }
+    {
+      "id": "agentInfo",
+      "icon": "🌸",
+      "label": "Agent 資訊",
+      "panel": 1,
+      "type": "inline"
+    },
+    {
+      "id": "room",
+      "icon": "🏠",
+      "label": "房間",
+      "panel": 1,
+      "type": "inline"
+    },
+    {
+      "id": "bookmark",
+      "icon": "📑",
+      "label": "書籤",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/static/書籤.html"
+    },
+    {
+      "id": "search",
+      "icon": "🔍",
+      "label": "搜尋",
+      "panel": 1,
+      "type": "inline"
+    },
+    {
+      "id": "notebook",
+      "icon": "📝",
+      "label": "筆記",
+      "panel": 1,
+      "type": "inline"
+    },
+    {
+      "id": "billing",
+      "icon": "📊",
+      "label": "token",
+      "panel": 1,
+      "type": "inline"
+    },
+    {
+      "id": "會員系統說明",
+      "icon": "💠",
+      "label": "會員系統說明",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/report/凜/會員系統說明/index.html"
+    },
+    {
+      "id": "mokagiWIKI",
+      "icon": "📖",
+      "label": "說明書 WIKI",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/project/wiki/index.html"
+    },
+    {
+      "id": "頻道清單",
+      "icon": "📡",
+      "label": "頻道清單",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/report/indexPage/頻道清單/index.html",
+      "adminOnly": true
+    },
+    {
+      "id": "快取日報",
+      "icon": "📰",
+      "label": "快取日報",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/jobs/快取日報/index.html",
+      "adminOnly": true
+    },
+    {
+      "id": "金流後台",
+      "icon": "💳",
+      "label": "金流後台",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/admin/orders",
+      "adminOnly": true
+    },
+    {
+      "id": "admin",
+      "icon": "🧑‍💼",
+      "label": "admin",
+      "panel": 1,
+      "type": "inline",
+      "adminOnly": true
+    },
+    {
+      "id": "backup",
+      "icon": "💾",
+      "label": "備份",
+      "panel": 1,
+      "type": "inline",
+      "adminOnly": true
+    },
+    {
+      "id": "github使用",
+      "icon": "🐙",
+      "label": "github 使用",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/report/github/github使用/index.html",
+      "adminOnly": true
+    },
+    {
+      "id": "進化",
+      "icon": "🧬",
+      "label": "進化",
+      "panel": 1,
+      "type": "inline",
+      "adminOnly": true
+    },
+    {
+      "id": "夢",
+      "icon": "🌙",
+      "label": "夢",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/report/衍/夢/index.html",
+      "adminOnly": true
+    },
+    {
+      "id": "復活",
+      "icon": "✨",
+      "label": "復活",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/report/mokagi說明/復活/index.html",
+      "adminOnly": true
+    },
+    {
+      "id": "pm2面板",
+      "icon": "🎛️",
+      "label": "PM2 開關",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/report/mokagi說明/pm2面板/index.html",
+      "adminOnly": true
+    },
+    {
+      "id": "logs",
+      "icon": "📋",
+      "label": "日誌",
+      "panel": 1,
+      "type": "inline",
+      "adminOnly": true
+    },
+    {
+      "id": "monitor",
+      "icon": "📊",
+      "label": "監控",
+      "panel": 1,
+      "type": "inline",
+      "adminOnly": true
+    },
+    {
+      "id": "files",
+      "icon": "📁",
+      "label": "文件",
+      "panel": 1,
+      "type": "inline"
+    },
+    {
+      "id": "tools",
+      "icon": "🔧",
+      "label": "工具",
+      "panel": 1,
+      "type": "inline"
+    },
+    {
+      "id": "novnc",
+      "icon": "🖥️",
+      "label": "桌面",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/webTools/novnc/index.html",
+      "adminOnly": true
+    },
+    {
+      "id": "gpu",
+      "icon": "💻",
+      "label": "GPU",
+      "panel": 1,
+      "type": "inline"
+    },
+    {
+      "id": "coldcall",
+      "icon": "📞",
+      "label": "冷呼控制台",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/webTools/冷呼控制台.html"
+    },
+    {
+      "id": "傳單王",
+      "icon": "📨",
+      "label": "傳單王",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/report/賺錢王/傳單王/index.html"
+    },
+    {
+      "id": "短劇王",
+      "icon": "🎬",
+      "label": "短劇王",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/jobs/短劇王/index.html"
+    },
+    {
+      "id": "p3a-wallet",
+      "icon": "💼",
+      "label": "p3a-wallet",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/report/市場調查侍女/p3a-wallet/dashboard.html",
+      "adminOnly": true
+    },
+    {
+      "id": "game",
+      "icon": "🎮",
+      "label": "game",
+      "panel": 1,
+      "type": "inline"
+    },
+    {
+      "id": "ascii",
+      "icon": "🎨",
+      "label": "ASCII",
+      "panel": 1,
+      "type": "inline"
+    },
+    {
+      "id": "panel2",
+      "icon": "🧰",
+      "label": "面板2",
+      "panel": 1,
+      "type": "action"
+    },
+    {
+      "id": "member",
+      "icon": "👥",
+      "label": "成員",
+      "panel": 1,
+      "type": "action"
+    }
   ]
 }

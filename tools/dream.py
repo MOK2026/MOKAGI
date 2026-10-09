@@ -11,6 +11,7 @@ PLUGIN_INFO = {
     "icon": "🌙",
     "handler": "handle_dream",
     "description": "做夢：agent 定時讀自己的 logs 與 soul，沉澱經驗寫入 soul/EXP.md。需該 agent 設定檔有 MOK_dream_EXP=1。",
+    "intent_keywords": ["/dream", "做夢", "夢境", "沉澱經驗", "反思經驗"],
     "tool_schema": {
         "name": "dream",
         "description": "做夢（EXP 反思）：讓 agent 讀自己的 logs 與 soul 沉澱經驗、更新 soul/EXP.md，超過上限自動歸檔到 soul/EXP_archive/。僅對已啟用 MOK_dream_EXP=1 的 agent 生效。",

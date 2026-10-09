@@ -1,0 +1,166 @@
+<!doctype html><html lang="zh-Hant"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>會員列表（預覽）</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,'PingFang TC','Microsoft JhengHei',system-ui,sans-serif;background:radial-gradient(1200px 600px at 15% -10%,#1b2338,#0b0f1a 60%);color:#e8eefc;min-height:100vh;padding:24px}
+.wrap{max-width:1320px;margin:0 auto}
+h1{font-size:24px;font-weight:800;letter-spacing:.5px;margin-bottom:4px;background:linear-gradient(90deg,#7aa2ff,#c084fc);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.sub{color:#8ea0c0;font-size:13px}
+.nav{display:flex;gap:6px;font-size:13px;margin-bottom:22px;align-items:center;flex-wrap:wrap;background:#141a29;border:1px solid #27324a;border-radius:14px;padding:10px 14px}
+.nav a{color:#a9bcff;text-decoration:none;padding:4px 10px;border-radius:8px;transition:.15s}
+.nav a:hover{background:#1b2438;color:#fff}
+.nav .sp{flex:1}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:22px}
+.card{position:relative;overflow:hidden;background:linear-gradient(160deg,#1b2438,#141a29);border:1px solid #27324a;border-radius:16px;padding:16px 18px}
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,#7c5cff,#ff5ca8);opacity:.85}
+.card .v{font-size:24px;font-weight:800;color:#9db4ff;letter-spacing:.3px}
+.card .l{font-size:12px;color:#8b93b5;margin-top:4px}
+.card.green .v{color:#2fa36b}
+.card.red .v{color:#ff8fa3}
+.card.purple .v{color:#c9a4ff}
+.panel{background:#141a29;border:1px solid #27324a;border-radius:16px;padding:18px;margin-bottom:20px;box-shadow:0 10px 30px rgba(0,0,0,.28)}
+.panel h2{font-size:15px;margin-bottom:14px;color:#c9d1f0;display:flex;align-items:center;gap:8px}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;min-width:1040px}
+.tablewrap{overflow-x:auto;padding-bottom:4px}
+thead th{position:sticky;top:0;z-index:2;background:#141a29;color:#8ea0c0;text-align:left;padding:11px 12px;border-bottom:1px solid #27324a;font-weight:700;font-size:12px;letter-spacing:.4px;white-space:nowrap}
+tbody td{padding:11px 12px;border-bottom:1px solid #1e2440;vertical-align:middle;white-space:nowrap}
+tbody tr{transition:background .12s}
+tbody tr:hover td{background:#19203a}
+tbody tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700}
+.badge.free{background:#23304f;color:#9db4e8}
+.badge.pro{background:#233a52;color:#6fc2ff}
+.badge.vip{background:#3a2b52;color:#d0a4ff}
+.badge.on{background:#15352a;color:#a7f3d0}
+.badge.off{background:#3a1d2e;color:#ffb3c1}
+.badge.admin{background:#4a2e1d;color:#ffd29e}
+.ops{display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:470px}
+.ops form{display:flex;gap:5px;align-items:center}
+select,input[type=text],input[type=password],input[type=number]{background:#12162a;border:1px solid #2c3560;color:#e8e8f0;border-radius:8px;padding:6px 8px;font-size:12px;outline:none}
+select:focus,input:focus{border-color:#7aa2ff}
+button{background:linear-gradient(90deg,#7c5cff,#c084fc);color:#fff;border:0;border-radius:9px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;transition:.15s;white-space:nowrap}
+button:hover{opacity:.9;transform:translateY(-1px)}
+button.danger{background:#3a1d2e;color:#ffb3c1;border:1px solid #d14d6a}
+button.danger:hover{background:#4a2538}
+button.gray{background:#232a45;color:#c9d1f0}
+.err{background:#3a1d2e;border:1px solid #d14d6a;color:#ffb3c1;padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:16px}
+.ok{background:#15352a;border:1px solid #2fa36b;color:#a7f3d0;padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:16px}
+input.amt{width:84px}
+input.pw{width:100px}
+.search{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.search input{flex:1;min-width:180px;max-width:320px}
+.empty{color:#5b6380;text-align:center;padding:30px;font-size:13px}
+.logline{font-size:12px;color:#8b93b5;padding:5px 0;border-bottom:1px solid #1e2440;display:flex;gap:10px}
+.logline b{color:#c9d1f0}
+.logline .t{color:#5b6380;white-space:nowrap}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+/* ===== 會員列表響應式（2026-10-01 by 春）===== */
+table.rt tr.rowhead{background:transparent}
+td.mops{white-space:normal}
+@media (max-width: 1130px){
+  body{padding:12px}
+  h1{font-size:20px}
+  .panel{padding:14px;border-radius:14px}
+  .cards{grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+  .card{padding:12px 14px}
+  .card .v{font-size:20px}
+  .search input{flex:1 1 100%;max-width:none;min-width:0}
+  .search{gap:8px}
+  .nav{padding:8px 10px}
+
+  /* 表格 → 卡片 */
+  .tablewrap{overflow:visible;padding-bottom:0}
+  table{min-width:0;border-spacing:0;font-size:14px}
+  thead{display:none}
+  tbody{display:block}
+  tbody tr{display:block;background:linear-gradient(160deg,#1b2438,#141a29);
+    border:1px solid #27324a;border-radius:14px;padding:12px 14px 14px;
+    margin-bottom:12px;box-shadow:0 8px 20px rgba(0,0,0,.28)}
+  tbody tr:hover td{background:transparent}
+  tbody tr:last-child{margin-bottom:0}
+  tbody td{display:flex;justify-content:space-between;align-items:center;gap:12px;
+    padding:7px 0;border-bottom:1px dashed #232b45;white-space:normal;text-align:right}
+  tbody td::before{content:attr(data-l);flex:0 0 auto;color:#8ea0c0;
+    font-size:12px;font-weight:700;letter-spacing:.5px;text-align:left}
+  tbody td:first-child{border-bottom:1px solid #27324a;padding-bottom:10px;margin-bottom:4px}
+  tbody td:first-child b{font-size:16px}
+  tbody td:last-child{border-bottom:none}
+  tbody td.mops{display:block;padding:12px 0 0;border-bottom:none}
+  tbody td.mops::before{content:none;display:none}
+
+  /* 管理操作：兩欄網格，輸入框撐滿、按鈕好按 */
+  .ops{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:none;width:100%}
+  .ops form{display:flex;gap:6px;width:100%;min-width:0}
+  .ops form:first-child{grid-column:1 / -1}
+  .ops form input{flex:1 1 auto;min-width:0;width:auto}
+  .ops form button{flex:0 0 auto}
+  .ops form select{flex:1 1 auto;min-width:0}
+  select,input[type=text],input[type=password],input[type=number]{font-size:16px;padding:9px 10px}
+  button{padding:9px 14px;font-size:13px}
+  input.amt,input.pw{width:auto;flex:1 1 auto}
+}
+@media (max-width: 380px){
+  .ops{grid-template-columns:1fr}
+  .ops form:first-child{grid-column:auto}
+}
+
+</style></head><body>
+<div class="wrap">
+  <h1>Admin 會員管理後台</h1>
+  <div class="sub">預覽：桌面＝表格 / 手機＝卡片</div>
+  <div class="nav"><a href="#">會員列表</a><a href="#">方案設定</a><a href="#">稽核紀錄</a></div>
+  <div class="cards">
+    <div class="card"><div class="v">6</div><div class="l">總會員</div></div>
+    <div class="card green"><div class="v">5</div><div class="l">啟用中</div></div>
+    <div class="card red"><div class="v">1</div><div class="l">已停用</div></div>
+    <div class="card purple"><div class="v">2</div><div class="l">VIP 人數</div></div>
+    <div class="card"><div class="v">10000.0億</div><div class="l">總餘額</div></div>
+  </div>
+  <div class="panel"><h2>👥 會員列表</h2>
+    <form class="search" method="get"><input type="text" placeholder="搜尋帳號..."><button>搜尋</button><a href="#" style="color:#a9bcff;font-size:13px">清除</a></form>
+    <div class="tablewrap"><table class="rt"><thead><tr><th>帳號</th><th>方案</th><th>餘額</th><th>本月用量</th><th>註冊時間</th><th>最後登入</th><th>狀態</th><th>管理操作</th></tr></thead>
+    <tbody><tr>
+<td data-l="帳號"><b>pktest2</b></td>
+<td data-l="方案"><span class="badge free">FREE</span></td>
+<td class="mono" data-l="餘額">5.0萬</td>
+<td class="mono" data-l="本月用量">0</td>
+<td data-l="註冊時間">2026-09-22 04:19</td>
+<td data-l="最後登入">2026-10-01 11:49</td>
+<td data-l="狀態"><span class="badge on">啟用中</span></td>
+<td class="mops"><div class="ops">
+  <form method="post" action="/x"><select name="plan"><option value="free" selected>free</option><option value="pro">pro</option><option value="vip">vip</option></select><button>改方案</button></form>
+  <form method="post" action="/x"><input class="amt" type="text" name="amount" placeholder="+1000 / -500"><button>調整</button></form>
+  <form method="post" action="/x"><input class="pw" type="text" name="new_password" placeholder="新密碼"><button>重設</button></form>
+  <form method="post" action="/x"><button class="danger">停用</button></form>
+  <form method="post" action="/x"><button class="danger">刪除</button></form>
+</div></td></tr><tr>
+<td data-l="帳號"><b>admin</b></td>
+<td data-l="方案"><span class="badge admin">ADMIN</span></td>
+<td class="mono" data-l="餘額">10000.0億</td>
+<td class="mono" data-l="本月用量">0</td>
+<td data-l="註冊時間">2026-08-20 15:57</td>
+<td data-l="最後登入">2026-10-01 19:45</td>
+<td data-l="狀態"><span class="badge on">啟用中</span> <span class="badge admin">管理員</span></td>
+<td class="mops"><div class="ops">
+  <form method="post" action="/x"><select name="plan"><option value="free">free</option><option value="pro" selected>pro</option><option value="vip">vip</option></select><button>改方案</button></form>
+  <form method="post" action="/x"><input class="amt" type="text" name="amount" placeholder="+1000 / -500"><button>調整</button></form>
+  <form method="post" action="/x"><input class="pw" type="text" name="new_password" placeholder="新密碼"><button>重設</button></form>
+  <form method="post" action="/x"><button class="danger">停用</button></form>
+  <form method="post" action="/x"><button class="danger">刪除</button></form>
+</div></td></tr><tr>
+<td data-l="帳號"><b>testpro</b></td>
+<td data-l="方案"><span class="badge pro">PRO</span></td>
+<td class="mono" data-l="餘額">1200</td>
+<td class="mono" data-l="本月用量">50</td>
+<td data-l="註冊時間">2026-09-30 21:10</td>
+<td data-l="最後登入">2026-10-01 06:11</td>
+<td data-l="狀態"><span class="badge off">已停用</span></td>
+<td class="mops"><div class="ops">
+  <form method="post" action="/x"><select name="plan"><option value="free" selected>free</option><option value="pro">pro</option><option value="vip">vip</option></select><button>改方案</button></form>
+  <form method="post" action="/x"><input class="amt" type="text" name="amount" placeholder="+1000 / -500"><button>調整</button></form>
+  <form method="post" action="/x"><input class="pw" type="text" name="new_password" placeholder="新密碼"><button>重設</button></form>
+  <form method="post" action="/x"><button class="danger">停用</button></form>
+  <form method="post" action="/x"><button class="danger">刪除</button></form>
+</div></td></tr></tbody></table></div>
+  </div>
+</div></body></html>

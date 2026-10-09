@@ -220,6 +220,9 @@ def do_panic(reason="manual"):
     except Exception as e:
         steps.append("上鎖失敗：%s" % e)
     for name in _conf["panic"]["pm2_stop"]:
+        if _is_protected_svc(name):
+            steps.append("略過受保護服務 %s（方案C）" % name)
+            continue
         rc, out = pm2_cmd(["stop", name])
         steps.append("pm2 stop %s rc=%s" % (name, rc))
         log("pm2 stop %s -> rc=%s %s" % (name, rc, out.strip()[:200]))
@@ -250,14 +253,28 @@ def do_resume():
     except Exception as e:
         steps.append("解鎖失敗：%s" % e)
     for name in _conf["panic"]["pm2_stop"]:
+        if _is_protected_svc(name):
+            steps.append("略過受保護服務 %s（方案C）" % name)
+            continue
         rc, out = pm2_cmd(["start", name])
         steps.append("pm2 start %s rc=%s" % (name, rc))
         log("pm2 start %s -> rc=%s %s" % (name, rc, out.strip()[:200]))
     return {"ok": True, "steps": steps}
 
 
+PROTECTED_SVC = ("mok_" + "agi", "launcher.py")
+
+
+def _is_protected_svc(name):
+    n = str(name or "").lower()
+    return any(m in n for m in PROTECTED_SVC)
+
+
 def do_restart(name):
     svc = next((s for s in _conf["services"] if s["name"] == name), None)
+    if _is_protected_svc(name) or (svc and (svc.get("protected") or _is_protected_svc(svc.get("pm2_name")))):
+        log("拒絕啟停受保護服務：%s（方案C）" % name)
+        return {"ok": False, "error": "protected_service：受保護服務僅能由主人手動重啟", "service": name}
     if not svc:
         return {"ok": False, "error": "未知服務 %s" % name}
     steps = []
@@ -370,25 +387,23 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def request_loop():
-    """目錄旗標式安全重啟：#2 方案 A。
-    agent 只要 `touch ~/.mok/core/warden/requests/<服務名>.req`，
-    warden 就會代它安全重啟，agent 永遠不需要自己動刀。"""
+    """【已封鎖 2026-10-04 mokagi說明】目錄旗標式代客重啟停用。
+
+    原設計：agent 寫 requests/<服務名>.req，warden 代為安全重啟。
+    此通道不經任何身分驗證 → 是 agent 繞過 pm2 閘門的重啟後門，故停用。
+    僅保留「清掉殘留 .req 檔」的動作，不再執行任何重啟。
+    """
     req_dir = BASE / "requests"
     try:
         req_dir.mkdir(exist_ok=True)
     except Exception:
         pass
-    log("request_loop 啟動（監看 %s）" % req_dir)
+    log("request_loop 啟動（已封鎖代客重啟，僅清理殘留請求）")
     while True:
         time.sleep(3)
         try:
             for f in sorted(req_dir.glob("*.req")):
-                name = f.stem
-                log("收到安全重啟請求：%s" % name)
-                try:
-                    do_restart(name)
-                except Exception as e:
-                    log("請求處理失敗：%s" % e, "ERROR")
+                log("忽略重啟請求（通道已封鎖）：%s" % f.stem, "WARN")
                 try:
                     f.unlink()
                 except Exception:

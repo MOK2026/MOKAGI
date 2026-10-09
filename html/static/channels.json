@@ -1,0 +1,102 @@
+{
+  "channels": [ {"id": "履歷生成網", "icon": "📄", "label": "履歷生成網", "href": "report/履歷之神/履歷生成網/index.html", "tone": "#7c7dff"},
+    {
+      "id": "room",
+      "icon": "🏠",
+      "label": "房間",
+      "href": "/index.html",
+      "tone": "#4ec9b0"
+    },
+    {
+      "id": "meeting",
+      "icon": "📋",
+      "label": "會議",
+      "href": "會議模式",
+      "tone": "#4ec9b0"
+    },
+    {
+      "id": "game",
+      "icon": "🎮",
+      "label": "game",
+      "href": "game",
+      "tone": "#ffb84d"
+    },
+    {
+      "id": "live3",
+      "icon": "🎬",
+      "label": "直播房3",
+      "href": "report/病毒引擎/直播房3/index.html",
+      "tone": "#e06c9f"
+    },
+    {
+      "id": "social2",
+      "icon": "🌐",
+      "label": "mokagi社交平台2",
+      "href": "report/春/mokagi社交平台2/index.html",
+      "tone": "#4ea3ff"
+    },
+    {
+      "id": "github-pages",
+      "icon": "📄",
+      "label": "GitHub Pages",
+      "href": "https://64071181.github.io/",
+      "tone": "#c084fc"
+    },
+    {
+      "id": "project",
+      "icon": "📁",
+      "label": "project",
+      "href": "https://64071181.xyz/project/",
+      "tone": "#f59e0b"
+    },
+    {
+      "id": "mokcs",
+      "icon": "🧩",
+      "label": "MokCs",
+      "href": "https://64071181.xyz/project/MokCs/",
+      "tone": "#34d399"
+    },
+    {
+      "id": "api",
+      "icon": "🔌",
+      "label": "api",
+      "href": "https://64071181.xyz/project/api/",
+      "tone": "#60a5fa"
+    },
+    {
+      "id": "schedule",
+      "icon": "🗓️",
+      "label": "mokagi日程",
+      "href": "https://64071181.xyz/report/莫氏集團/mokagi日程/index.html",
+      "tone": "#f472b6"
+    },
+    {
+      "id": "mokagi-gh",
+      "icon": "🐙",
+      "label": "MOKAGI (GitHub)",
+      "href": "https://github.com/MOK2026/MOKAGI",
+      "tone": "#94a3b8"
+    },
+    {
+      "id": "call48",
+      "icon": "📞",
+      "label": "48call 老人陪伴房",
+      "href": "report/衍/48call_老人陪伴房/web/index.html",
+      "tone": "#f59e0b"
+    },
+    {
+      "id": "wiki",
+      "icon": "📖",
+      "label": "mokagi 說明書 (WIKI)",
+      "href": "/project/wiki/index.html",
+      "tone": "#fbbf24"
+    },
+    {
+      "id": "member-system",
+      "icon": "💠",
+      "label": "會員系統說明",
+      "href": "report/凜/會員系統說明/index.html",
+      "tone": "#a78bfa"
+    }
+  ]
+}

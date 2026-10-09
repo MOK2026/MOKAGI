@@ -377,7 +377,22 @@ def _load_agent_config() -> dict:
 # ------------------------------------------------------------------
 # 主迴圈
 # ------------------------------------------------------------------
+def _balance_blocked(tool_name):
+    """P0 餘額熔斷：低餘額時暫停非必要高耗工具（fail-open）。"""
+    try:
+        import sys as _sys
+        _core = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "core")
+        if _core not in _sys.path:
+            _sys.path.insert(0, _core)
+        from deepseek_guard import tool_blocked
+        return tool_blocked(tool_name)
+    except Exception:
+        return False
+
+
 async def handle_gui_agent(args, chat_id="web", agent_config=None):
+    if _balance_blocked("gui_agent"):
+        return json.dumps({"success": False, "error": "DeepSeek 餘額不足，已暫停非必要高耗工具（GUI 自動化）；請主人補值後再試。"}, ensure_ascii=False)
     t0 = time.time()
     try:
         p = _parse_args(args)

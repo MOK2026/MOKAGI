@@ -27,6 +27,15 @@ body{background:var(--bg);color:var(--txt);
 #logout:hover{background:#4a2029;color:#fff}
 #content{flex:1;width:100%;border:none;background:#0b0f1a}
 #tip{display:none;padding:10px 14px;font-size:13px;color:#ffb3c1}
+@media (max-width:680px){
+  #nav{flex-wrap:nowrap;overflow-x:auto;gap:5px;padding:6px 8px}
+  #nav::-webkit-scrollbar{display:none}
+  .tab{padding:6px 10px;font-size:12.5px;flex:0 0 auto;border-radius:9px}
+  #logout{padding:6px 10px;font-size:12.5px;flex:0 0 auto;border-radius:9px}
+  .sep{display:none}
+  #spacer{display:none}
+  #tip{padding:8px 12px;font-size:12.5px}
+}
 </style>
 </head>
 <body>

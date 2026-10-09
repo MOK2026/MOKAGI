@@ -5,6 +5,7 @@ import os
 import sqlite3
 import time
 from contextlib import closing
+from db_conn import connect
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 
@@ -12,9 +13,9 @@ from shared import MOKAGI_home, HISTORY_DB_PATH
 
 def _init_history_db():
     """創建對話歷史表，啟用 WAL 模式"""
-    with closing(sqlite3.connect(HISTORY_DB_PATH, timeout=10.0)) as conn:
+    with closing(connect(HISTORY_DB_PATH)) as conn:
         conn.execute('PRAGMA journal_mode=WAL')
-        conn.execute('PRAGMA busy_timeout = 5000')
+        conn.execute('PRAGMA busy_timeout = 30000')
         conn.execute('''
             CREATE TABLE IF NOT EXISTS conversation_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,7 +40,7 @@ def get_user_history(user_id: str, limit: int = None, agent_name: str = None) ->
     """獲取用戶對話歷史"""
     _init_history_db()
     user_key = f"{agent_name or 'default'}:{user_id}"
-    with closing(sqlite3.connect(HISTORY_DB_PATH)) as conn:
+    with closing(connect(HISTORY_DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         if limit:
             rows = conn.execute(
@@ -58,7 +59,7 @@ async def add_to_history(user_id: str, user_msg: str, assistant_reply: str, agen
     _init_history_db()
     user_key = f"{(agent_config or {}).get('MOK_AGENT_NAME', 'default')}:{user_id}"
     now = time.time()
-    with closing(sqlite3.connect(HISTORY_DB_PATH)) as conn:
+    with closing(connect(HISTORY_DB_PATH)) as conn:
         conn.execute(
             'INSERT INTO conversation_history (user_key, role, content, timestamp) VALUES (?,?,?,?)',
             (user_key, "user", user_msg, now)
@@ -73,7 +74,7 @@ def clear_history(user_id: str, agent_name: str = None):
     """清除用戶對話歷史"""
     _init_history_db()
     user_key = f"{agent_name or 'default'}:{user_id}"
-    with closing(sqlite3.connect(HISTORY_DB_PATH)) as conn:
+    with closing(connect(HISTORY_DB_PATH)) as conn:
         conn.execute('DELETE FROM conversation_history WHERE user_key=?', (user_key,))
         conn.commit()
 
@@ -81,7 +82,7 @@ def get_all_conversation_summary(user_id: str, agent_config: Dict = None) -> str
     """獲取所有對話的摘要"""
     _init_history_db()
     user_key = f"{(agent_config or {}).get('MOK_AGENT_NAME', 'default')}:{user_id}"
-    with closing(sqlite3.connect(HISTORY_DB_PATH)) as conn:
+    with closing(connect(HISTORY_DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             'SELECT * FROM conversation_history WHERE user_key=? ORDER BY timestamp ASC',

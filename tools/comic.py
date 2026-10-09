@@ -168,6 +168,45 @@ JSON 格式：
 要求：分鏡要有起承轉合與戲劇張力、台詞簡短有力、旁白有文學感、camera 多樣不要連續重複、每幕 duration 3~6 秒。"""
 
 
+def _log_remote_tool_usage(model_name, api_url, usage, agent_name=None, user_id=None):
+    """P1 補漏帳：把外部（非本機）LLM 的 token 用量寫進統一記帳（漫劇生成）。
+
+    - 只記遠端付費端點；本機端點不記，避免灌水。
+    - 任何異常一律吞掉，絕不影響主流程與回傳值。
+    """
+    try:
+        if not usage:
+            return
+        low = (api_url or "").lower()
+        if any(h in low for h in ("localhost", "127.0.0.1", "0.0.0.0", ":11434", ":11436")):
+            return
+        import sys as _sys
+        _core = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "core")
+        if _core not in _sys.path:
+            _sys.path.insert(0, _core)
+        from mok_token import log_token_usage
+        pt = int(usage.get("prompt_tokens") or 0)
+        ct = int(usage.get("completion_tokens") or 0)
+        tt = int(usage.get("total_tokens") or (pt + ct))
+        extra = {"purpose": "comic_tool", "source": "tool"}
+        try:
+            _d = usage.get("prompt_tokens_details") or {}
+            if isinstance(_d, dict) and _d.get("cached_tokens") is not None:
+                extra["cached_tokens"] = int(_d.get("cached_tokens") or 0)
+                extra["cache_source"] = "openai_details"
+            if usage.get("prompt_cache_hit_tokens") is not None:
+                extra["cached_tokens"] = int(usage.get("prompt_cache_hit_tokens") or 0)
+                extra["cache_source"] = "deepseek"
+            if usage.get("prompt_cache_miss_tokens") is not None:
+                extra["cache_miss_tokens"] = int(usage.get("prompt_cache_miss_tokens") or 0)
+        except Exception:
+            pass
+        log_token_usage(user_id or "tool", agent_name or os.environ.get("MOK_AGENT_NAME") or "unknown",
+                        model_name or "", pt, ct, tt, extra=extra)
+    except Exception:
+        pass
+
+
 def _call_llm(cfg, user_prompt, system_prompt=None, timeout=120):
     model, url, token = _get_llm_config(cfg)
     if not token:
@@ -185,6 +224,7 @@ def _call_llm(cfg, user_prompt, system_prompt=None, timeout=120):
     if r.status_code != 200:
         raise RuntimeError(f"LLM {r.status_code}: {r.text[:300]}")
     data = r.json()
+    _log_remote_tool_usage(model, base, (data or {}).get("usage"))
     try:
         return data["choices"][0]["message"]["content"]
     except Exception:
@@ -496,7 +536,22 @@ def _add_audio(video_mp4, audio_items, out_mp4):
     subprocess.run(cmd, check=True, capture_output=True, timeout=300)
 
 # ==================== 主處理 ====================
+def _balance_blocked(tool_name):
+    """P0 餘額熔斷：低餘額時暫停非必要高耗工具（fail-open）。"""
+    try:
+        import sys as _sys
+        _core = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "core")
+        if _core not in _sys.path:
+            _sys.path.insert(0, _core)
+        from deepseek_guard import tool_blocked
+        return tool_blocked(tool_name)
+    except Exception:
+        return False
+
+
 async def handle_comic(args, user_id: str = None, agent_config: Optional[Dict] = None) -> str:
+    if _balance_blocked("comic"):
+        return json.dumps({"success": False, "error": "DeepSeek 餘額不足，已暫停非必要高耗工具（漫劇生成）；請主人補值後再試。"}, ensure_ascii=False)
     try:
         p = _parse_args(args)
         subject = (p.get("subject") or "").strip()

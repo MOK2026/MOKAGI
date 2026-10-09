@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cor
 
 import mokagi
 from mokagi import process_message, clear_history, reload_tools, MOKAGI_home
+from global_gate import gated as gate_call, gate_held, gate_stats
 
 # ================== 載入配置文件（僅用於 Telegram 特有配置）==================
 def load_agent_config():
@@ -110,6 +111,45 @@ def split_text(text: str, max_length: int = 4096) -> list:
 
 
 
+# ================== per-chat 序列化鎖 ==================
+# 背景：main() 用 concurrent_updates(True) 讓「不同 chat」的 update 可並行處理，
+#       避免單一慢請求（長回覆、生圖、轉檔等）卡住其他使用者的訊息。
+# 但「同一個 chat」仍必須序列化，否則會出事：
+#   (1) 串流佔位訊息被多個協程同時 edit_message，造成內容交錯、更新亂序；
+#   (2) chat 級共享狀態（對話歷史、working video 訊息 id 等）被併發讀改而競爭。
+# 做法：以 chat_id 為粒度各持一把 asyncio.Lock —— 同 chat 排隊、跨 chat 互不阻塞。
+_chat_locks: dict = {}
+
+def _serialized(func):
+    """per-chat 序列化裝飾器：同一 chat_id 依序執行，不同 chat 並行。
+
+    用法：加在 Telegram handler 上（@_serialized）。被包裝的 handler 第一個參數
+    需為 Update，且能取得 effective_chat / message.chat / callback_query.message.chat。
+    """
+    from functools import wraps
+
+    @wraps(func)
+    async def wrapper(update, context, *args, **kwargs):
+        # 1) 優先由 effective_chat 取 chat_id（一般訊息與 callback 皆適用）
+        chat = getattr(update, "effective_chat", None)
+        chat_id = getattr(chat, "id", None)
+        # 2) 後備路徑：部分 update 無 effective_chat，改由 message / callback_query.message 取；
+        #    兩者都拿不到則退為 "unknown"，讓這類無 chat 的 update 共用同一把鎖、仍維持順序
+        if chat_id is None:
+            obj = getattr(update, "message", None) or getattr(update, "callback_query", None)
+            chat_id = getattr(getattr(obj, "chat", None), "id", "unknown")
+        # 3) 取得（必要時建立）此 chat 專屬的鎖，並快取回 _chat_locks
+        lock = _chat_locks.get(chat_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _chat_locks[chat_id] = lock
+        # 4) 持鎖執行原 handler：同 chat 的請求在此排隊，不同 chat 各用其鎖並行
+        async with lock:
+            return await func(update, context, *args, **kwargs)
+
+    return wrapper
+
+
 # ================== 全域工作中影片追蹤 ==================
 # key: chat_id, value: message_id，用於在發送新影片前清理舊的
 _working_video_msgs: dict = {}
@@ -122,6 +162,53 @@ async def _cleanup_working_video(chat_id: str, context, current_msg_id: int = No
             await context.bot.delete_message(chat_id=int(chat_id), message_id=old_msg_id)
         except Exception:
             pass  # 消息可能已被刪除
+
+# ================== L3 結構化媒體（20261008 indexPage） ==================
+def _resolve_tg_media_source(url):
+    """把協議 URL 轉成 Telegram 可用來源：站內相對路徑 -> 本機檔案；http(s) -> 原網址。"""
+    if not url:
+        return None
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    if url.startswith("/"):
+        rel = url.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+        base = os.path.join(os.path.expanduser("~/.mok/html"), rel)
+        if os.path.isfile(base):
+            return open(base, "rb")
+    return None
+
+
+async def _send_tg_media(context, chat_id, items):
+    """依媒體型別逐一發送（圖/影/音）；單項失敗只記 log，不中斷其餘。"""
+    sent = 0
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        _type = it.get("type")
+        _url = it.get("url")
+        src = _resolve_tg_media_source(_url)
+        if src is None:
+            continue
+        fh = src if hasattr(src, "read") else None
+        try:
+            cap = it.get("alt") or None
+            if _type == "video":
+                await context.bot.send_video(chat_id=chat_id, video=src, caption=cap, supports_streaming=True)
+            elif _type == "audio":
+                await context.bot.send_audio(chat_id=chat_id, audio=src, caption=cap)
+            else:
+                await context.bot.send_photo(chat_id=chat_id, photo=src, caption=cap)
+            sent += 1
+        except Exception as e:
+            logging.warning("send media 失敗 url=%s: %s", _url, e)
+        finally:
+            if fh is not None:
+                try:
+                    fh.close()
+                except Exception:
+                    pass
+    return sent
+
 
 # ================== 流式回調函數（核心） ==================
 async def stream_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, temp_msg, state: dict, event: dict, user_text: str = ""):
@@ -136,6 +223,9 @@ async def stream_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     避免多個並發請求共享全域狀態導致內容混雜。
     """
     try:
+        # L3 結構化媒體（20261008 indexPage）：累積本輪媒體，done 時統一發送
+        if event.get("type") == "tool_result" and event.get("media"):
+            state.setdefault("media", []).extend(event["media"])
         if event["type"] == "think":
             state["think_content"] += event["content"]
             # 只顯示思考部分（回覆還沒開始）
@@ -169,9 +259,15 @@ async def stream_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, te
                 text=new_text,
                 parse_mode="Markdown"
             )
+            # L3 結構化媒體（20261008 indexPage）：文字回覆送出後，再補發本輪圖/影/音
+            try:
+                await _send_tg_media(context, update.effective_chat.id, state.get("media") or [])
+            except Exception as _me:
+                logging.warning("發送結構化媒體失敗: %s", _me)
             # 清理累積器，為下一次對話準備
             state["think_content"] = ""
             state["full_reply"] = ""
+            state["media"] = []
             # ✨ A/B: girl gate — 偵測一般模型的安全拒答 → GIRL_AUTO=1 直接開 girl，否則送確認按鈕
             try:
                 import girl_gate
@@ -207,6 +303,7 @@ async def stream_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
 
 # ================== girl 引擎確認按鈕 callback（B/D/E） ==================
+@_serialized
 async def girl_confirm_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """「開 vast girl / 不用」按鈕回調：no → 關閉；go → 呼叫 girl_engine.request_girl_start"""
     q = update.callback_query
@@ -268,16 +365,50 @@ async def girl_confirm_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.warning(f"girl_confirm_cb 失敗: {e}")
 
 
+# ================== 指令權限閘（2026-10-03 by 稚）==================
+# start / clear / tools 一律先過白名單（ADMIN_CHAT_ID 或 MOK_ALLOWED_USERS）；
+# 未授權者只回制式訊息、不做任何事。授權判定與 handle_message 完全一致。
+def _cmd_allowed(update) -> bool:
+    try:
+        cid = str(update.message.chat_id)
+    except Exception:
+        return False
+    if ADMIN_CHAT_ID and cid == str(ADMIN_CHAT_ID):
+        return True
+    if not ALLOWED_USERS:
+        return True          # 未設白名單時維持舊行為，避免把主人自己鎖在門外
+    return cid in set(map(str, ALLOWED_USERS))
+
+
+async def _reject_cmd(update):
+    try:
+        await update.message.reply_text(UNAUTHORIZED_MSG)
+    except Exception:
+        pass
+
+
 # ================== Telegram 命令處理器 ==================
+@_serialized
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _cmd_allowed(update):
+        await _reject_cmd(update)
+        return
     await update.message.reply_text(WELCOME_MSG)
 
+@_serialized
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _cmd_allowed(update):
+        await _reject_cmd(update)
+        return
     chat_id = str(update.message.chat_id)
     clear_history(chat_id)
     await update.message.reply_text("記憶已清除，我們重新開始。")
 
+@_serialized
 async def tools_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _cmd_allowed(update):
+        await _reject_cmd(update)
+        return
     from mokagi import tool_handler
     tools = tool_handler.get_tools()
     text = "🧰 已安裝的工具:\n"
@@ -288,6 +419,7 @@ async def tools_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += "\n ➕ 增加工具: https://github.com/MOK2026/MOKAGI/tree/main/tools"
     await update.message.reply_text(text, disable_web_page_preview=True)
 
+@_serialized
 async def reload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 立即停止所有服務及緊急重啟，請稍候...")
     import subprocess
@@ -299,7 +431,8 @@ async def update_bot_commands(app):
     base_commands = [
         BotCommand(sanitize("start"), sanitize("開始對話")),
         BotCommand(sanitize("clear"), sanitize("清除會話記憶")),
-        BotCommand(sanitize("reload"), sanitize("緊急重啟")),
+        # [停用 2026-10-03 by 稚] /reload 已停用，選單同步移除
+        # BotCommand(sanitize("reload"), sanitize("緊急重啟")),
         BotCommand(sanitize("tools"), sanitize("工具箱")),
     ]
     plugin_commands = []
@@ -320,6 +453,7 @@ async def send_welcome(app):
             logging.warning(f"無法發送歡迎消息給 {ADMIN_CHAT_ID}: {e}")
 
 # ================== 圖片處理 ==================
+@_serialized
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """處理 Telegram 圖片訊息：下載圖片 → vision 分析 → 回覆描述"""
     chat_id = str(update.message.chat_id)
@@ -384,6 +518,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ================== 消息處理（流式） ==================
+@_serialized
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     chat_id = str(update.message.chat_id)
@@ -464,12 +599,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.warning(f"發送工作中影片失敗，降級為文字: {e}")
 
     # 為每個請求創建獨立的狀態容器，避免並發請求共享全域狀態
-    stream_state = {"think_content": "", "full_reply": ""}
+    stream_state = {"think_content": "", "full_reply": "", "media": []}
     
     temp_msg = await update.message.reply_text("💭 思考中...")
     try:
         cb = partial(stream_callback, update, context, temp_msg, stream_state, user_text)
-        await process_message(user_id=chat_id, text=user_text, stream_callback=cb, agent_config=mokagi._agent_config)
+        await gate_call(process_message, user_id=chat_id, text=user_text, stream_callback=cb, agent_config=mokagi._agent_config)
     except Exception as e:
         logging.exception("處理消息時出錯")
         await context.bot.edit_message_text(
@@ -500,10 +635,12 @@ async def post_init(app):
 
 def main():
     reload_tools()
-    app = ApplicationBuilder().token(MOK_TG_TOKEN).post_init(post_init).build()
+    app = ApplicationBuilder().token(MOK_TG_TOKEN).concurrent_updates(True).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("clear", clear))
-    app.add_handler(CommandHandler("reload", reload))
+    # [停用 2026-10-03 by 稚] /reload 是「無閘門」的強制重啟指令，任何人皆可用；
+    # 依主人指示停用（保留函數本體，不刪碼）。要恢復：取消下一行註解即可。
+    # app.add_handler(CommandHandler("reload", reload))
     app.add_handler(CommandHandler("tools", tools_command))
     
     app.add_handler(MessageHandler(filters.TEXT, handle_message))

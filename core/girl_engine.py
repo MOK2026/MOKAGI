@@ -60,19 +60,28 @@ def _vast_instances():
 
 
 def spawn_auto_start(user_id: str = "", agent: str = "稚") -> bool:
-    """★ 檢查到色情過濾(安全拒答) → 射後不理地在背景打開 girl 模型。
-    供前端 girl_gate(auto=True) 直接呼叫；不阻塞對話串流。"""
+    """★ 2026-09-28 稚（根治「沒要出片卻自己租機」）：
+    偵測到安全拒答時，**不再自動租 GPU**。改為只通知主人，由主人明確決定。
+    回傳 False = 沒有自動開啟（前端應顯示「請按按鈕確認」而非「已自動打開」）。
+    原因：主人鐵令「我沒要出片時，侍女不得自己租機」；自動租機鏈已整條切除。"""
     try:
-        import asyncio as _asyncio, threading as _threading
-        def _run():
-            try:
-                _asyncio.run(request_girl_start(user_id, agent))
-            except Exception:
-                pass
-        _threading.Thread(target=_run, daemon=True).start()
-        return True
+        _msg = ("🧠 偵測到一般模型安全拒答。\n"
+                "⚠ 自動租機已停用（避免沒下令就燒錢）。如需 vast girl 引擎，請主人明確下令／按按鈕，"
+                "或叫侍女開閘：python3 ~/.mok/skill/vastai/scripts/rent_guard.py arm --minutes 90 --reason 出片")
+        try:
+            import importlib.util as _ilu
+            _p = os.path.join(HOME, ".mok", "skill", "vastai", "scripts", "vast_notify.py")
+            if os.path.exists(_p):
+                _s = _ilu.spec_from_file_location("_vg_notify", _p)
+                _m = _ilu.module_from_spec(_s); _s.loader.exec_module(_m)
+                _m.notify(_msg)
+            else:
+                print(_msg)
+        except Exception:
+            print(_msg)
     except Exception:
-        return False
+        pass
+    return False
 
 
 def _state_path():
@@ -99,16 +108,16 @@ def _spawn_rent(agent="稚"):
         return False, f"找不到租機程式 {RENT_DRIVER}"
     try:
         cmd = [sys.executable, RENT_DRIVER]
-        # 多租競速（SOP_LLM引擎.md）：★ 主人 2026-09-13 鐵令「一律 20 台競速」
-        # （H3 出片 / LLM / 日後所有 vast 用途都必須）；開不到的立即刪、留最穩最便宜。
-        # 除錯真的想單租時，直接跑 vastai_rent_llm.py --no-race，不要從這裡降級。
-        _env_race_n = os.environ.get("LLM_RACE_N") or os.environ.get("GIRL_RACE_N") or "20"
+        # ★ 2026-09-28 汐修正（根絕「20 機嘖血」）：預設改 1，不再強制至少 20 台。
+        #   根因：vastai_rent_llm 常駐無限重試 × 強制 20 競速 × RETAIN=1（停機仍計費）× 無熔斷。
+        #   要競速請明確設 LLM_RACE_N>1；租機另有 rent_guard 單日 US$1 熔斷把關。
+        _env_race_n = os.environ.get("LLM_RACE_N") or os.environ.get("GIRL_RACE_N") or "1"
         try:
             _n = int(_env_race_n)
         except Exception:
-            _n = 20
-        if _n < 20:
-            _n = 20   # 硬化：正式路徑一律至少 20 競速
+            _n = 1
+        if _n < 1:
+            _n = 1
         if _n > 1:
             cmd += ["--race", str(_n)]  # 多租競速: 開不到的立即刪, 開到的留最穩最便宜
         with open(RENT_LOG, "ab") as f:
@@ -142,7 +151,17 @@ async def request_girl_start(user_id: str = "", agent: str = "稚"):
     if insts:
         ids = ", ".join(str(i.get("id")) for i in insts[:3])
         return (False, f"⏳ vast girl 實例({ids}) 部署中（反向隧道尚未就緒）。請稍候再按，或叫我查進度。")
-    # 完全沒機 → D: 自動租機部署 (主人已核准)
+    # 完全沒機 → 走到這裡代表「主人明確按了按鈕／明確下令」，屬明確動作：
+    # 先開租機閘門（預設 60 分鐘，20 台競速額度），再租機。逾時自動關，杜絕自走。
+    try:
+        import importlib.util as _ilu2
+        _rgp = os.path.join(HOME, ".mok", "skill", "vastai", "scripts", "rent_guard.py")
+        if os.path.exists(_rgp):
+            _s2 = _ilu2.spec_from_file_location("_rent_guard_gate", _rgp)
+            _rg = _ilu2.module_from_spec(_s2); _s2.loader.exec_module(_rg)
+            _rg.arm(minutes=60, by="主人", reason="開 vast girl 引擎（按鈕/明確下令）", max_machines=20)
+    except Exception as _e_arm:
+        print(f"[girl_engine] 開閘失敗（不影響流程）: {_e_arm}")
     ok, err = _spawn_rent(agent)
     if ok:
         return (False,

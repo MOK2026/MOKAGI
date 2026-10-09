@@ -5,6 +5,7 @@
 # 2026-08-22 建立；2026-09-17 加入系統還原點
 # ------------------------------------------------------------------------------------ #
 import os
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 
@@ -47,7 +48,7 @@ PLUGIN_INFO = {
     ],
     "tool_schema": {
         "name": "backup",
-        "description": "MOK 系統備份與還原：run=立即備份（含所有 cron 與執行中 pm2）；list=備份列表；points=系統還原點列表；restore=一鍵還原到指定備份並重啟所有服務；status=狀態；cleanup=清理舊備份（保留最近7份）。",
+        "description": "MOK 系統備份與還原：run=立即備份（含所有 cron 與執行中 pm2）；list=備份列表；points=系統還原點列表；restore=一鍵還原到指定備份並重啟所有服務；status=狀態；cleanup=清理舊備份（保留最近2份）。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -186,16 +187,57 @@ def _restore(target):
             f"進度可看 /backup status 或 backups/restore.log")
 
 
+def _parse_log_ts(name):
+    """從檔名 mok_backup_YYYYMMDD_HHMMSS 取出可讀時間（取不到回 None）。"""
+    m = re.search(r"(\d{8})_(\d{6})", name or "")
+    if not m:
+        return None
+    d, t = m.group(1), m.group(2)
+    return f"{d[:4]}-{d[4:6]}-{d[6:]} {t[:2]}:{t[2:4]}:{t[4:]}"
+
+
+def _last_run_from_log(lines):
+    """依日誌判定『最近一次』備份結果。
+    結果行：OK <檔> <大小> ／ done: <檔> (<大小>) rc=<n>  → 成功
+            FAIL rc=<n> ／ fail rc=<n>                      → 失敗
+    時間優先取檔名內的時間戳（權威來源），避免被較舊的 '===== start' 標頭誤導。
+    回傳 (時間, 結果行, 是否成功)；完全找不到時回 None。
+    """
+    hdr_ts, last = None, None
+    for ln in lines:
+        if ln.startswith("=====") and "start" in ln:
+            m = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", ln)
+            hdr_ts = m.group(1) if m else None
+            continue
+        ok, name = None, None
+        if ln.startswith("OK "):
+            parts = ln.split()
+            name, ok = (parts[1] if len(parts) > 1 else None), True
+        elif ln.startswith("done:"):
+            rest = ln[5:].strip()
+            name, ok = (rest.split()[0] if rest else None), True
+        elif ln.startswith("FAIL") or ln.startswith("fail rc="):
+            ok = False
+        if ok is None:
+            continue
+        last = (_parse_log_ts(name) or hdr_ts or "N/A", ln.replace(BK + "/", ""), ok)
+    return last
+
+
 def _status():
     out = []
+    files = _list_files()
     if os.path.exists(LOG):
         with open(LOG, "r", encoding="utf-8", errors="replace") as f:
             lines = [l.strip() for l in f.readlines() if l.strip()]
-        last = next((l for l in reversed(lines) if l.startswith("=====") and "start" in l), "N/A")
-        result = next((l for l in reversed(lines) if l.startswith("done") or l.startswith("fail") or l.startswith("count:")), "N/A")
-        out.append(f"🗂 最近執行: {last}")
-        out.append(f"  結果: {result}")
-    files = _list_files()
+        last = _last_run_from_log(lines)
+        if last:
+            ts, text, ok = last
+            mark = "✅ 成功" if ok else "❌ 失敗"
+            out.append(f"🗂 最近一次備份: {ts}")
+            out.append(f"  結果: {mark} ｜ {text}")
+        else:
+            out.append("🗂 最近一次備份: N/A")
     out.append(f"📦 備份份數: {len(files)}")
     if files:
         newest = files[0]
@@ -212,11 +254,11 @@ def _status():
     return "\n".join(out)
 
 
-def _cleanup(keep=7):
+def _cleanup(keep=2):
     try:
         keep = int(keep)
     except (TypeError, ValueError):
-        keep = 7
+        keep = 2
     if keep < 1:
         keep = 1
     files = _list_files()

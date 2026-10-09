@@ -256,7 +256,7 @@
 
     // 2026-09-24 修補：/api/gpu/status 在核心版本更迭中被移除
     //（保丁補丁 GPU帳單API_202609241330 會在 mok_web 重啟後補回）。
-    // 先呼叫 API，失敗才退回 cron 產生的靜態快照 /static/gpu_status.json。
+    // 先呼叫 API，失敗才退回 cron 產生的靜態快照 /webTools/gpu_status_snapshot.json。
     function fetchJson(url) {
         return fetch(url, { cache: 'no-store' })
             .then(function (r) {
@@ -273,7 +273,7 @@
         var url = '/api/gpu/status' + (syncFirst === false ? '?sync=0' : '');
         return fetchJson(url)
             .catch(function () {
-                return fetchJson('/static/gpu_status.json?t=' + Date.now());
+                return fetchJson('/webTools/gpu_status_snapshot.json?t=' + Date.now());
             })
             .then(function (d) {
                 if (!d.ok) throw new Error(d.error || 'unknown');

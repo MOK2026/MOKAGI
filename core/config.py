@@ -59,7 +59,7 @@ def load_agent_config(agent_name: str = None) -> Dict[str, str]:
             "MOK_MODEL_NAME": "minimax-m3:cloud",
             "MOK_MODEL_url": "http://localhost:11434/api/generate",
             "MOK_num_ctx": "16384",
-            "MOK_num_predict": "8192",
+            "MOK_num_predict": "32768",
             "MOK_temperature": "0.8",
             "MOK_top_p": "0.9",
             "MOK_top_k": "50",
@@ -154,7 +154,7 @@ MOK_AGENT_NAME = _agent_config.get("MOK_AGENT_NAME", "助手")
 OLLAMA_API = _agent_config.get("MOK_MODEL_url", "http://localhost:11434/api/generate")
 OLLAMA_OPTIONS = {
     "num_ctx": int(_agent_config.get("MOK_num_ctx", 16384)),
-    "num_predict": int(_agent_config.get("MOK_num_predict", 8192)),
+    "num_predict": int(_agent_config.get("MOK_num_predict", 32768)),
     "temperature": float(_agent_config.get("MOK_temperature", 0.8)),
     "top_p": float(_agent_config.get("MOK_top_p", 0.9)),
     "top_k": int(_agent_config.get("MOK_top_k", 50)),

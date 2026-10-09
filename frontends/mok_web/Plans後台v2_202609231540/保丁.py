@@ -104,6 +104,27 @@ def _avail_agents():
         pass
     return out
 
+def _agent_group_of(name):
+    """2026-10-01 凜：讀 .<agent> 的 MOK_AGENT_group，回傳所屬組別（無則空字串）。"""
+    try:
+        dot = os.path.join(AGENT_DIR, name, '.' + name)
+        if os.path.isfile(dot):
+            for line in open(dot, encoding='utf-8', errors='ignore'):
+                if line.startswith('MOK_AGENT_group='):
+                    return line.strip().split('=', 1)[1].strip()
+    except Exception:
+        pass
+    return ''
+
+def _agent_groups():
+    """2026-10-01 凜：以 MOK_AGENT_group 分組，回 {組別: [agent,...]}（僅含有組別者）。"""
+    g = {}
+    for _a in _avail_agents():
+        _g = _agent_group_of(_a)
+        if _g:
+            g.setdefault(_g, []).append(_a)
+    return g
+
 def _avail_pets():
     seen, out = set(), []
     try:
@@ -198,7 +219,7 @@ table.pt th{color:#9aa0b8;font-weight:600}
 def _plans_page(title, inner, status=200):
     from flask import render_template_string, Response
     html = ('<!doctype html><html lang="zh-TW"><head><meta charset="utf-8">'
-            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark">'
             '<title>%s</title><style>%s</style></head><body>%s</body></html>'
             % (title, _CSS, inner))
     return Response(html, status=status)
@@ -225,7 +246,18 @@ def _perm_checks(plan, agents_avail, pets_avail):
         ag_html = '<label class="chip all"><input type="checkbox" name="agents" value="__all__" onchange="plansSyncAll(this)">全部 Agent(*)</label>'
     for a in agents_avail:
         checked = ' checked' if (ag_all or a in ag) else ''
-        ag_html += '<label class="chip"><input type="checkbox" name="agents" value="%s"%s onchange="plansSyncOne(this)">%s</label>' % (_esc(a), checked, _esc(a))
+        _ag = _agent_group_of(a)
+        _gattr = (' data-group="%s"' % _esc(_ag)) if _ag else ''
+        ag_html += '<label class="chip"><input type="checkbox" name="agents" value="%s"%s%s onchange="plansSyncOne(this)">%s</label>' % (_esc(a), _gattr, checked, _esc(a))
+    # 組別（2026-10-01 凜）：同 MOK_AGENT_group 一鍵全選／全不選（不提交，僅前端連動；與下方單選並存）
+    _groups = _agent_groups()
+    if _groups:
+        ag_html += '<span class="small" style="flex-basis:100%;margin-top:6px">組別（同一組一次全選／全不選，可再個別微調＝組內試用）</span>'
+        for _gn in sorted(_groups):
+            _members = _groups[_gn]
+            _gchk = ' checked' if (ag_all or all((_m in ag) for _m in _members)) else ''
+            ag_html += ('<label class="chip grp" style="border-color:#c084fc" title="%s"><input type="checkbox" data-grp="%s"%s onchange="plansToggleGroup(this)">組別 ▸ %s（%d）</label>'
+                        % (_esc('、'.join(_members)), _esc(_gn), _gchk, _esc(_gn), len(_members)))
     # 寵物款式複選
     if pt_all:
         pet_html = '<label class="chip all"><input type="checkbox" name="pets" value="__all__" checked onchange="plansSyncAll(this)">全部款式(*)</label>'
@@ -246,8 +278,12 @@ def _perm_checks(plan, agents_avail, pets_avail):
                    % (_esc(plan['plan']), ' disabled' if pg_all else '', _esc(pg_txt)))
     inner_js = """
 <script>
-function plansSyncAll(cb){var box=cb.closest('.card');box.querySelectorAll('input[name="agents"]').forEach(function(x){if(x!==cb)x.checked=false});if(cb.name==='pets'){box.querySelectorAll('input[name="pets"]').forEach(function(x){if(x!==cb)x.checked=false});}}
-function plansSyncOne(cb){if(cb.checked){var box=cb.closest('.card');box.querySelectorAll('input[name="'+cb.name+'"][value="__all__"]').forEach(function(x){x.checked=false});}}
+function plansSyncAll(cb){var box=cb.closest('.card');box.querySelectorAll('input[name="agents"]').forEach(function(x){if(x!==cb)x.checked=false});if(cb.name==='pets'){box.querySelectorAll('input[name="pets"]').forEach(function(x){if(x!==cb)x.checked=false});}plansSyncGroupState(box);}
+function plansSyncOne(cb){if(cb.checked){var box=cb.closest('.card');box.querySelectorAll('input[name="'+cb.name+'"][value="__all__"]').forEach(function(x){x.checked=false});}plansSyncGroupState(cb.closest('.card'));}
+function plansToggleAll(btn,on){var card=btn.closest('.card');card.querySelectorAll('input[name="agents"]').forEach(function(x){x.checked=on;});plansSyncGroupState(card);}
+function plansToggleGroup(cb){var card=cb.closest('.card'),g=cb.getAttribute('data-grp');card.querySelectorAll('input[name="agents"][data-group="'+g+'"]').forEach(function(x){x.checked=cb.checked;});if(cb.checked){card.querySelectorAll('input[name="agents"][value="__all__"]').forEach(function(x){x.checked=false;});}plansSyncGroupState(card);}
+function plansSyncGroupState(card){if(!card)return;var allcb=card.querySelector('input[name="agents"][value="__all__"]');var allon=!!(allcb&&allcb.checked);card.querySelectorAll('input[data-grp]').forEach(function(gc){var g=gc.getAttribute('data-grp');var ms=card.querySelectorAll('input[name="agents"][data-group="'+g+'"]');var n=ms.length,c=0;ms.forEach(function(x){if(x.checked)c++;});if(allon){gc.checked=true;gc.indeterminate=false;}else{gc.checked=(n>0&&c===n);gc.indeterminate=(c>0&&c<n);}});}
+try{document.querySelectorAll('.card').forEach(plansSyncGroupState);}catch(e){}
 </script>"""
     return ag_html, pet_html, pages_html, inner_js
 
@@ -275,7 +311,12 @@ def _cards_html(msg=None, msg_type=None):
             '<input type="number" name="monthly_tokens" value="%s" min="0" step="1">'
             '<label class="f">方案說明</label>'
             '<textarea name="desc">%s</textarea>'
-            '<label class="f">① 可用 Agent（agents）</label><div class="checks">%s</div>'
+            '<label class="f">① 可用 Agent（agents）</label>'
+            '<div style="display:flex;gap:6px;margin:2px 0 4px">'
+            '<button type="button" onclick="plansToggleAll(this,true)" style="font-size:11px;padding:3px 10px;border-radius:14px;border:1px solid #2a3050;background:#0e1122;color:#cfd3e6;cursor:pointer">全選</button>'
+            '<button type="button" onclick="plansToggleAll(this,false)" style="font-size:11px;padding:3px 10px;border-radius:14px;border:1px solid #2a3050;background:#0e1122;color:#cfd3e6;cursor:pointer">全不選</button>'
+            '</div>'
+            '<div class="checks">%s</div>'
             '<label class="f">② 可瀏覽頁面（pages）</label>%s'
             '<label class="f">③ 可用桌面寵物款式（pets）</label><div class="checks">%s</div>'
             '%s<button class="btn" type="submit">儲存 %s 層級</button>'
@@ -284,7 +325,7 @@ def _cards_html(msg=None, msg_type=None):
                _esc(pname), _esc(_csrf_token()), _esc(plan.get('monthly_tokens') or 0),
                _esc(plan.get('desc') or ''), ag_html, pages_html, pet_html, js, _esc(pname)))
         agents_meta = ''
-    header = ('<div class="top"><div><h1>層級方案管理（plans）</h1>'
+    header = ('<div class="top"><div><h1>層級方案管理（plans）</h1><div class="sub">管理員：admin＋凜</div>'
               '<div class="sub">三欄權限：①可用 Agent　②可瀏覽頁面　③可用寵物款式（* = 全部）</div></div>'
               '<div class="nav"><a href="/admin/member">← 會員管理</a><a href="/plans" target="_blank">檢視前台方案 ↗</a></div></div>')
     return header + msg_html + '<div class="grid">' + ''.join(cards) + '</div>'
@@ -315,14 +356,17 @@ if app is not None:
             agents = request.form.getlist('agents')
             pets = request.form.getlist('pets')
             pages_all = request.form.get('pages_all')
-            if '__all__' in agents or not agents:
+            if '__all__' in agents:
                 agents = ['*']
+            elif not agents:
+                agents = []          # 凜 2026-09-30：全不選＝不開放任何共用 Agent（會員自創 Agent 不受限）
             if '__all__' in pets or not pets:
                 pets = ['*']
             if pages_all:
                 pages = ['*']
             else:
-                pages = [ln.strip() for ln in (request.form.get('pages_txt') or '').splitlines() if ln.strip()]
+                from urllib.parse import unquote as _uq
+                pages = [_uq(ln).strip() for ln in (request.form.get('pages_txt') or '').splitlines() if ln.strip()]
                 if not pages:
                     pages = ['*']
             monthly = int(request.form.get('monthly_tokens') or 0)
@@ -388,19 +432,40 @@ def _fmt_pills(items):
     return ''.join('<span class="pill">%s</span>' % _esc(x) for x in items)
 
 # ============ 頁面權限檢查（預設全放行） ============
+# 受保護頁面前綴：一律走白名單（不因 .html 等副檔名被當靜態資源放行）
+_GATED_PAGES = ('/report',)
+
+def _is_gated(path):
+    return any(path == g or path.startswith(g + '/') for g in _GATED_PAGES)
+
 _PUBLIC_PREFIX = ('/api/', '/static', '/login', '/register', '/logout',
                   '/admin/', '/plans', '/member', '/favicon')
 
+def _norm_page(p):
+    from urllib.parse import unquote as _uq
+    p = _uq(p or '').strip().split('?')[0].split('#')[0]
+    if not p:
+        return ''
+    return '/' + p.lstrip('/')
+
 def _path_allowed(path, pages):
-    if not pages or '*' in pages:
+    if '*' in (pages or []):
         return True
+    if not pages:
+        return False                      # 未設定白名單 → 一律不可看
+    np = _norm_page(path)
     for p in pages:
-        if not p:
+        e = _norm_page(p)
+        if not e or e == '/':
             continue
-        if path == p:
+        if np == e:
             return True
-        if len(p) > 1 and p.endswith('/') and path.startswith(p):
-            return True
+        if e.endswith('/') and np.startswith(e):
+            return True                   # 目錄白名單
+        if not e.endswith('/'):
+            parent = e.rsplit('/', 1)[0] + '/'
+            if np.startswith(parent):
+                return True               # 同資料夾資源（css/js/圖/json）
     return False
 
 def _page_access_check():
@@ -418,14 +483,12 @@ def _page_access_check():
         low = path.lower()
         if low.startswith(_PUBLIC_PREFIX):
             return None
-        # 帶副檔名視為靜態資源
+        # 受保護頁面一律走白名單（不因 .html 等副檔名被當靜態資源放行）
         seg = path.rsplit('/', 1)[-1]
-        if '.' in seg:
+        if '.' in seg and not _is_gated(path):
             return None
-        plan = _get_plan_row_by_user(uname)
-        if not plan:
-            return None
-        pages = _to_list(plan.get('pages'), ['*'])
+        plan = _get_plan_row_by_user(uname) or {}
+        pages = _to_list(plan.get('pages'), [])   # 未設定（空）＝ 全部不可看
         if _path_allowed(path, pages):
             return None
         inner = ('<div class="back"><a href="/member">← 返回會員中心</a></div>'
@@ -484,6 +547,19 @@ import random as _random
 
 _BLOCK_NONPUBLIC_GUEST = True      # 訪客瀏覽非公開層頁面是否擋下（False=只記錄不擋）
 _QUOTA_PATHS = ('/api/chat', '/api/chat/start')
+# 【2026-09-27】匿名（未登入）專屬額度：每 sid 固定值，不套用 free 的月額度。
+# 主機指令（2026-09-30 更新）：訪客額度改與 FREE 月計同額 → 每訪客身分每月 50000 tokens。
+_GUEST_SID_QUOTA = 50000
+# 【2026-10-02 凜｜主人交付】free／訪客硬擋：月 50k token（不變）＋ 每小時最多 3 次。
+#   超額＝直接拒絕（完全不呼叫 LLM），回一句寫死的「註冊 / 登入會員」引導句。
+_GUEST_HOUR_LIMIT = 3
+_GUEST_BLOCK_MSG = {
+    'hour': '⏳ 免費體驗每小時最多 3 次對話，本小時的次數已用完。\n'
+            '請稍後再試，或立即「註冊 / 登入會員」繼續使用。',
+    'month': '🔒 免費訪客額度（50,000 Token）已用完。\n'
+             '請「註冊 / 登入會員」繼續未完成的對話。',
+}
+
 
 # 超額體驗（零 LLM）：本地句型樣板池隨機取句；{n}=登入贈送 Token（＝pro 層級每月額度）
 _LOGIN_BONUS_TEMPLATES = (
@@ -504,8 +580,7 @@ def _v2_ensure_columns():
             cols = [r[1] for r in c.execute('PRAGMA table_info(plans)').fetchall()]
             if 'requires_login' not in cols:
                 c.execute('ALTER TABLE plans ADD COLUMN requires_login INTEGER NOT NULL DEFAULT 1')
-            if 'guest_quota' not in cols:
-                c.execute('ALTER TABLE plans ADD COLUMN guest_quota INTEGER NOT NULL DEFAULT 0')
+            # 2026-09-27：guest_quota 舊欄位停用；統一以 monthly_tokens 為單一額度來源（不再建立）
             # guest_usage 主鍵由 day 改為 month（月計）；舊表自動遷移（同月多日彙總）
             gcols = [r[1] for r in c.execute('PRAGMA table_info(guest_usage)').fetchall()]
             if gcols and 'month' not in gcols:
@@ -520,6 +595,8 @@ def _v2_ensure_columns():
                     ' used INTEGER NOT NULL DEFAULT 0,'
                     ' first_ts REAL,'
                     ' last_ts REAL,'
+                    ' hour_key TEXT,'
+                    ' hour_used INTEGER NOT NULL DEFAULT 0,'
                     ' PRIMARY KEY (guest_id, month))')
             try:
                 c.execute('SELECT 1 FROM guest_usage_daybak LIMIT 1')
@@ -527,6 +604,15 @@ def _v2_ensure_columns():
                           "SELECT guest_id, substr(day, 1, 7), MAX(plan), SUM(used), MIN(first_ts), MAX(last_ts) "
                           'FROM guest_usage_daybak GROUP BY guest_id, substr(day, 1, 7)')
                 c.execute('DROP TABLE guest_usage_daybak')
+            except Exception:
+                pass
+            # 【2026-10-02】既有表補上「每小時次數」欄（hour_key='YYYY-MM-DDTHH'）
+            try:
+                _hc = [r[1] for r in c.execute('PRAGMA table_info(guest_usage)').fetchall()]
+                if 'hour_key' not in _hc:
+                    c.execute('ALTER TABLE guest_usage ADD COLUMN hour_key TEXT')
+                if 'hour_used' not in _hc:
+                    c.execute('ALTER TABLE guest_usage ADD COLUMN hour_used INTEGER NOT NULL DEFAULT 0')
             except Exception:
                 pass
             c.execute('CREATE INDEX IF NOT EXISTS idx_guest_usage_month ON guest_usage(month)')
@@ -549,7 +635,16 @@ def _public_plans():
 
 
 def _v2_guest_id():
-    """取得未登入訪客身分（由「訪客身分綁定」補丁頒發：session 或簽章 cookie）。"""
+    """取得未登入訪客身分。
+    2026-09-27：改以「匿名產物沙盒」(ｚｚｚ匿名產物) 的 sid 作為單一身分來源 → guest:<sid>。
+    找不到沙盒 sid 時才回落舊來源（session / 簽章 cookie）。"""
+    try:
+        from flask import g as _G
+        _sid = getattr(_G, '_anon_sid', None) or getattr(_G, '_anon_new_sid', None)
+        if _sid and 8 <= len('guest:' + str(_sid)) <= 48:
+            return 'guest:' + str(_sid)
+    except Exception:
+        pass
     try:
         from flask import session as _S, request as _R
         g = _S.get('mok_guest_id')
@@ -585,19 +680,85 @@ def _guest_used(g, month=None):
         return 0
 
 
-def _guest_bump(g, plan=None):
+def _v2_this_hour():
+    """目前小時鍵 'YYYY-MM-DDTHH'（訪客每小時次數 bucket）。"""
+    return _v2_time.strftime('%Y-%m-%dT%H')
+
+
+def _guest_hour_used(g, hour_key=None):
+    """本小時已用次數；跨小時自動視為 0。"""
+    hour_key = hour_key or _v2_this_hour()
+    try:
+        with _db_lock, _conn() as c:
+            r = c.execute('SELECT hour_key, hour_used FROM guest_usage WHERE guest_id=? AND month=?',
+                          (g, _v2_this_month())).fetchone()
+            if not r:
+                return 0
+            if str(r['hour_key'] or '') != hour_key:
+                return 0
+            return int(r['hour_used'] or 0)
+    except Exception:
+        return 0
+
+
+def _guest_hour_bump(g, hour_key=None, plan=None):
+    """通過檢查後，本小時次數 +1（換小時自動歸零重計）。"""
+    hour_key = hour_key or _v2_this_hour()
     month = _v2_this_month()
     now = _v2_time.time()
     try:
         with _db_lock, _conn() as c:
-            cur = c.execute('UPDATE guest_usage SET used=used+1, last_ts=?, plan=COALESCE(?, plan) '
-                            'WHERE guest_id=? AND month=?', (now, plan, g, month))
-            if cur.rowcount == 0:
-                c.execute('INSERT OR IGNORE INTO guest_usage (guest_id, month, plan, used, first_ts, last_ts) '
-                          'VALUES (?,?,?,1,?,?)', (g, month, plan, now, now))
+            r = c.execute('SELECT hour_key FROM guest_usage WHERE guest_id=? AND month=?',
+                          (g, month)).fetchone()
+            if not r:
+                c.execute('INSERT OR IGNORE INTO guest_usage '
+                          '(guest_id, month, plan, used, first_ts, last_ts, hour_key, hour_used) '
+                          'VALUES (?,?,?,?,?,?,?,?)', (g, month, plan, 0, now, now, hour_key, 1))
+            elif str(r['hour_key'] or '') == hour_key:
+                c.execute('UPDATE guest_usage SET hour_used=hour_used+1, last_ts=? '
+                          'WHERE guest_id=? AND month=?', (now, g, month))
+            else:
+                c.execute('UPDATE guest_usage SET hour_key=?, hour_used=1, last_ts=? '
+                          'WHERE guest_id=? AND month=?', (hour_key, now, g, month))
             c.commit()
     except Exception:
         pass
+
+
+def _guest_bump(g, plan=None, tokens=0):
+    """累加訪客用量（單位：token）。
+    2026-09-27：改為累加「實際 token 數」——由 _guest_quota_count 讀 token_usage 增量後傳入，
+    不再每次 +1（次數）。tokens<=0 時僅更新 last_ts。"""
+    month = _v2_this_month()
+    now = _v2_time.time()
+    try:
+        add = int(tokens) if tokens and int(tokens) > 0 else 0
+        with _db_lock, _conn() as c:
+            cur = c.execute('UPDATE guest_usage SET used=used+?, last_ts=?, plan=COALESCE(?, plan) '
+                            'WHERE guest_id=? AND month=?', (add, now, plan, g, month))
+            if cur.rowcount == 0:
+                c.execute('INSERT OR IGNORE INTO guest_usage (guest_id, month, plan, used, first_ts, last_ts) '
+                          'VALUES (?,?,?,?,?,?)', (g, month, plan, add, now, now))
+            c.commit()
+    except Exception:
+        pass
+
+
+def _guest_tokens_since(gid):
+    """讀 token_usage 增量：本次請求期間（g._qt0 起）該訪客新增的 total_tokens 總和。"""
+    try:
+        from flask import g as _G
+        t0 = float(getattr(_G, '_qt0', 0) or 0)
+        if not t0 or not gid:
+            return 0
+        import sqlite3 as _sq
+        db = os.path.expanduser('~/.mok/.memory/chat_history.db')
+        with _sq.connect('file:%s?mode=ro' % db, uri=True, timeout=10) as c:
+            r = c.execute('SELECT COALESCE(SUM(total_tokens),0) FROM token_usage '
+                          'WHERE user_id=? AND timestamp>=?', (gid, t0 - 1)).fetchone()
+            return int(r[0] or 0)
+    except Exception:
+        return 0
 
 
 def _public_quota():
@@ -681,12 +842,47 @@ def _public_page_check():
         return None
 
 
+def _guest_block_response(reason, used, limit):
+    """【2026-10-02】硬擋（直接拒絕、零 LLM）：回一句寫死的「註冊 / 登入會員」引導句。
+    - /api/chat/start → 回 JSON（無 sse_session_id；新前端直接顯示，舊前端自動回退舊串流）
+    - /api/chat       → 回單輪 SSE（iteration_start / reply / done），前端以既有管線渲染"""
+    import json as _json
+    from flask import request as _R, jsonify as _J, Response as _Resp
+    msg = _GUEST_BLOCK_MSG.get(reason) or _GUEST_BLOCK_MSG.get('month')
+    agent = ''
+    try:
+        _b = _R.get_json(silent=True) or {}
+        agent = _b.get('agent') or ''
+    except Exception:
+        agent = ''
+    if (_R.path or '').startswith('/api/chat/start'):
+        return _J({'success': False, 'error': 'guest_quota_exceeded', 'blocked': True,
+                   'need_login': True, 'reason': reason, 'message': msg,
+                   'used': used, 'quota': limit,
+                   'login_url': '/login', 'register_url': '/register'})
+
+    def _ev(_o):
+        return 'data: ' + _json.dumps(_o, ensure_ascii=False) + '\n\n'
+
+    body = (_ev({'type': 'iteration_start', 'agent': agent, 'iteration': 1})
+            + _ev({'type': 'reply', 'agent': agent, 'content': msg})
+            + _ev({'type': 'done', 'agent': agent, 'final_reply': msg}))
+    return _Resp(body, status=200, mimetype='text/event-stream')
+
+
 def _guest_quota_check():
-    """訪客呼叫 mokagi（/api/chat*）前，檢查公開層「每月」額度（＝free 每月 Token 額度）。"""
+    """訪客呼叫 mokagi（/api/chat*）前，檢查「匿名每 sid 固定額度」。
+    2026-09-27：由 free 每月額度改為匿名專屬固定值（_GUEST_SID_QUOTA）；
+    2026-09-30：額度調整為 50000（與 FREE 月計同額），說明頁 03 同步。"""
     if app is None:
         return None
     try:
         from flask import request as _R, session as _S, jsonify as _J
+        try:
+            from flask import g as _G
+            _G._qt0 = _v2_time.time()
+        except Exception:
+            pass
         if _R.method != 'POST':
             return None
         path = _R.path or ''
@@ -697,23 +893,19 @@ def _guest_quota_check():
         g = _v2_guest_id()
         if not g:
             return None
-        if not _public_plans():
-            return None
-        quota = _public_quota()
+        quota = _GUEST_SID_QUOTA
         if quota <= 0:
             return None
+        # 【2026-10-02】hard block：月額度（50k token）用完 或 本小時已滿 3 次 → 直接拒絕（零 LLM）
         used = _guest_used(g)
-        if used >= quota:
-            # 超額體驗：不再 429 硬擋，改回一句引導句（HTTP 200）；數字固定＝pro 每月額度
-            msg = _guest_exceeded_message(used, quota)
-            bonus = _login_bonus_tokens()
-            try:
-                return _J({'success': False, 'error': 'guest_quota_exceeded',
-                           'message': msg, 'used': used, 'quota': quota,
-                           'login_bonus': bonus, 'period': 'month'})
-            except Exception:
-                from flask import Response as _Resp
-                return _Resp(msg, status=200, mimetype='text/plain; charset=utf-8')
+        if quota > 0 and used >= quota:
+            return _guest_block_response('month', used, quota)
+        _hkey = _v2_this_hour()
+        _hused = _guest_hour_used(g, _hkey)
+        if _GUEST_HOUR_LIMIT > 0 and _hused >= _GUEST_HOUR_LIMIT:
+            return _guest_block_response('hour', _hused, _GUEST_HOUR_LIMIT)
+        # 通過檢查：記一次「本小時次數」（月 token 由 after_request 依實際用量累加）
+        _guest_hour_bump(g, _hkey)
         return None
     except Exception:
         return None
@@ -734,7 +926,7 @@ def _guest_quota_count(resp):
             return resp
         g = _v2_guest_id()
         if g and _public_plans():
-            _guest_bump(g)
+            _guest_bump(g, None, _guest_tokens_since(g))
     except Exception:
         pass
     return resp
@@ -811,8 +1003,8 @@ if app is not None:
         q = max(q, 0)
         try:
             with _db_lock, _conn() as c:
-                c.execute('UPDATE plans SET requires_login=?, guest_quota=? WHERE plan=?',
-                          (0 if is_public else 1, q, plan))
+                c.execute('UPDATE plans SET requires_login=? WHERE plan=?',
+                          (0 if is_public else 1, plan))
                 c.commit()
         except Exception as e:
             return _plans_page('儲存失敗', '<p>%s</p>' % _esc(e), 500)
@@ -824,3 +1016,283 @@ if app is not None:
 
 _v2_ensure_columns()
 print('[Plans公開層] v2.1 已載入（訪客月額度＝free 月額度 / 超額引導句樣板池）', flush=True)
+
+
+
+# ██████████████████████████████████████████████████████████████████████████
+# v3.0 UI 改版（2026-10-01 春｜主人交付）
+# ──────────────────────────────────────────────────────────────────────────
+# 問題：FREE/PRO/VIP 三張卡片全塞在同一頁；「可用 Agent」把「組別捷徑」與
+#       「個別 agent」混雜在同一個 flex 容器裡 → 手機上擠成一團、看不清楚。
+# 改法：① 上方分頁列（FREE / PRO / VIP 各自一個分頁，一次只顯示一個層級）
+#       ②「可用 Agent」拆成兩塊：組別捷徑（大卡、一行一組）＋ 個別 Agent
+#         （整列清單、一行一個、可即時搜尋）
+#       ③ 每個權限一個獨立區塊、觸控目標 >=44px、儲存鈕黏在底部。
+# 安全：只覆寫呈現層三個符號（_CSS / _perm_checks / _cards_html），
+#       表單欄位名與後端 plans_admin_save 完全一致（csrf / monthly_tokens /
+#       desc / agents / pets / pages_all / pages_txt），
+#       不動資料庫、不動權限判定、不動任何路由。
+# 還原：用 editlock 備份覆蓋即可回到舊版。
+# ██████████████████████████████████████████████████████████████████████████
+
+_CSS = """
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0f1220;--card:#171b2e;--line:#272d49;--line2:#2a3050;--txt:#e8e8f0;--dim:#8b90a5;--acc:#7aa2ff}
+body{font-family:-apple-system,BlinkMacSystemFont,'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif;
+     background:var(--bg);color:var(--txt);min-height:100vh;padding:14px 12px 96px;font-size:15px;line-height:1.55}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+h1{font-size:20px;color:#fff;letter-spacing:.5px}
+.sub{color:var(--dim);font-size:12.5px;margin-top:4px}
+.small{font-size:12px;color:var(--dim)}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.nav{display:flex;gap:8px;flex-wrap:wrap}
+.nav a{font-size:12.5px;background:#1a1f36;border:1px solid var(--line);border-radius:999px;padding:6px 12px;color:#b9c0d8}
+.tabs{position:sticky;top:0;z-index:30;display:flex;gap:6px;background:var(--bg);
+      padding:8px 0 10px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+.tab{flex:1;appearance:none;border:1px solid var(--line);background:#151a2d;color:#aeb6cf;
+     border-radius:12px;padding:11px 6px;font-size:14px;font-weight:700;letter-spacing:.6px;cursor:pointer;transition:.15s}
+.tab.active{color:#fff;background:#1d2540;box-shadow:0 0 0 1px #7aa2ff55 inset}
+.tab.free.active{border-color:#8aa0c8}
+.tab.pro.active{border-color:#60a5fa}
+.tab.vip.active{border-color:#c084fc;box-shadow:0 0 18px #c084fc33}
+.panel{display:none}
+.panel.show{display:block;animation:fade .18s ease}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 13px;margin-bottom:14px}
+.card-vip{border-color:#c084fc55}
+.hero{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.hero .nm{font-size:19px;font-weight:800;color:#fff}
+.tag{display:inline-block;font-size:11px;padding:2px 9px;border-radius:999px;margin-left:6px;vertical-align:middle}
+.tag.free{background:#334155;color:#cbd5e1}
+.tag.pro{background:#1e3a8a;color:#93c5fd}
+.tag.vip{background:#581c87;color:#e9d5ff}
+label.f{display:block;font-size:12.5px;color:#9aa0b8;margin:14px 0 6px;font-weight:600}
+input[type=text],input[type=number],textarea{width:100%;background:#0b0e1c;border:1px solid var(--line2);color:var(--txt);
+     border-radius:10px;padding:10px 12px;font-size:15px;outline:none}
+input:focus,textarea:focus{border-color:var(--acc)}
+textarea{min-height:76px;resize:vertical;font-family:inherit;line-height:1.5}
+.sec{border:1px solid var(--line);border-radius:12px;padding:11px;margin-top:12px;background:#131728}
+.sech{display:flex;align-items:center;gap:8px;font-size:14.5px;font-weight:700;color:#fff}
+.sech .num{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;border-radius:50%;
+     background:#243055;color:#9fc0ff;font-size:12px;font-weight:800;flex:none}
+.sech .cnt{min-width:0;margin-left:auto;font-size:12px;font-weight:600;color:#8fb4ff;background:#1b2540;border:1px solid #2d3b63;
+     border-radius:999px;padding:2px 10px;white-space:nowrap}
+.subh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:14px 0 7px;font-size:12.5px;font-weight:700;color:#c3cae0}
+.subh .subtip{font-weight:400;color:var(--dim);font-size:11.5px}
+.allrow{min-width:0;display:flex;align-items:center;gap:10px;min-height:44px;margin-top:8px;padding:8px 11px;
+     background:#0e1324;border:1px dashed #3d5a9e;border-radius:10px;cursor:pointer;font-weight:600}
+.allrow .hint{margin-left:auto;font-size:11px;color:var(--dim);font-weight:400}
+input[type=checkbox]{width:19px;height:19px;accent-color:var(--acc);flex:none}
+.grps{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.grp{display:flex;align-items:center;gap:9px;min-height:48px;padding:9px 11px;background:#0e1324;
+     border:1px solid #3b2f63;border-radius:11px;cursor:pointer}
+.grp{min-width:0;overflow:hidden}
+.grp .gn{min-width:0;font-size:13.5px;font-weight:700;color:#d9c8ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grp .gm{margin-left:auto;font-size:11.5px;font-weight:700;color:#a78bfa;background:#241a3d;border-radius:999px;padding:2px 8px;flex:none}
+.grp input{accent-color:#c084fc}
+.search{margin-bottom:8px;font-size:14px;background:#0b0e1c}
+.alist{display:flex;flex-direction:column;gap:6px;max-height:300px;overflow:auto;padding-right:2px}
+.arow{display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 11px;background:#0e1324;
+     border:1px solid var(--line2);border-radius:10px;cursor:pointer}
+.arow{min-width:0;overflow:hidden}
+.arow .an{min-width:0;font-size:14px;color:#e2e6f3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.arow .ag{margin-left:auto;font-size:11px;color:#a78bfa;background:#241a3d;border-radius:999px;padding:2px 8px;flex:none}
+.checks{min-width:0;display:flex;flex-wrap:wrap;gap:7px;padding:2px 0}
+.chip{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;background:#0e1324;border:1px solid var(--line2);
+     border-radius:999px;padding:8px 12px;font-size:13px;cursor:pointer;min-height:40px}
+.chip.all{border-color:#3d5a9e}
+.empty{font-size:12.5px;color:var(--dim);padding:10px 2px}
+.mini{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.btnrow{position:sticky;bottom:0;padding:10px 0 2px;background:linear-gradient(180deg,rgba(15,18,32,0),#0f1220 40%);margin-top:14px}
+.btn{width:100%;background:var(--acc);color:#0b0e1c;border:0;border-radius:12px;padding:15px 18px;
+     font-size:15.5px;font-weight:800;cursor:pointer;letter-spacing:.5px}
+.btn.ghost{background:#1a1f36;color:#cfd3e6;border:1px solid var(--line2);font-weight:600;font-size:13px;padding:10px 14px;width:auto}
+.msg{padding:11px 14px;border-radius:11px;font-size:13.5px;margin-bottom:12px}
+.msg.ok{background:#14321f;color:#9ae6b4;border:1px solid #2f6b45}
+.msg.err{background:#3a1522;color:#ffb3c1;border:1px solid #7a2b45}
+.err{color:#ffb3c1}
+.back{margin-bottom:10px;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:14px}
+.pt{width:100%;border-collapse:collapse;font-size:13px}
+.pt th{text-align:left;color:var(--dim);font-weight:600;width:96px;padding:6px 8px 6px 0;vertical-align:top}
+.pt td{padding:6px 0;color:#dfe4f2}
+.pill{display:inline-block;font-size:11.5px;background:#1a2340;border:1px solid var(--line2);border-radius:999px;padding:2px 9px;margin:2px 4px 2px 0;color:#c7d2ee}
+@media (max-width:420px){
+  h1{font-size:18px}
+  .grps{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body{padding:12px 10px 92px}
+}
+"""
+
+
+def _perm_checks(plan, agents_avail, pets_avail):
+    """v3：① 可用 Agent（組別捷徑＋個別清單）② 可瀏覽頁面 ③ 可用寵物款式。"""
+    ag = _to_list(plan.get('agents'), ['*'])
+    pg = _to_list(plan.get('pages'), ['*'])
+    pt = _to_list(plan.get('pets'), ['*'])
+    ag_all = '*' in ag
+    pt_all = '*' in pt
+    pg_all = '*' in pg
+
+    if ag_all:
+        _all_cb = '<input type="checkbox" name="agents" value="__all__" checked onchange="plansAllToggle(this)">'
+    else:
+        _all_cb = '<input type="checkbox" name="agents" value="__all__" onchange="plansAllToggle(this)">'
+    ag_html = ('<section class="sec"><div class="sech"><span class="num">①</span><span>可用 Agent</span>'
+               '<span class="cnt">已選 0 個</span></div>'
+               '<label class="allrow">' + _all_cb +
+               '<span>全部 Agent（*）</span><span class="hint">＝目錄內所有 agent</span></label>')
+
+    _groups = _agent_groups()
+    if _groups:
+        ag_html += ('<div class="subh">組別捷徑<span class="subtip">點一下＝整組開／關，之後仍可個別微調</span></div>'
+                    '<div class="grps">')
+        for _gn in sorted(_groups):
+            _members = _groups[_gn]
+            _gchk = ' checked' if (not ag_all and all((_m in ag) for _m in _members)) else ''
+            ag_html += ('<label class="grp"><input type="checkbox" data-grp="%s"%s onchange="plansGroupToggle(this)">'
+                        '<span class="gn">%s</span><span class="gm">0/%d</span></label>'
+                        % (_esc(_gn), _gchk, _esc(_gn), len(_members)))
+        ag_html += '</div>'
+
+    ag_html += ('<div class="subh">個別 Agent<span class="subtip">共 %d 個</span></div>' % len(agents_avail))
+    ag_html += ('<input class="search" type="text" placeholder="搜尋 agent 名稱…" '
+                'oninput="plansFilter(this)" autocomplete="off">')
+    ag_html += '<div class="alist">'
+    for a in agents_avail:
+        _checked = ' checked' if (ag_all or a in ag) else ''
+        _g = _agent_group_of(a)
+        _gtag = ('<span class="ag">%s</span>' % _esc(_g)) if _g else ''
+        ag_html += ('<label class="arow" data-name="%s">'
+                    '<input type="checkbox" name="agents" value="%s" data-group="%s"%s onchange="plansOneToggle(this)">'
+                    '<span class="an">%s</span>%s</label>'
+                    % (_esc(a).lower(), _esc(a), _esc(_g), _checked, _esc(a), _gtag))
+    ag_html += ('</div>'
+                '<div class="empty" style="display:none">沒有符合的 agent</div>'
+                '<div class="mini">'
+                '<button type="button" class="btn ghost" onclick="plansAgentSet(this,true)">全部勾選</button>'
+                '<button type="button" class="btn ghost" onclick="plansAgentSet(this,false)">全部取消</button>'
+                '</div></section>')
+
+    if pt_all:
+        _pet_cb = '<input type="checkbox" name="pets" value="__all__" checked onchange="plansPetsToggle(this)">'
+    else:
+        _pet_cb = '<input type="checkbox" name="pets" value="__all__" onchange="plansPetsToggle(this)">'
+    pet_html = ('<section class="sec"><div class="sech"><span class="num">③</span><span>可用桌面寵物款式</span></div>'
+                '<label class="allrow">' + _pet_cb + '<span>全部款式（*）</span></label>'
+                '<div class="checks" style="margin-top:10px">')
+    for p in pets_avail:
+        _checked = ' checked' if (pt_all or p in pt) else ''
+        pet_html += ('<label class="chip"><input type="checkbox" name="pets" value="%s"%s>%s</label>'
+                     % (_esc(p), _checked, _esc(p)))
+    if not pets_avail:
+        pet_html += '<span class="small">（目前未偵測到已設定的寵物款式）</span>'
+    pet_html += '</div></section>'
+
+    pg_txt = '' if pg_all else '\n'.join(x for x in pg if x != '*')
+    _pg_cb = ' checked' if pg_all else ''
+    pages_html = ('<section class="sec"><div class="sech"><span class="num">②</span><span>可瀏覽頁面</span></div>'
+                  '<label class="allrow"><input type="checkbox" name="pages_all" value="1"%s '
+                  'onchange="plansPagesToggle(this)"><span>不限頁面（*）</span>'
+                  '<span class="hint">取消才需填白名單</span></label>'
+                  '<textarea name="pages_txt" style="margin-top:10px"'
+                  ' placeholder="每行一個路徑，例如：&#10;/&#10;/member&#10;/some/page"%s>%s</textarea>'
+                  '<div class="small" style="margin-top:6px">留空＝不限制（儲存時自動視為 *）。</div></section>'
+                  % (_pg_cb, ' disabled' if pg_all else '', _esc(pg_txt)))
+
+    inner_js = """
+<script>
+function _pf(e){return e.closest('form');}
+function plansAllToggle(cb){var f=_pf(cb);f.querySelectorAll('input[name="agents"]').forEach(function(x){if(x.value!=='__all__'){x.checked=cb.checked;}});plansState(f);}
+function plansOneToggle(cb){var f=_pf(cb);var a=f.querySelector('input[name="agents"][value="__all__"]');if(cb.checked&&a){a.checked=false;}plansState(f);}
+function plansGroupToggle(cb){var f=_pf(cb);var g=cb.getAttribute('data-grp');f.querySelectorAll('input[name="agents"][data-group]').forEach(function(x){if(x.getAttribute('data-group')===g){x.checked=cb.checked;}});if(cb.checked){var a=f.querySelector('input[name="agents"][value="__all__"]');if(a){a.checked=false;}}plansState(f);}
+function plansAgentSet(btn,on){var f=_pf(btn);var a=f.querySelector('input[name="agents"][value="__all__"]');if(a&&on){a.checked=false;}f.querySelectorAll('.arow').forEach(function(r){if(r.style.display!=='none'){var x=r.querySelector('input[name="agents"]');if(x){x.checked=on;}}});plansState(f);}
+function plansPetsToggle(cb){var f=_pf(cb);f.querySelectorAll('input[name="pets"]').forEach(function(x){if(x.value!=='__all__'){x.checked=cb.checked;}});plansState(f);}
+function plansPagesToggle(cb){plansState(_pf(cb));}
+function plansFilter(inp){var f=_pf(inp);var q=(inp.value||'').trim().toLowerCase();var hit=0;f.querySelectorAll('.arow').forEach(function(r){var ok=(!q)||((r.getAttribute('data-name')||'').indexOf(q)>=0);r.style.display=ok?'':'none';if(ok){hit++;}});var e=f.querySelector('.empty');if(e){e.style.display=hit?'none':'block';}}
+function plansState(f){
+  var all=f.querySelector('input[name="agents"][value="__all__"]');var on=!!(all&&all.checked);
+  var n=0;f.querySelectorAll('.arow input[name="agents"]').forEach(function(x){if(x.checked){n++;}});
+  var c=f.querySelector('.sech .cnt');if(c){c.textContent=on?'全部 Agent':('已選 '+n+' 個');}
+  f.querySelectorAll('.grp').forEach(function(g){
+    var cb0=g.querySelector('input[data-grp]');if(!cb0){return;}
+    var name=cb0.getAttribute('data-grp');var tot=0,sel=0;
+    f.querySelectorAll('.arow input[data-group]').forEach(function(x){if(x.getAttribute('data-group')===name){tot++;if(x.checked){sel++;}}});
+    var m=g.querySelector('.gm');if(m){m.textContent=sel+'/'+tot;}
+    cb0.checked=(!on&&tot>0&&sel===tot);
+  });
+  var pa=f.querySelector('input[name="pages_all"]');var ta=f.querySelector('textarea[name="pages_txt"]');
+  if(pa&&ta){ta.disabled=pa.checked;ta.style.opacity=pa.checked?'0.45':'1';}
+}
+function plansTab(i,btn){
+  document.querySelectorAll('.panel').forEach(function(p){p.classList.remove('show');});
+  var p=document.getElementById('plan-panel-'+i);if(p){p.classList.add('show');}
+  document.querySelectorAll('.tab').forEach(function(b){b.classList.remove('active');});
+  var t=btn||document.querySelectorAll('.tab')[i];if(t){t.classList.add('active');}
+  try{history.replaceState(null,'','#plan-'+i);}catch(e){}
+}
+function plansInit(){
+  var tabs=document.querySelectorAll('.tab');
+  var m=(location.hash||'').match(/plan-(\\d+)/);var i=m?parseInt(m[1],10):0;
+  if(isNaN(i)||i<0||i>=tabs.length){i=0;}
+  plansTab(i,null);
+  document.querySelectorAll('.panel form').forEach(function(f){plansState(f);});
+}
+if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',plansInit);}else{plansInit();}
+</script>
+"""
+    return ag_html, pet_html, pages_html, inner_js
+
+
+def _cards_html(msg=None, msg_type=None):
+    """v3：FREE / PRO / VIP 分頁式方案管理（一次只看一個層級）。"""
+    plans = _all_plans()
+    agents_avail = _avail_agents()
+    pets_avail = _avail_pets()
+    if not plans:
+        return '<div class="msg err">plans 表無資料</div>'
+    msg_html = ''
+    if msg:
+        msg_html = '<div class="msg %s">%s</div>' % (_esc(msg_type or 'ok'), _esc(msg))
+    csrf = _csrf_token()
+    tabs, panels = [], []
+    for i, plan in enumerate(plans):
+        pname = str(plan['plan'])
+        up = pname.upper()
+        tagcls = pname if pname in ('free', 'pro', 'vip') else 'free'
+        mt = int(plan.get('monthly_tokens') or 0)
+        mt_txt = ('%s / 月' % format(mt, ',')) if mt else '—'
+        ag_html, pet_html, pages_html, js = _perm_checks(plan, agents_avail, pets_avail)
+        tabs.append('<button type="button" class="tab %s%s" onclick="plansTab(%d,this)">%s</button>'
+                    % (_esc(tagcls), '' if i else ' active', i, _esc(up)))
+        panels.append(
+            "<div class='panel panel-%s' id='plan-panel-%d'>"
+            "<form method='post' action='/admin/plans/%s#plan-%d'>"
+            "<input type='hidden' name='csrf' value='%s'>"
+            "<div class='card card-%s'>"
+            "<div class='hero'><div class='nm'>%s<span class='tag %s'>%s</span></div>"
+            "<div class='small'>目前額度 %s</div></div>"
+            "<label class='f'>每月 Token 額度</label>"
+            "<input type=number name=monthly_tokens value=%d min=0 step=1000 inputmode=numeric>"
+            "<label class='f'>方案說明（會顯示在前台方案頁）</label>"
+            "<textarea name=desc placeholder=方案說明文字>%s</textarea>"
+            "%s%s%s%s"
+            "<div class='btnrow'><button class='btn' type=submit>儲存 %s 層級</button></div>"
+            "</div></form></div>"
+            % (_esc(tagcls), i,
+               _esc(pname), i,
+               _esc(csrf),
+               ' vip' if pname == 'vip' else '',
+               _esc(up), _esc(tagcls), _esc(up), _esc(mt_txt),
+               mt, _esc(plan.get('desc') or ''),
+               ag_html, pages_html, pet_html, (js if i == 0 else ''),
+               _esc(up)))
+    header = ("<div class='top'><div><h1>層級方案管理</h1>"
+              "<div class='sub'>分頁編輯 FREE / PRO / VIP 的權限與額度</div></div>"
+              "<div class='nav'><a href='/admin/member'>← 會員管理</a>"
+              "<a href='/plans' target='_blank'>前台方案 ↗</a></div></div>")
+    return header + msg_html + ("<div class='tabs'>%s</div>" % ''.join(tabs)) + ''.join(panels)
+
+
+print('[Plans後台] v3.0 手機分頁 UI 已載入')

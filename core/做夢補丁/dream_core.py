@@ -8,9 +8,11 @@
   1. 只寫 soul/EXP.md 與 soul/EXP_archive/；絕不碰 agent.md / user.md。
   2. 寫入 EXP.md 前先走「進化鎖」（skill 進化 editlock.py start / done）。
   3. 權限：agent 設定檔要有 MOK_dream_EXP=1 才執行。
-  4. 觸發制：累積足量新 logs 才做（預設 45 份，MOK_dream_min_new_logs）。
-     單次最多讀 45 份（MOK_dream_max_log_files）。
+  4. 觸發制：累積足量新 logs 才做（預設 10 份，MOK_dream_min_new_logs）。
+     單次最多讀 10 份（MOK_dream_max_log_files）。
      可選時間節流 MOK_dream_interval_h（預設 0＝不等 24h）。
+  4b. 做夢成功、經驗落 EXP.md 後，把剛吃掉的這批 log『軟刪』進系統資源回收筒
+      （~/.mok/trash/，政策唯一真相 core/log_policy.py；可 restore，絕不硬刪）。
   5. 分批：內容過長自動切批，逐批丟 LLM；全系統另有 gap 分批節流。
 
 流程（單一 agent）
@@ -32,6 +34,18 @@ HOME = os.path.expanduser("~")
 MOK = os.path.join(HOME, ".mok")
 AGENT_DIR = os.path.join(MOK, "agent")
 CORE_DIR = os.path.join(MOK, "core")
+if CORE_DIR not in sys.path:
+    sys.path.insert(0, CORE_DIR)
+# 日誌政策唯一真相：LOG_KEEP / DREAM_TRIGGER / DREAM_BATCH / consume(軟刪)  2026-10-04 by 衍
+try:
+    from log_policy import (DREAM_TRIGGER as _LP_TRIGGER,
+                            DREAM_BATCH as _LP_BATCH,
+                            consume as _lp_consume)
+except Exception:  # 政策檔缺失時退回安全預設，且不做任何刪除
+    _LP_TRIGGER, _LP_BATCH = 10, 10
+
+    def _lp_consume(base_dir, paths):
+        return []
 EVO_DIR = os.path.join(MOK, "skill", "進化")
 EDITLOCK_PY = os.path.join(EVO_DIR, "editlock.py")
 PATCH_DIR = os.path.join(CORE_DIR, "做夢補丁")
@@ -39,18 +53,74 @@ SCAN_STATE = os.path.join(PATCH_DIR, ".dream_scan.json")
 
 EXP_HEADER = "# 經驗記錄 (EXP)"
 
+# --- owner-only 標記保護（保留 marker） 2026-10-04 by 凜 ---
+_OWN_B = "<!-- MOK_OWNER_ONLY -->"
+_OWN_E = "<!-- /MOK_OWNER_ONLY -->"
+_SLOT = "<!-- __MOK_PROTECTED_%d__ -->"
+
+
+def _split_protected(text):
+    """抽出 owner-only 區塊，以 _SLOT 佔位取代；回傳 (遮罩後文字, [原始區塊...])。"""
+    if not text or "MOK_OWNER_ONLY" not in text:
+        return text, []
+    out, blocks, i = [], [], 0
+    while True:
+        a = text.find(_OWN_B, i)
+        if a == -1:
+            out.append(text[i:])
+            break
+        out.append(text[i:a])
+        b = text.find(_OWN_E, a + len(_OWN_B))
+        if b == -1:
+            block, i = text[a:], len(text)
+        else:
+            block, i = text[a:b + len(_OWN_E)], b + len(_OWN_E)
+        out.append(_SLOT % len(blocks))
+        blocks.append(block)
+    return "".join(out), blocks
+
+
+def _strip_owner_only(text):
+    """直接移除 owner-only 區塊（餵給 LLM 前淨化）。"""
+    prot, _ = _split_protected(text)
+    return re.sub(r"<!-- __MOK_PROTECTED_\d+__ -->", "", prot)
+
+
+def _restore_protected(text, blocks):
+    """把 _SLOT 佔位還原成原始區塊；LLM 若吃掉佔位則補回檔尾，保證不遺失。"""
+    if not blocks:
+        return text
+    t = text or ""
+    miss = []
+    for idx, blk in enumerate(blocks):
+        tok = _SLOT % idx
+        if tok in t:
+            t = t.replace(tok, blk)
+        else:
+            miss.append(blk)
+    if miss:
+        t = t.rstrip() + "\n\n" + "\n\n".join(miss) + "\n"
+    return t
+
+
+def _marker_balance(lines):
+    b = 0
+    for ln in lines:
+        b += ln.count(_OWN_B) - ln.count(_OWN_E)
+    return b
+
 DEFAULTS = {
     "interval_h": 0.0,
-    "min_new_logs": 45,
+    "min_new_logs": _LP_TRIGGER,   # 政策：log_policy.DREAM_TRIGGER（預設 10）
     "max_lines": 200,
     "batch_chars": 12000,
     "gap_s": 90,
     "consolidate": 1,
     "consolidate_min_lines": 40,
-    "max_log_files": 45,
+    "max_log_files": _LP_BATCH,    # 政策：log_policy.DREAM_BATCH（預設 10）
     "log_chars": 6000,
     "soul_chars": 4000,
-    "num_predict": 16000,
+    "num_predict": 32768,
 }
 
 _SYS = ("你是 MOKAGI 系統中的 agent，正在做每日反思（代號「做夢」）。"
@@ -174,7 +244,15 @@ def _state_path(agent_dir):
     return os.path.join(agent_dir, "soul", ".dream.json")
 
 
-def _new_logs(agent_dir, last_log, max_files=45):
+def _new_logs(agent_dir, last_log, max_files=10):
+    """回傳「尚未處理」的 log 檔（由舊到新），單次最多 max_files 份。
+
+    游標 last_log 是「上次處理的最後一份」檔名。檔名為 YYYYMMDD_HHMMSS_*.md，
+    字串序＝時間序，故直接比對檔名即可（即使該檔已被軟刪進回收筒、不存在了也照樣正確）：
+      * 有 last_log → 取檔名嚴格大於它的（尚未處理的）
+      * 無 last_log → 首輪，取最舊的一批
+    修正舊版 fallback「取最新」的漏讀 bug（會跳過最舊未處理的幾份）。
+    """
     d = os.path.join(agent_dir, "logs")
     if not os.path.isdir(d):
         return [], None
@@ -182,11 +260,10 @@ def _new_logs(agent_dir, last_log, max_files=45):
     if not files:
         return [], None
     latest = files[-1]
-    if last_log and last_log in files:
-        idx = files.index(last_log)
-        new = files[idx + 1:]
+    if last_log:
+        new = [f for f in files if f > str(last_log)]
     else:
-        new = files[-max_files:]
+        new = list(files)
     # 單次最多讀 max_files 份：取「最舊尚未處理」的那批，剩下下一輪再處理
     if max_files and len(new) > max_files:
         new = new[:max_files]
@@ -201,7 +278,7 @@ def _soul_blocks(agent_dir, soul_chars):
     for f in sorted(os.listdir(d)):
         if not f.endswith(".md") or f == "EXP.md":
             continue
-        t = _read_text(os.path.join(d, f), limit=soul_chars)
+        t = _strip_owner_only(_read_text(os.path.join(d, f), limit=soul_chars))
         if t.strip():
             out.append("#### %s\n%s" % (f, t.strip()))
     return out
@@ -214,7 +291,7 @@ def _gather_blocks(agent_dir, log_paths, agent_config):
         blocks.append("### 【靈魂檔 soul】\n" + "\n\n".join(soul))
     log_blocks = []
     for p in log_paths:
-        t = _read_text(p, limit=cfg(agent_config, "log_chars", 6000))
+        t = _strip_owner_only(_read_text(p, limit=cfg(agent_config, "log_chars", 6000)))
         if t.strip():
             log_blocks.append("#### log: %s\n%s" % (os.path.basename(p), t.strip()))
     if log_blocks:
@@ -283,6 +360,7 @@ def _prompt_consolidate(agent_name, text):
         "- 保留所有具體事實（指令、路徑、連結、錯誤訊息、參數）\n"
         "- 依日期由舊到新排序，同一天合併為一節\n"
         "- 刪除空話與重複敘述，讓內容更精煉\n"
+        "嚴禁刪除或改寫 <!-- __MOK_PROTECTED_n__ --> 這類佔位註解，必須原樣保留在原位置；\n"
         "輸出『完整的新版 EXP.md』Markdown 全文（第一行必須是 %s），"
         "不要任何解說、不要 code fence。\n\n"
         "---- EXP.md 開始 ----\n%s\n---- EXP.md 結束 ----"
@@ -308,8 +386,14 @@ def _archive_if_needed(exp_path, agent_name, max_lines, agent_config):
     lines = txt.splitlines()
     if len(lines) <= max_lines:
         return None
-    keep = lines[-max_lines:]
-    old = lines[:-max_lines]
+    cut = len(lines) - max_lines
+    # 保留 marker：切口不得落在 owner-only 區塊中間（整塊一起保留）
+    while cut > 0 and _marker_balance(lines[:cut]) != 0:
+        cut -= 1
+    if cut <= 0:
+        return None
+    keep = lines[cut:]
+    old = lines[:cut]
     while keep and not keep[0].strip():
         keep.pop(0)
     old_body = "\n".join(old).strip()
@@ -328,7 +412,9 @@ def _archive_if_needed(exp_path, agent_name, max_lines, agent_config):
 
 
 # -------------------------------------------------------------- 單一 agent
-async def dream_one(agent_name, agent_config=None, dry_run=False, force=False):
+async def dream_one(agent_name, agent_config=None, dry_run=False, force=False,
+                    ignore_throttle=False):
+    """ignore_throttle=True：只略過『自節流 + 份數門檻』，仍要求有新 log（不空轉）。"""
     from config import load_agent_config
     agent_dir = os.path.join(AGENT_DIR, agent_name)
     if agent_config is None:
@@ -356,21 +442,20 @@ async def dream_one(agent_name, agent_config=None, dry_run=False, force=False):
     res["latest_log"] = latest
 
     if not force:
-        if latest and last_log and latest == last_log:
-            res["status"] = "skip_no_new_log"
-            return res
-        if interval_h and last_at and (now - last_at) < interval_h * 3600:
-            res["status"] = "skip_throttle"
-            res["next_in_h"] = round((interval_h * 3600 - (now - last_at)) / 3600.0, 2)
-            return res
+        # 沒有任何新 log → 一定跳過（強制立即也不空轉）
         if not log_paths:
             res["status"] = "skip_no_logs"
             return res
-        if min_new > 0 and len(log_paths) < min_new:
-            res["status"] = "skip_not_enough_new_logs"
-            res["pending_logs"] = len(log_paths)
-            res["need_logs"] = min_new
-            return res
+        if not ignore_throttle:
+            if interval_h and last_at and (now - last_at) < interval_h * 3600:
+                res["status"] = "skip_throttle"
+                res["next_in_h"] = round((interval_h * 3600 - (now - last_at)) / 3600.0, 2)
+                return res
+            if min_new > 0 and len(log_paths) < min_new:
+                res["status"] = "skip_not_enough_new_logs"
+                res["pending_logs"] = len(log_paths)
+                res["need_logs"] = min_new
+                return res
 
     blocks = _gather_blocks(agent_dir, log_paths, agent_config)
     batches = _chunk_blocks(blocks, cfg(agent_config, "batch_chars", 12000))
@@ -388,7 +473,7 @@ async def dream_one(agent_name, agent_config=None, dry_run=False, force=False):
     for i, b in enumerate(batches):
         try:
             txt = await _llm(_prompt_extract(agent_name, i + 1, len(batches), "\n\n".join(b)),
-                             agent_config, num_predict=int(cfg(agent_config, "num_predict", 16000)))
+                             agent_config, num_predict=int(cfg(agent_config, "num_predict", 32768)))
         except Exception as e:
             res["status"] = "llm_error"
             res["msg"] = "第 %d 批生成失敗: %s" % (i + 1, e)
@@ -412,6 +497,11 @@ async def dream_one(agent_name, agent_config=None, dry_run=False, force=False):
         return res
     res["appended"] = True
 
+    # 經驗已落 EXP.md → 把剛吃掉的這批 log 軟刪進系統資源回收筒（政策唯一真相 log_policy）
+    _moved = _lp_consume(os.path.join(agent_dir, "logs"), log_paths)
+    res["logs_trashed"] = len(_moved)
+    res["logs_trash_failed"] = len(log_paths) - len(_moved)
+
     cursor = os.path.basename(log_paths[-1]) if log_paths else latest
     st.update({"last_log": cursor,
                "last_dream_at": now,
@@ -425,12 +515,13 @@ async def dream_one(agent_name, agent_config=None, dry_run=False, force=False):
         do_c = 1
     cur = _read_text(exp_path)
     if do_c and len(cur.splitlines()) >= int(cfg(agent_config, "consolidate_min_lines", 40)):
+        cur_prot, _prot = _split_protected(cur)
         newtxt = ""
         for attempt in range(2):
             try:
                 cand = _strip_fence(await _llm(
-                    _prompt_consolidate(agent_name, cur), agent_config,
-                    num_predict=int(cfg(agent_config, "num_predict", 16000)),
+                    _prompt_consolidate(agent_name, cur_prot), agent_config,
+                    num_predict=int(cfg(agent_config, "num_predict", 32768)),
                     temperature=0.3))
             except Exception as e:
                 res["consolidate_msg"] = "整理失敗：%s" % e
@@ -439,6 +530,7 @@ async def dream_one(agent_name, agent_config=None, dry_run=False, force=False):
                 newtxt = cand
                 break
         if newtxt:
+            newtxt = _restore_protected(newtxt, _prot)
             ok2, _ = write_locked(exp_path, newtxt.rstrip() + "\n", agent_name,
                                   "做夢：整理 EXP.md", "LLM 濃縮整理", mode="w")
             res["consolidated"] = bool(ok2)
@@ -460,7 +552,8 @@ def list_agents():
     return sorted(n for n in os.listdir(AGENT_DIR) if os.path.isdir(os.path.join(AGENT_DIR, n)))
 
 
-async def dream_all(dry_run=False, force=False, limit=None, only=None):
+async def dream_all(dry_run=False, force=False, limit=None, only=None,
+                    ignore_throttle=False):
     from config import load_agent_config
     names = list_agents() if only is None else list(only)
     out, done = [], 0
@@ -472,7 +565,8 @@ async def dream_all(dry_run=False, force=False, limit=None, only=None):
         if not is_enabled(cf):
             continue
         try:
-            r = await dream_one(name, cf, dry_run=dry_run, force=force)
+            r = await dream_one(name, cf, dry_run=dry_run, force=force,
+                                ignore_throttle=ignore_throttle)
         except Exception as e:
             r = {"agent": name, "status": "error", "msg": str(e)}
         out.append(r)
@@ -551,7 +645,9 @@ def main():
     ap.add_argument("--agent", help="指定 agent（預設用 MOK_AGENT_NAME）")
     ap.add_argument("--all", action="store_true", help="掃描所有已啟用 agent")
     ap.add_argument("--dry-run", action="store_true", help="只回報計畫，不呼叫 LLM、不寫檔")
-    ap.add_argument("--force", action="store_true", help="略過自節流與新 logs 檢查")
+    ap.add_argument("--force", action="store_true", help="略過自節流與新 logs 檢查（可能空轉）")
+    ap.add_argument("--ignore-throttle", action="store_true",
+                    help="只略過自節流與份數門檻；仍要求有新 log（不空轉）。面板一鍵全體做夢即用此模式")
     ap.add_argument("--ignore-permission", action="store_true", help="忽略 MOK_dream_EXP（僅測試）")
     ap.add_argument("--limit", type=int, default=None)
     a = ap.parse_args()
@@ -560,7 +656,8 @@ def main():
     from config import load_agent_config
 
     if a.all:
-        res = run_async(dream_all(dry_run=a.dry_run, force=a.force, limit=a.limit))
+        res = run_async(dream_all(dry_run=a.dry_run, force=a.force, limit=a.limit,
+                                  ignore_throttle=a.ignore_throttle))
     else:
         name = a.agent or os.environ.get("MOK_AGENT_NAME") or ""
         if not name:
@@ -570,7 +667,8 @@ def main():
         if a.ignore_permission:
             cf = dict(cf)
             cf["MOK_dream_EXP"] = "1"
-        res = run_async(dream_one(name, cf, dry_run=a.dry_run, force=a.force))
+        res = run_async(dream_one(name, cf, dry_run=a.dry_run, force=a.force,
+                                  ignore_throttle=a.ignore_throttle))
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
 

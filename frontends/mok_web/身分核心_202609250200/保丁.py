@@ -156,7 +156,7 @@ def _admin_usernames():
                 names.add(str(r['username']))
     except Exception:
         pass
-    names.update({'admin', 'root'})   # 相容舊行為
+    # 2026-09-27：不再用帳號名 fallback；admin 名單一律來自 users.is_admin=1
     return names
 
 
@@ -193,7 +193,7 @@ def resolve_identity(data=None):
     uname = _session_username()
     if uname:
         row = _user_row(uname) or {}
-        is_admin = bool(row.get('is_admin')) or str(uname) in ('admin', 'root')
+        is_admin = bool(row.get('is_admin'))   # 2026-09-27：唯一真相＝DB，不看帳號名
         plan = row.get('plan') or 'free'
         role = 'admin' if is_admin else plan
         disp = row.get('display_name') or ('主人' if is_admin else uname)
@@ -363,8 +363,8 @@ if _orig_get_file_content is not None:
 _orig_get_file_tree = getattr(main, 'get_file_tree', None)
 
 
-def _patched_get_file_tree(path, depth=0):
-    tree = _orig_get_file_tree(path, depth) if _orig_get_file_tree else []
+def _patched_get_file_tree(path, depth=0, one_level=False):
+    tree = _orig_get_file_tree(path, depth, one_level=one_level) if _orig_get_file_tree else []
 
     def _strip(nodes):
         out = []
@@ -454,3 +454,367 @@ if app:
         print("[身分核心] 註冊 agent/owner 失敗:", _e)
 
 print("[身分核心] 載入完成")
+
+
+# ============================================================
+# 【身分感知】注入 v2（2026-09-27 由舊「會員系統」身分塊整併）
+#   單一真相來源：member.db users.is_admin / users.plan（本補丁）
+#   注入點 A：get_system_context（system prompt 末尾）
+#   注入點 B：call_llm（每輪即時刷新）
+#   注入點 C：process_message（決定本次請求身分）
+# ============================================================
+import mokagi as _mokagi
+
+
+def _get_user(username):
+    """相容層：一律讀本補丁的 member.db（users）。"""
+    return _user_row(username)
+
+
+def _get_plan(plan):
+    try:
+        with _db() as conn:
+            r = conn.execute('SELECT * FROM plans WHERE plan=?', (plan,)).fetchone()
+            return dict(r) if r else {}
+    except Exception:
+        return {}
+
+
+def _ensure_month(user):
+    """月切換：month_key 不同則把 monthly_used 歸零。"""
+    try:
+        u = dict(user or {})
+        mk = time.strftime('%Y-%m')
+        if u.get('month_key') != mk:
+            with _DB_LOCK, _db() as conn:
+                conn.execute('UPDATE users SET monthly_used=0, month_key=? WHERE username=?',
+                             (mk, u.get('username')))
+                conn.commit()
+            u['monthly_used'] = 0
+            u['month_key'] = mk
+        return u
+    except Exception:
+        return user
+
+
+# ============================================================
+# ============ 身分感知注入 Identity Awareness Injection =========
+# ------------------------------------------------------------
+# 目的：讓 LLM 在每次對話都能「知道」對面是誰、什麼會員等級、
+#       餘額與可用範圍，並據此調整「稱呼語氣」與「權限判斷」。
+#
+# 設計（不動核心，純 wrap 疊加）：
+#   注入點 C  process_message   → 決定「當前請求」的身分（存進 ContextVar）
+#   注入點 A  get_system_context → 在 system prompt 末尾追加身分區塊
+#   注入點 B  call_llm          → 每一輪即時刷新身分區塊（餘額、等級變動同步）
+#
+# 開關：環境變數 MOK_IDENTITY_INJECT=0 可整體關閉。
+# 管理員名單：MOK_MEMBER_ADMIN（逗號分隔，預設 admin）。
+# ============================================================
+
+import contextvars
+
+_IDENTITY_ENABLED = (os.environ.get('MOK_IDENTITY_INJECT', '1').strip().lower()
+                     not in ('0', 'false', 'no', 'off'))
+_IDENTITY_MARK = '【身分感知】'
+_IDENTITY_MAX_CHARS = 1500
+# 2026-09-27 停用：不再用帳號名白名單（唯一真相＝member.db users.is_admin=1）
+_IDENTITY_ADMIN_USERS = set()   # 永久空集合（保留變數名以免外部引用出錯）
+
+# 每個請求獨立的當前身分（async、多線程安全）
+_identity_ctx = contextvars.ContextVar('mok_member_identity', default=None)
+
+
+def get_identity():
+    return _identity_ctx.get()
+
+
+def set_identity(username, agent_name=None):
+    return _identity_ctx.set({'username': username, 'agent_name': agent_name})
+
+
+def clear_identity(token=None):
+    try:
+        if token is not None:
+            _identity_ctx.reset(token)
+        else:
+            _identity_ctx.set(None)
+    except Exception:
+        pass
+
+
+# 各等級的稱呼語氣與政策（可自由調整）
+_IDENTITY_PLAN_POLICY = {
+    'free': {'label': '免費會員', 'tone': '親切友善、標準服務',
+             'note': '僅能使用基礎 agent；高階功能與大量額度需升級。',
+             'upsell': '若對方要求超額或高階功能，可提示升級 PRO / VIP。'},
+    'pro': {'label': 'PRO 專業會員', 'tone': '更主動、更詳細、可提供進階協助',
+            'note': '可使用全部 agent，額度較高。', 'upsell': ''},
+    'vip': {'label': 'VIP 尊貴會員', 'tone': '尊榮、貼心、優先且主動',
+            'note': '最高等級與額度，優先處理所有需求。', 'upsell': ''},
+    'admin': {'label': '管理員', 'tone': '直接、精確、可執行系統操作',
+              'note': '擁有最高權限。', 'upsell': ''},
+}
+
+
+def _identity_plan_key(username, plan):
+    # 2026-09-27：admin 唯一真相＝member.db users.is_admin=1（不看帳號名、不看 plan 名稱）
+    try:
+        if (_get_user(username) or {}).get('is_admin'):
+            return 'admin'
+    except Exception:
+        pass
+    return plan if plan in _IDENTITY_PLAN_POLICY else 'free'
+
+
+def _collect_identity(username, agent_name=None):
+    """收集某會員的完整身分快照；非會員回傳 None。"""
+    if not username:
+        return None
+    try:
+        user = _get_user(username)
+    except Exception:
+        user = None
+    if not user:
+        return None
+    try:
+        user = _ensure_month(user)
+    except Exception:
+        pass
+    plan = (user.get('plan') or 'free')
+    plan_key = _identity_plan_key(username, plan)
+    try:
+        planrow = _get_plan(plan) or {}
+    except Exception:
+        planrow = {}
+    try:
+        agents = json.loads(planrow.get('agents') or '[]')
+    except Exception:
+        agents = []
+    quota = planrow.get('monthly_tokens') or 0
+    used = user.get('monthly_used') or 0
+    remaining_month = max(0, quota - used) if quota else 0
+    return {
+        'username': username,
+        'plan': plan,
+        'plan_key': plan_key,
+        'plan_label': _IDENTITY_PLAN_POLICY.get(plan_key, {}).get('label', plan),
+        'plan_desc': planrow.get('desc', '') or '',
+        'is_admin': plan_key == 'admin',
+        'is_vip': plan_key == 'vip',
+        'agents': agents,
+        'agents_str': '全部 agent' if '*' in agents else ('、'.join(agents) if agents else '無'),
+        'balance_tokens': user.get('balance_tokens') or 0,
+        'monthly_used': used,
+        'month_quota': quota,
+        'remaining_month': remaining_month,
+        'last_login': user.get('last_login') or 0,
+        'agent_name': agent_name,
+        'ts': time.time(),
+    }
+
+
+def _build_identity_block(ident):
+    """把身分快照變成要注入 system prompt 的文字區塊。"""
+    if not ident:
+        return ''
+
+    def _fmt(n):
+        try:
+            return f"{int(n):,}"
+        except Exception:
+            return str(n)
+
+    pol = _IDENTITY_PLAN_POLICY.get(ident.get('plan_key'), {})
+    desc = ident.get('plan_desc') or ''
+    lines = [
+        _IDENTITY_MARK,
+        '（本區塊由系統自動注入，為當前對話對象的真實身分，請務必據此回應。）',
+        f"- 帳號：{ident.get('username')}",
+        f"- 會員等級：{ident.get('plan')}（{ident.get('plan_label')}）" + (f"｜{desc}" if desc else ''),
+        f"- 身分：{'管理員' if ident.get('is_admin') else ident.get('plan_label')}",
+        f"- 可用範圍：{ident.get('agents_str')}",
+        f"- Token 餘額：{_fmt(ident.get('balance_tokens'))}",
+        f"- 本月已用：{_fmt(ident.get('monthly_used'))} / 額度 {_fmt(ident.get('month_quota'))}（本月剩 {_fmt(ident.get('remaining_month'))}）",
+        f"- 當前 agent：{ident.get('agent_name') or '（預設）'}",
+    ]
+    if pol:
+        if pol.get('tone'):
+            lines.append(f"- 互動語氣：{pol.get('tone')}")
+        if pol.get('note'):
+            lines.append(f"- 權限提示：{pol.get('note')}")
+        if pol.get('upsell'):
+            lines.append(f"- 升級提示：{pol.get('upsell')}")
+    lines.append('遵守：'
+                 '1) 以符合該等級的語氣稱呼對方；'
+                 '2) 不得承諾超出其權限的功能，遇越權請禮貌說明並視情況提示升級；'
+                 '3) 對方詢問方案/額度/身分時，直接引用上述數據，切勿編造。')
+    block = '\n'.join(lines)
+    if len(block) > _IDENTITY_MAX_CHARS:
+        block = block[:_IDENTITY_MAX_CHARS] + '…'
+    return block
+
+
+# ---- 注入點 A：包裝 get_system_context（system prompt 末尾追加身分區塊） ----
+if _IDENTITY_ENABLED and not getattr(_mokagi.get_system_context, '_identity_aware', False):
+    _orig_get_system_context = _mokagi.get_system_context
+
+    def _identity_aware_get_system_context(agent_name, owner, owner_time=0, context_files=None,output_dir=None, output_role=None, **kwargs):
+        body = _orig_get_system_context(agent_name, owner, owner_time, context_files=context_files,
+                                    output_dir=output_dir, output_role=output_role, **kwargs)
+        try:
+            cur = _identity_ctx.get()
+            if cur and cur.get('username'):
+                ident = _collect_identity(cur.get('username'), agent_name=agent_name or cur.get('agent_name'))
+                block = _build_identity_block(ident)
+                if block:
+                    body = (body or '') + '\n\n' + block
+        except Exception:
+            pass
+        return body
+
+    _identity_aware_get_system_context._identity_aware = True
+    _mokagi.get_system_context = _identity_aware_get_system_context
+
+
+# ---- 注入點 B：包裝 call_llm（每一輪即時刷新身分區塊） ----
+if _IDENTITY_ENABLED and not getattr(_mokagi.call_llm, '_identity_aware', False):
+    _orig_call_llm = _mokagi.call_llm
+
+    async def _identity_aware_call_llm(*args, **kwargs):
+        try:
+            cur = _identity_ctx.get()
+            messages = kwargs.get('messages')
+            if messages is None and len(args) >= 6:
+                messages = args[5]
+            if cur and cur.get('username') and messages:
+                ident = _collect_identity(cur.get('username'), agent_name=cur.get('agent_name'))
+                block = _build_identity_block(ident)
+                if block:
+                    for m in messages:
+                        if m.get('role') == 'system' and isinstance(m.get('content'), str):
+                            # 稚 2026-10-05：找不到 mark 時也「補上」身分塊（不再只換不補），
+                            #   否則 system 版型一變（soul 版/無 soul 版切換）身分塊會整塊消失。
+                            idx = m['content'].find(_IDENTITY_MARK)
+                            if idx >= 0:
+                                m['content'] = m['content'][:idx].rstrip() + '\n\n' + block
+                            else:
+                                m['content'] = m['content'].rstrip() + '\n\n' + block
+                            break
+        except Exception:
+            pass
+        return await _orig_call_llm(*args, **kwargs)
+
+    _identity_aware_call_llm._identity_aware = True
+    _mokagi.call_llm = _identity_aware_call_llm
+
+
+# ---- 注入點 C：包裝 process_message（決定當前請求的身分） ----
+if _IDENTITY_ENABLED and not getattr(_mokagi.process_message, '_member_identity_wrapper', False):
+    # 2026-09-27：接在既有 main.process_message 之後，避免蓋掉身分核心的包裝
+    _member_base_process_message = getattr(main, 'process_message', None) or _mokagi.process_message
+
+    async def _identity_process_message(user_id, text, stream_callback=None, agent_name=None,
+                                    agent_config=None, auto_mode=False, initial_prompt=None,
+                                    context_files=None,
+                                    output_dir=None, anon_sid=None, output_job=None,
+                                    **kwargs):
+        token = None
+        username = None
+        try:
+            if session is not None:
+                username = session.get('member_user')
+        except Exception:
+            username = None
+        if not username:
+            try:
+                if _get_user(user_id):
+                    username = user_id
+            except Exception:
+                username = None
+        if username:
+            token = _identity_ctx.set({'username': username, 'agent_name': agent_name})
+        try:
+            return await _member_base_process_message(
+            user_id=user_id, text=text, stream_callback=stream_callback,
+            agent_name=agent_name, agent_config=agent_config, auto_mode=auto_mode,
+            initial_prompt=initial_prompt, context_files=context_files,
+            output_dir=output_dir, anon_sid=anon_sid, output_job=output_job,
+            **kwargs)
+        finally:
+            if token is not None:
+                clear_identity(token)
+
+    _identity_process_message._member_identity_wrapper = True
+    _mokagi.process_message = _identity_process_message
+    try:
+        main.process_message = _identity_process_message
+    except Exception:
+        pass
+
+
+# ---- 驗證/檢視端點 ----
+if app is not None and request is not None:
+    @app.route('/api/member/identity')
+    def member_identity_view():
+        username = None
+        try:
+            username = session.get('member_user')
+        except Exception:
+            username = None
+        if not username:
+            return jsonify({'logged_in': False})
+        ident = _collect_identity(username)
+        return jsonify({'logged_in': True, 'enabled': _IDENTITY_ENABLED,
+                        'mark': _IDENTITY_MARK, 'identity': ident,
+                        'block': _build_identity_block(ident)})
+
+    @app.route('/api/member/identity/selftest')
+    def member_identity_selftest():
+        username = None
+        try:
+            username = session.get('member_user')
+        except Exception:
+            username = None
+        if not username:
+            return jsonify({'ok': False, 'reason': '未登入'}), 401
+        if username not in _IDENTITY_ADMIN_USERS:
+            return jsonify({'ok': False, 'reason': '僅管理員可執行'}), 403
+        checks = {}
+        ident = _collect_identity(username, agent_name='selftest')
+        checks['collect_identity'] = bool(ident)
+        block = _build_identity_block(ident)
+        checks['block_has_mark'] = bool(block and _IDENTITY_MARK in block)
+        checks['get_system_context_patched'] = bool(getattr(_mokagi.get_system_context, '_identity_aware', False))
+        checks['call_llm_patched'] = bool(getattr(_mokagi.call_llm, '_identity_aware', False))
+        checks['process_message_patched'] = bool(getattr(_mokagi.process_message, '_member_identity_wrapper', False))
+        token = set_identity(username, agent_name='selftest')
+        try:
+            body = _mokagi.get_system_context('凜', '用戶', 0)
+            checks['mark_in_system_context'] = _IDENTITY_MARK in (body or '')
+        except Exception as e:
+            checks['mark_in_system_context'] = False
+            checks['error'] = str(e)
+        finally:
+            clear_identity(token)
+        return jsonify({'ok': all(checks.values()), 'enabled': _IDENTITY_ENABLED, 'checks': checks})
+
+
+# ---- 對外暴露給其他補丁使用 ----
+if main is not None:
+    for _n, _o in (('member_collect_identity', _collect_identity),
+                   ('member_build_identity_block', _build_identity_block),
+                   ('member_identity_ctx', _identity_ctx)):
+        try:
+            setattr(main, _n, _o)
+        except Exception:
+            pass
+
+# 2026-09-27：把唯一真相 API 掛到 main，供其他補丁查詢（不再各自比對帳號名）
+try:
+    main.resolve_identity = resolve_identity
+except Exception:
+    pass
+
+
+print(f"[會員系統] 身分感知注入已載入 | enabled={_IDENTITY_ENABLED} | mark={_IDENTITY_MARK}")

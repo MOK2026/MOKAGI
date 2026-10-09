@@ -286,6 +286,7 @@ async def _generate_associations(query: str, count: int = 5, context: str = "", 
             stream=False,
             temperature=0.4,
             num_predict=max(count * 15, 300),
+            disable_thinking=True,
             tools_def=[],
             agent_config=agent_config
         )
@@ -392,6 +393,7 @@ async def extract_keywords_from_sentence(sentence: str, agent_config: Optional[D
             stream=False,
             temperature=0.3,
             num_predict=num_Max,
+            disable_thinking=True,
             tools_def=[],
             agent_config=agent_config
         )

@@ -36,6 +36,45 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+def _log_remote_tool_usage(model_name, api_url, usage, agent_name=None, user_id=None):
+    """P1 補漏帳：把外部（非本機）多模態模型的 token 用量寫進統一記帳。
+
+    - 只記遠端付費端點；本機 Ollama（localhost/127.0.0.1/:11434/:11436）不記，避免灌水。
+    - 任何異常一律吞掉，絕不影響主流程與回傳值。
+    """
+    try:
+        if not usage:
+            return
+        low = (api_url or "").lower()
+        if any(h in low for h in ("localhost", "127.0.0.1", "0.0.0.0", ":11434", ":11436")):
+            return
+        import sys as _sys
+        _core = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "core")
+        if _core not in _sys.path:
+            _sys.path.insert(0, _core)
+        from mok_token import log_token_usage
+        pt = int(usage.get("prompt_tokens") or 0)
+        ct = int(usage.get("completion_tokens") or 0)
+        tt = int(usage.get("total_tokens") or (pt + ct))
+        extra = {"purpose": "vision_tool", "source": "tool"}
+        try:
+            _d = usage.get("prompt_tokens_details") or {}
+            if isinstance(_d, dict) and _d.get("cached_tokens") is not None:
+                extra["cached_tokens"] = int(_d.get("cached_tokens") or 0)
+                extra["cache_source"] = "openai_details"
+            if usage.get("prompt_cache_hit_tokens") is not None:
+                extra["cached_tokens"] = int(usage.get("prompt_cache_hit_tokens") or 0)
+                extra["cache_source"] = "deepseek"
+            if usage.get("prompt_cache_miss_tokens") is not None:
+                extra["cache_miss_tokens"] = int(usage.get("prompt_cache_miss_tokens") or 0)
+        except Exception:
+            pass
+        log_token_usage(user_id or "tool", agent_name or os.environ.get("MOK_AGENT_NAME") or "unknown",
+                        model_name or "", pt, ct, tt, extra=extra)
+    except Exception:
+        pass
+
 # ---------- 依賴 ----------
 try:
     import httpx
@@ -327,6 +366,7 @@ async def _call_vision_model(
                 }, ensure_ascii=False)
             
             data = response.json()
+            _log_remote_tool_usage(model_name, api_url, (data or {}).get("usage"))
             if "choices" in data and len(data["choices"]) > 0:
                 content = data["choices"][0].get("message", {}).get("content", "")
                 return content

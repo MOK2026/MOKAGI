@@ -22,7 +22,7 @@ Admin 會員管理後台 v1.0
   - 所有管理操作寫入 admin_log 稽核紀錄
 """
 
-import sys, os, sqlite3, time, json, hashlib, secrets, threading, asyncio
+import sys, os, sqlite3, time, json, hashlib, secrets, threading, asyncio, hmac
 from urllib.parse import quote as urllib_quote
 main = sys.modules.get('__main__')
 import mokagi as _mokagi
@@ -73,10 +73,47 @@ def _ensure_disabled_column():
 
 _ensure_disabled_column()
 
+def _auth2():
+    """優先取得 P0（會員認證）的 bcrypt 實作；沒有則回 None。"""
+    a2 = getattr(main, 'mok_auth2', None)
+    if a2 and callable(a2.get('hash_pw')):
+        return a2
+    return None
+
 def _hash_pw(pw):
-    if _member_mod is not None and hasattr(_member_mod, '_hash_pw'):
-        return _member_mod._hash_pw(pw)
-    return hashlib.sha256(('mok_member_v1' + pw).encode()).hexdigest()
+    """統一雜湊：優先 bcrypt（與 P0 一致），bcrypt 不可用才退回舊式。
+    ★ 2026-10-01 凜：原本取「最先載入的會員系統._hash_pw」＝舊式，
+      導致後台每次新增/重設密碼都寫回舊格式，是登入不一致的根因。"""
+    a2 = _auth2()
+    if a2 is not None:
+        try:
+            return a2['hash_pw'](pw)
+        except Exception:
+            pass
+    try:
+        import bcrypt as _b
+        return _b.hashpw(pw.encode('utf-8'), _b.gensalt(rounds=12)).decode()
+    except Exception:
+        return hashlib.sha256(('mok_member_v1' + pw).encode()).hexdigest()
+
+def _verify_pw(pw, stored):
+    """驗證密碼（bcrypt 或舊式皆可），回傳 bool。"""
+    a2 = _auth2()
+    if a2 is not None and callable(a2.get('verify_pw')):
+        try:
+            ok, _up = a2['verify_pw'](pw, stored)
+            return bool(ok)
+        except Exception:
+            pass
+    if not stored:
+        return False
+    if stored.startswith('$2'):
+        try:
+            import bcrypt as _b
+            return _b.checkpw(pw.encode('utf-8'), stored.encode())
+        except Exception:
+            return False
+    return hmac.compare_digest(stored, hashlib.sha256(('mok_member_v1' + pw).encode()).hexdigest())
 
 def _get_user(username):
     if _member_mod is not None and hasattr(_member_mod, '_get_user'):
@@ -100,6 +137,16 @@ def _list_plans():
     with _connect() as conn:
         rows = conn.execute('SELECT * FROM plans ORDER BY plan').fetchall()
         return [dict(r) for r in rows]
+
+def _plan_monthly_tokens(plan):
+    """★ indexPage 2026-09-30：取方案月額度（tokens）；查無回 0。"""
+    for _p in _list_plans():
+        if _p.get('plan') == plan:
+            try:
+                return int(_p.get('monthly_tokens') or 0)
+            except Exception:
+                return 0
+    return 0
 
 def _month_key():
     return time.strftime('%Y-%m')
@@ -164,26 +211,31 @@ def _check_csrf():
 
 _CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,'PingFang TC','Microsoft JhengHei',sans-serif;background:#0f1220;color:#e8e8f0;min-height:100vh;padding:24px}
-.wrap{max-width:1200px;margin:0 auto}
-h1{font-size:24px;margin-bottom:4px;background:linear-gradient(90deg,#7aa2ff,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.sub{color:#8b93b5;font-size:13px;margin-bottom:20px}
-.nav{display:flex;gap:14px;font-size:13px;margin-bottom:20px;align-items:center}
-.nav a{color:#7aa2ff;text-decoration:none}
+body{font-family:-apple-system,'PingFang TC','Microsoft JhengHei',system-ui,sans-serif;background:radial-gradient(1200px 600px at 15% -10%,#1b2338,#0b0f1a 60%);color:#e8eefc;min-height:100vh;padding:24px}
+.wrap{max-width:1320px;margin:0 auto}
+h1{font-size:24px;font-weight:800;letter-spacing:.5px;margin-bottom:4px;background:linear-gradient(90deg,#7aa2ff,#c084fc);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.sub{color:#8ea0c0;font-size:13px}
+.nav{display:flex;gap:6px;font-size:13px;margin-bottom:22px;align-items:center;flex-wrap:wrap;background:#141a29;border:1px solid #27324a;border-radius:14px;padding:10px 14px}
+.nav a{color:#a9bcff;text-decoration:none;padding:4px 10px;border-radius:8px;transition:.15s}
+.nav a:hover{background:#1b2438;color:#fff}
 .nav .sp{flex:1}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:22px}
-.card{background:#1a1f33;border:1px solid #2c3560;border-radius:14px;padding:14px 16px}
-.card .v{font-size:22px;font-weight:700;color:#7aa2ff}
+.card{position:relative;overflow:hidden;background:linear-gradient(160deg,#1b2438,#141a29);border:1px solid #27324a;border-radius:16px;padding:16px 18px}
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,#7c5cff,#ff5ca8);opacity:.85}
+.card .v{font-size:24px;font-weight:800;color:#9db4ff;letter-spacing:.3px}
 .card .l{font-size:12px;color:#8b93b5;margin-top:4px}
 .card.green .v{color:#2fa36b}
-.card.red .v{color:#d14d6a}
-.card.purple .v{color:#c084fc}
-.panel{background:#1a1f33;border:1px solid #2c3560;border-radius:14px;padding:18px;margin-bottom:20px}
-.panel h2{font-size:15px;margin-bottom:12px;color:#c9d1f0}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{color:#8b93b5;text-align:left;padding:8px 10px;border-bottom:1px solid #2c3560;font-weight:600;white-space:nowrap}
-td{padding:9px 10px;border-bottom:1px solid #1e2440;vertical-align:middle}
-tr:hover td{background:#161b30}
+.card.red .v{color:#ff8fa3}
+.card.purple .v{color:#c9a4ff}
+.panel{background:#141a29;border:1px solid #27324a;border-radius:16px;padding:18px;margin-bottom:20px;box-shadow:0 10px 30px rgba(0,0,0,.28)}
+.panel h2{font-size:15px;margin-bottom:14px;color:#c9d1f0;display:flex;align-items:center;gap:8px}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;min-width:1040px}
+.tablewrap{overflow-x:auto;padding-bottom:4px}
+thead th{position:sticky;top:0;z-index:2;background:#141a29;color:#8ea0c0;text-align:left;padding:11px 12px;border-bottom:1px solid #27324a;font-weight:700;font-size:12px;letter-spacing:.4px;white-space:nowrap}
+tbody td{padding:11px 12px;border-bottom:1px solid #1e2440;vertical-align:middle;white-space:nowrap}
+tbody tr{transition:background .12s}
+tbody tr:hover td{background:#19203a}
+tbody tr:last-child td{border-bottom:none}
 .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700}
 .badge.free{background:#23304f;color:#9db4e8}
 .badge.pro{background:#233a52;color:#6fc2ff}
@@ -191,26 +243,76 @@ tr:hover td{background:#161b30}
 .badge.on{background:#15352a;color:#a7f3d0}
 .badge.off{background:#3a1d2e;color:#ffb3c1}
 .badge.admin{background:#4a2e1d;color:#ffd29e}
-.ops{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.ops{display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:470px}
 .ops form{display:flex;gap:5px;align-items:center}
 select,input[type=text],input[type=password],input[type=number]{background:#12162a;border:1px solid #2c3560;color:#e8e8f0;border-radius:8px;padding:6px 8px;font-size:12px;outline:none}
 select:focus,input:focus{border-color:#7aa2ff}
-button{background:linear-gradient(90deg,#7aa2ff,#c084fc);color:#0f1220;border:0;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer}
-button:hover{opacity:.88}
+button{background:linear-gradient(90deg,#7c5cff,#c084fc);color:#fff;border:0;border-radius:9px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;transition:.15s;white-space:nowrap}
+button:hover{opacity:.9;transform:translateY(-1px)}
 button.danger{background:#3a1d2e;color:#ffb3c1;border:1px solid #d14d6a}
 button.danger:hover{background:#4a2538}
 button.gray{background:#232a45;color:#c9d1f0}
 .err{background:#3a1d2e;border:1px solid #d14d6a;color:#ffb3c1;padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:16px}
 .ok{background:#15352a;border:1px solid #2fa36b;color:#a7f3d0;padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:16px}
-input.amt{width:90px}
-input.pw{width:110px}
-.search{display:flex;gap:8px;margin-bottom:14px}
-.search input{flex:1;max-width:280px}
+input.amt{width:84px}
+input.pw{width:100px}
+.search{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.search input{flex:1;min-width:180px;max-width:320px}
 .empty{color:#5b6380;text-align:center;padding:30px;font-size:13px}
 .logline{font-size:12px;color:#8b93b5;padding:5px 0;border-bottom:1px solid #1e2440;display:flex;gap:10px}
 .logline b{color:#c9d1f0}
 .logline .t{color:#5b6380;white-space:nowrap}
 .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+/* ===== 會員列表響應式（2026-10-01 by 春）===== */
+table.rt tr.rowhead{background:transparent}
+td.mops{white-space:normal}
+@media (max-width: 1130px){
+  body{padding:12px}
+  h1{font-size:20px}
+  .panel{padding:14px;border-radius:14px}
+  .cards{grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+  .card{padding:12px 14px}
+  .card .v{font-size:20px}
+  .search input{flex:1 1 100%;max-width:none;min-width:0}
+  .search{gap:8px}
+  .nav{padding:8px 10px}
+
+  /* 表格 → 卡片 */
+  .tablewrap{overflow:visible;padding-bottom:0}
+  table{min-width:0;border-spacing:0;font-size:14px}
+  thead{display:none}
+  tbody{display:block}
+  tbody tr{display:block;background:linear-gradient(160deg,#1b2438,#141a29);
+    border:1px solid #27324a;border-radius:14px;padding:12px 14px 14px;
+    margin-bottom:12px;box-shadow:0 8px 20px rgba(0,0,0,.28)}
+  tbody tr:hover td{background:transparent}
+  tbody tr:last-child{margin-bottom:0}
+  tbody td{display:flex;justify-content:space-between;align-items:center;gap:12px;
+    padding:7px 0;border-bottom:1px dashed #232b45;white-space:normal;text-align:right}
+  tbody td::before{content:attr(data-l);flex:0 0 auto;color:#8ea0c0;
+    font-size:12px;font-weight:700;letter-spacing:.5px;text-align:left}
+  tbody td:first-child{border-bottom:1px solid #27324a;padding-bottom:10px;margin-bottom:4px}
+  tbody td:first-child b{font-size:16px}
+  tbody td:last-child{border-bottom:none}
+  tbody td.mops{display:block;padding:12px 0 0;border-bottom:none}
+  tbody td.mops::before{content:none;display:none}
+
+  /* 管理操作：兩欄網格，輸入框撐滿、按鈕好按 */
+  .ops{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:none;width:100%}
+  .ops form{display:flex;gap:6px;width:100%;min-width:0}
+  .ops form:first-child{grid-column:1 / -1}
+  .ops form input{flex:1 1 auto;min-width:0;width:auto}
+  .ops form button{flex:0 0 auto}
+  .ops form select{flex:1 1 auto;min-width:0}
+  select,input[type=text],input[type=password],input[type=number]{font-size:16px;padding:9px 10px}
+  button{padding:9px 14px;font-size:13px}
+  input.amt,input.pw{width:auto;flex:1 1 auto}
+}
+@media (max-width: 380px){
+  .ops{grid-template-columns:1fr}
+  .ops form:first-child{grid-column:auto}
+}
+
 """
 
 def _page(title, inner, msg='', mtype=''):
@@ -221,6 +323,15 @@ def _page(title, inner, msg='', mtype=''):
     return ('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<title>%s</title><style>%s</style></head><body><div class="wrap">%s%s</div></body></html>'
             % (title, _CSS, m_html, inner))
+
+# ---- 工具鍵權限設定（右側面板按鍵 x 會員等級矩陣）by 凜 2026-10-01 ----
+@app.route('/admin/tools')
+@app.route('/admin/ui-tools')
+def admin_tools_perm():
+    r = _require_admin()
+    if r is not None:
+        return r
+    return redirect('/static/tools_perm.html')
 
 @app.route('/admin/member')
 def admin_member():
@@ -260,14 +371,14 @@ def admin_member():
             del_btn = ('<button class="danger" onclick="return confirm(%s)">刪除</button>'
                        % repr('確定刪除會員 ' + u['username'] + ' ？此操作無法復原'))
         rows.append(f"""<tr>
-<td><b>{uname}</b></td>
-<td><span class="badge {plan}">{plan.upper()}</span></td>
-<td class="mono">{_fmt_tokens(u.get('balance_tokens'))}</td>
-<td class="mono">{_fmt_tokens(u.get('monthly_used'))}</td>
-<td>{_fmt_ts(u.get('created_at'))}</td>
-<td>{_fmt_ts(u.get('last_login'))}</td>
-<td>{status_badge}</td>
-<td><div class="ops">
+<td data-l="帳號"><b>{uname}</b></td>
+<td data-l="方案"><span class="badge {plan}">{plan.upper()}</span></td>
+<td class="mono" data-l="餘額">{_fmt_tokens(u.get('balance_tokens'))}</td>
+<td class="mono" data-l="本月用量">{_fmt_tokens(u.get('monthly_used'))}</td>
+<td data-l="註冊時間">{_fmt_ts(u.get('created_at'))}</td>
+<td data-l="最後登入">{_fmt_ts(u.get('last_login'))}</td>
+<td data-l="狀態">{status_badge}</td>
+<td class="mops"><div class="ops">
   <form method="post" action="/admin/member/{uname}/plan">{hidden}{plan_select}<button>改方案</button></form>
   <form method="post" action="/admin/member/{uname}/balance">{hidden}<input class="amt" type="text" name="amount" placeholder="+1000 / -500"><button>調整</button></form>
   <form method="post" action="/admin/member/{uname}/password">{hidden}<input class="pw" type="text" name="new_password" placeholder="新密碼"><button>重設</button></form>
@@ -275,8 +386,8 @@ def admin_member():
   {('<form method="post" action="/admin/member/' + uname + '/delete">' + hidden + del_btn + '</form>') if del_btn else ''}
 </div></td></tr>""")
 
-    table = ('<table><thead><tr><th>帳號</th><th>方案</th><th>餘額</th><th>本月用量</th><th>註冊時間</th><th>最後登入</th><th>狀態</th><th style="min-width:460px">管理操作</th></tr></thead><tbody>'
-             + ''.join(rows) + '</tbody></table>') if rows else '<div class="empty">找不到會員</div>'
+    table = ('<div class="tablewrap"><table class="rt"><thead><tr><th>帳號</th><th>方案</th><th>餘額</th><th>本月用量</th><th>註冊時間</th><th>最後登入</th><th>狀態</th><th>管理操作</th></tr></thead><tbody>'
+             + ''.join(rows) + '</tbody></table></div>') if rows else '<div class="empty">找不到會員</div>'
 
     logs = _recent_logs()
     log_html = ''.join('<div class="logline"><span class="t">%s</span><b>%s</b> %s → %s <span>%s</span></div>'
@@ -288,8 +399,8 @@ def admin_member():
 
     inner = f"""
 <h1>🛡️ Admin 會員管理後台</h1>
-<div class="nav"><span class="sub">管理員：{_esc(admin)}</span><span class="sp"></span>
-<a href="/admin/member">會員列表</a>｜<a href="/admin/plans">方案設定</a>｜<a href="/member">會員中心</a>｜<a href="/">聊天首頁</a>｜<a href="/logout">登出</a></div>
+<div class="nav"><span class="sub">管理員：{_esc(admin)}＋凜</span><span class="sp"></span>
+<a href="/admin/member">會員列表</a>｜<a href="/admin/plans">方案設定</a>｜<a href="/admin/tools">🧩 工具鍵權限</a>｜<a href="/member">會員中心</a>｜<a href="/">聊天首頁</a>｜<a href="/logout">登出</a></div>
 <div class="cards">
   <div class="card"><div class="v">{total}</div><div class="l">會員總數</div></div>
   <div class="card green"><div class="v">{active}</div><div class="l">啟用中</div></div>
@@ -303,7 +414,7 @@ def admin_member():
 <input type="text" name="username" placeholder="帳號（英數字）" required pattern="[A-Za-z0-9]{{2,20}}">
 <input type="text" name="password" placeholder="密碼（至少6碼）" required>
 <select name="plan">{plan_opts}</select>
-<input class="amt" type="number" name="balance" value="0" min="0" placeholder="初始餘額">
+<input class="amt" type="number" name="balance" value="" min="0" placeholder="留空＝方案預設額度">
 <button>建立會員</button>
 </form></div>
 <div class="panel"><h2>會員列表{('（搜尋：「' + _esc(q) + '」）') if q else ''}</h2>
@@ -324,11 +435,17 @@ def admin_member_add():
     username = (request.form.get('username') or '').strip()
     pw = request.form.get('password') or ''
     plan = (request.form.get('plan') or 'free').strip()
-    try:
-        balance = int(request.form.get('balance') or 0)
-    except ValueError:
-        balance = 0
-    balance = max(0, balance)
+    # ★ indexPage 2026-09-30：初始餘額留空＝帶入該方案預設月額度（避免新會員一律 0）
+    _raw_bal = (request.form.get('balance') or '').strip()
+    if _raw_bal == '':
+        balance = _plan_monthly_tokens(plan)
+    else:
+        try:
+            balance = max(0, int(_raw_bal))
+        except ValueError:
+            balance = _plan_monthly_tokens(plan)
+    if str(plan).lower() in ('admin', 'root'):
+        balance = 10 ** 12
     if len(username) < 2 or not username.isalnum():
         return redirect('/admin/member?type=err&msg=' + urllib_quote('帳號需為 2 個以上英數字'))
     if len(pw) < 6:
@@ -356,7 +473,19 @@ def admin_member_plan(username):
     if not u:
         return redirect('/admin/member?type=err&msg=' + urllib_quote('會員不存在'))
     with _db_lock, _connect() as conn:
-        conn.execute('UPDATE users SET plan=? WHERE username=?', (new_plan, username))
+        # ★ indexPage 2026-09-30：改方案同時對齊餘額／月用量（否則餘額永遠停在舊值 → 三級都顯示 50000）
+        _mb = _plan_monthly_tokens(new_plan)
+        if str(new_plan).lower() in ('admin', 'root'):
+            _mb = 10 ** 12
+        else:
+            # ★ 凜 2026-09-30：舊餘額累加 —— 新餘額 = 現在餘額 + 新方案月額度
+            #   例：FREE→PRO = FREE 現在餘額 + 500,000；PRO→VIP = PRO 現在餘額 + 2,000,000
+            try:
+                _mb += max(0, int(u.get('balance_tokens') or 0))
+            except Exception:
+                pass
+        conn.execute('UPDATE users SET plan=?, balance_tokens=?, monthly_used=0, month_key=? WHERE username=?',
+                     (new_plan, _mb, _month_key(), username))
         conn.commit()
     _log_action(admin, '改方案', username, f'{u.get("plan")} → {new_plan}')
     return redirect('/admin/member?type=ok&msg=' + urllib_quote(f'{username} 方案已改為 {new_plan}'))
@@ -463,7 +592,7 @@ if _orig_login_fn is not None:
                 username = (request.form.get('username') or '').strip()
                 pw = request.form.get('password') or ''
                 u = _get_user(username)
-                if u and u.get('disabled') and u['password_hash'] == _hash_pw(pw):
+                if u and u.get('disabled') and _verify_pw(pw, u.get('password_hash')):
                     session.pop('member_user', None)
                     return _page('帳號已停用', '<p style="color:#ffb3c1;font-size:15px">⛔ 此帳號已被停用，請聯絡管理員。</p><p><a href="/login">← 返回登入</a></p>')
         except Exception:
@@ -475,7 +604,8 @@ if _orig_login_fn is not None:
 _prev_process_message = getattr(_mokagi, 'process_message', None)
 if _prev_process_message is not None and asyncio.iscoroutinefunction(_prev_process_message):
     async def _admin_gated_process_message(user_id, text, stream_callback=None, agent_name=None, agent_config=None,
-                                           auto_mode=False, initial_prompt=None, context_files=None):
+                                       auto_mode=False, initial_prompt=None, context_files=None,
+                                       **kwargs):
         try:
             if session is not None:
                 username = session.get('member_user')
@@ -488,9 +618,10 @@ if _prev_process_message is not None and asyncio.iscoroutinefunction(_prev_proce
         except Exception:
             pass
         return await _prev_process_message(
-            user_id=user_id, text=text, stream_callback=stream_callback,
-            agent_name=agent_name, agent_config=agent_config, auto_mode=auto_mode,
-            initial_prompt=initial_prompt, context_files=context_files)
+        user_id=user_id, text=text, stream_callback=stream_callback,
+        agent_name=agent_name, agent_config=agent_config, auto_mode=auto_mode,
+        initial_prompt=initial_prompt, context_files=context_files,
+        **kwargs)
     _mokagi.process_message = _admin_gated_process_message
     print('[管理後台] 已攔截 process_message：停用會員無法使用 AI')
 

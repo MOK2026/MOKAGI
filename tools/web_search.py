@@ -169,6 +169,37 @@ def load_agent_config_value(key: str, agent_config: Optional[Dict] = None) -> st
 
 
 # ------------------------------------------------------------------------------------ #
+# ------------------------------------------------------------------------------------ #
+# 常數／函式: 共用搜尋 key 真源（方案C，2026-10-07 主人批准）
+# 用途: agent 自己 config 冇 TAVILY_API_KEY 時，改讀共用真源檔的 tavily_api_key。
+#       fallback 鏈：agent 自有 key → 共用真源 → 環境變數 TAVILY_API_KEY。
+#       換 key 只需改該檔（0600）；真源檔 enabled=false 即停用 fallback。
+# 影響: 全體 agent 共用（多工並行）。真源檔由 agent 泠 維護：jobs/search_key_pool/
+# ------------------------------------------------------------------------------------ #
+SEARCH_KEY_POOL_FILE = "/home/ubuntu/.mok/agent/泠/jobs/search_key_pool/config.json"
+_shared_key_cache = {"mtime": None, "key": ""}
+
+
+def load_shared_search_key() -> str:
+    """讀取共用搜尋 key 真源（帶 mtime 快取，避免每次搜尋都做 I/O）。"""
+    try:
+        st = os.stat(SEARCH_KEY_POOL_FILE)
+    except OSError:
+        return ""
+    if _shared_key_cache["mtime"] == st.st_mtime:
+        return _shared_key_cache["key"]
+    key = ""
+    try:
+        with open(SEARCH_KEY_POOL_FILE, "r", encoding="utf-8") as f:
+            _cfg = json.load(f) or {}
+        if _cfg.get("enabled", True) is not False:
+            key = str(_cfg.get("tavily_api_key", "") or "").strip()
+    except Exception:
+        key = ""
+    _shared_key_cache.update({"mtime": st.st_mtime, "key": key})
+    return key
+
+
 # 函式: check_search_deps
 # 用途: 一次性檢查所有搜尋依賴（Tavily 庫、API Key、DuckDuckGo 庫），
 #       若缺少任何一項則返回清晰的安裝指引（附帶複製按鈕），否則返回 None 表示就緒。
@@ -191,9 +222,13 @@ def check_search_deps(agent_config: Optional[Dict] = None) -> tuple[str | None, 
     except ImportError:
         missing.append("tavily-python 未安裝")
 
-    api_key = agent_config.get("TAVILY_API_KEY", "")
+    # 方案C fallback 鏈：agent 自有 key → 共用真源 → 環境變數
+    api_key = (agent_config.get("TAVILY_API_KEY", "") or "").strip()
     if not api_key:
-        missing.append("Tavily API Key 未配置")
+        api_key = load_shared_search_key()
+    if not api_key:
+        api_key = (os.environ.get("TAVILY_API_KEY", "") or "").strip()
+    # 缺 key 不再列為 fatal：改為降級（只跑 DuckDuckGo），放行邏輯見下方
 
     try:
         from ddgs import DDGS  # 新版套件（duckduckgo_search 已改名為 ddgs）
@@ -203,8 +238,13 @@ def check_search_deps(agent_config: Optional[Dict] = None) -> tuple[str | None, 
         except ImportError:
             missing.append("ddgs 未安裝")
 
-    if not missing:
+    # 方案C：任何一個搜尋源可用就放行（缺 Tavily key → api_key 為空 → 只跑 DuckDuckGo）
+    _has_tavily = (not any("tavily-python" in _m for _m in missing)) and bool(api_key)
+    _has_ddg = not any("ddgs" in _m for _m in missing)
+    if _has_tavily or _has_ddg:
         return None, api_key
+    if not api_key and not any("Tavily API Key" in _m for _m in missing):
+        missing.append("Tavily API Key 未配置")
 
     msg = "❌ 以下搜尋依賴缺失，請依序處理：\n\n"
     for item in missing:
@@ -537,6 +577,7 @@ async def naturalize_search_result(user_text: str, raw_result: str, ollama_api: 
         "model": model_name,
         "prompt": prompt,
         "stream": True,
+        "think": False,
         "options": {
             "num_predict": 4000,
             "temperature": 0.7,
@@ -721,11 +762,16 @@ async def handle_web_search(args: Union[str, dict], chat_id: str = None, agent_c
     ddg_params = params.copy()
     tavily_params = {"query": params["query"]}
 
-    results_tavily, results_ddg = await asyncio.gather(
-        _do_search_via_tavily(tavily_params, api_key),
-        _do_search_duckduckgo_async(ddg_params),
-        return_exceptions=True
-    )
+    if api_key:
+        results_tavily, results_ddg = await asyncio.gather(
+            _do_search_via_tavily(tavily_params, api_key),
+            _do_search_duckduckgo_async(ddg_params),
+            return_exceptions=True
+        )
+    else:
+        # 方案C 降級：無 Tavily key 時跳過 Tavily，只跑 DuckDuckGo（不再整支失敗）
+        results_tavily = {"success": False, "error": "skipped:no_tavily_key"}
+        results_ddg = await _do_search_duckduckgo_async(ddg_params)
 
     all_items = []
     errors = []
@@ -736,7 +782,9 @@ async def handle_web_search(args: Union[str, dict], chat_id: str = None, agent_c
     elif isinstance(results_tavily, Exception):
         errors.append(f"Tavily: {str(results_tavily)}")
     elif isinstance(results_tavily, dict) and not results_tavily.get("success"):
-        errors.append(f"Tavily: {results_tavily.get('error', '未知錯誤')}")
+        _tav_err = str(results_tavily.get("error", "未知錯誤"))
+        if not _tav_err.startswith("skipped:"):  # 方案C：降級跳過不當成錯誤
+            errors.append(f"Tavily: {_tav_err}")
 
     # 處理 DuckDuckGo 結果
     if isinstance(results_ddg, dict) and results_ddg.get("success"):

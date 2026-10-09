@@ -115,8 +115,8 @@ else
   exit 1
 fi
 
-# 只保留最近 7 份（連同 .meta.json 一起清理）
-ls -1t "$BK"/mok_backup_*.tar.gz 2>/dev/null | tail -n +8 | while read -r old; do
+# 只保留最近 2 份（連同 .meta.json 一起清理）
+ls -1t "$BK"/mok_backup_*.tar.gz 2>/dev/null | tail -n +3 | while read -r old; do
   rm -f "$old" "$old.meta.json"
 done
 echo "count: $(ls -1 "$BK"/mok_backup_*.tar.gz 2>/dev/null | wc -l)" >> "$LOG"

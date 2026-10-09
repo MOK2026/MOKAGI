@@ -3,6 +3,10 @@
 # 使用 Playwright + Chromium，透過 Xvfb 在 headless 主機上實現 headful 模式
 # 模擬真人用戶的滑鼠和鍵盤操作，適合註冊/登入無 API 的網站
 # 2026-07-21 衍 創建（2026-07-22 修正 Alpine/Docker 沙箱相容性）
+# 2026-09-27 卓 進程鎖改為 per-profile + JSON 持有者資訊（pid/心跳），錯誤訊息顯示真正持有者
+# 2026-09-27 卓 工具描述補上：侍女預設用自己的專屬 profile（可並行）；同 profile 並行時第二個約等 20 秒失敗
+# 2026-09-28 衍 Xvfb 逐實例獨立：DISPLAY 改用 launch env 注入（不再改全域 os.environ）；編號改確定性掃描空閒；啟動前回收 PPID=1 孤兒
+# 2026-09-28 衍 修正孤兒回收門檻 dn<10 → 只跳過 :0/:1（原 :2~:9 孤兒永遠清不掉）；實測已回收殘留 :2
 # ------------------------------------------------------------------------------------ #
 
 PLUGIN_INFO = {
@@ -22,7 +26,7 @@ PLUGIN_INFO = {
     "naturalize_func": "naturalize_browser_result",
     "tool_schema": {
         "name": "browser",
-        "description": "在主機操作真實 Chromium 瀏覽器，模擬真人滑鼠鍵盤操作。支援安裝瀏覽器環境、啟動、導航到 URL、點擊元素、輸入文字、截圖儲存、頁面滾動、鍵盤按鍵、等待元素/時間、執行 JavaScript、取得頁面文字內容、關閉瀏覽器等完整操作。適合需要模擬真人操作網站的場景（如註冊帳號、登入無 API 的網站、手動瀏覽）。瀏覽器以 headful 模式運行（透過 Xvfb 虛擬顯示器），支援持久化設定檔保存登入狀態。",
+        "description": "在主機操作真實 Chromium 瀏覽器，模擬真人滑鼠鍵盤操作。支援安裝瀏覽器環境、啟動、導航到 URL、點擊元素、輸入文字、截圖儲存、頁面滾動、鍵盤按鍵、等待元素/時間、執行 JavaScript、取得頁面文字內容、關閉瀏覽器等完整操作。適合需要模擬真人操作網站的場景（如註冊帳號、登入無 API 的網站、手動瀏覽）。瀏覽器以 headful 模式運行（透過 Xvfb 虛擬顯示器），支援持久化設定檔保存登入狀態。你（侍女）預設使用自己的專屬 Chromium profile（=侍女名），與其他侍女互不干擾、可並行；正常情況各侍女自己的 profile 不會撞，但同一侍女若同時開多個並行任務搶自己的 profile，第二個只等 20 秒就會失敗。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -93,6 +97,7 @@ import random
 import subprocess
 import fcntl
 import re
+import signal
 from typing import Optional, Dict, Union
 import mok_profile as mok_profile  # 全系統統一的 profile 推導（單一真相來源）
 
@@ -175,6 +180,64 @@ def _find_chromium_path() -> Optional[str]:
     return None
 
 
+def _browser_env(display_num: int) -> dict:
+    """為單一瀏覽器進程準備獨立環境：DISPLAY 指向它自己的 Xvfb。
+
+    重點：不再改動全域 os.environ["DISPLAY"]——同一主進程多實例並行時，
+    全域變數會被後啟動的實例覆蓋，導致瀏覽器掛到錯的顯示器搶滑鼠/焦點。
+    """
+    return {**os.environ, "DISPLAY": f":{display_num}"}
+
+
+def _reap_orphan_xvfb() -> None:
+    """回收孤兒 Xvfb：父行程已死（PPID=1）、且未被 _instances 追蹤者。
+
+    桌面 :0/:1 屬系統服務，永久保留（只跳過 :0/:1；:2 以上孤兒可回收）。
+    """
+    tracked = {i.get("display_num") for i in _instances.values()}
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,ppid=,args="],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return
+    for line in out.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) < 3:
+            continue
+        pid, ppid, cmd = parts
+        if not cmd.startswith("Xvfb :"):
+            continue
+        try:
+            dn = int(cmd.split()[1].lstrip(":"))
+        except Exception:
+            continue
+        if dn < 2 or dn in tracked or ppid != "1":
+            continue
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except Exception:
+            pass
+
+
+def _live_xvfb_displays() -> set:
+    """回傳目前有活著 Xvfb 進程在服務的 display 編號（判斷空閒的權威來源）。"""
+    live = set()
+    try:
+        out = subprocess.run(["ps", "-eo", "args="],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return live
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith("Xvfb :"):
+            continue
+        try:
+            live.add(int(line.split()[1].lstrip(":")))
+        except Exception:
+            pass
+    return live
+
+
 def _check_xvfb() -> bool:
     """檢查 Xvfb 是否可用"""
     return shutil.which("Xvfb") is not None
@@ -183,8 +246,11 @@ def _start_xvfb(profile: str = "default") -> int:
     """啟動該 profile 專屬的 Xvfb 虛擬顯示器，返回 display number（多 profile 各自獨立）"""
     global _xvfb_proc, _display_num
     inst = _instances.get(profile)
-    if inst and inst.get("xvfb_proc") is not None:
+    if inst and inst.get("display_num") is not None:
         return inst["display_num"]
+
+    # 先回收上一輪行程重啟後遺留的孤兒 Xvfb，避免編號被幽靈佔住
+    _reap_orphan_xvfb()
 
     # 第一個實例優先使用既有桌面顯示器 :1（即 noVNC 桌面面板所見），讓 Chrome 直接出現在桌面上
     if os.path.exists("/tmp/.X11-unix/X1") and not any(
@@ -194,27 +260,33 @@ def _start_xvfb(profile: str = "default") -> int:
         xvfb_proc = None
         os.environ["DISPLAY"] = ":1"
     else:
-        # 分配未被其他實例使用的顯示器編號
+        # 確定性分配：依序挑「真正空閒」的編號（2-99），不與其他實例重複，
+        # 且 /tmp/.X11-unix/X{n} 與 /tmp/.X{n}-lock 皆不存在（避免撞殘留/他人）
         used = {i.get("display_num") for i in _instances.values()}
-        display_num = random.randint(10, 99)
-        guard = 0
-        while display_num in used and guard < 50:
-            display_num = random.randint(10, 99)
-            guard += 1
-        # 確保沒有殘留的鎖檔
-        lockfile = f"/tmp/.X{display_num}-lock"
-        if os.path.exists(lockfile):
-            try:
-                os.remove(lockfile)
-            except:
-                pass
+        live = _live_xvfb_displays()
+        display_num = None
+        for n in range(2, 100):
+            if n in used or n in live:
+                continue
+            display_num = n
+            # 此號無活著的 Xvfb，清掉殘留鎖檔/socket（Xvfb 遇殘留鎖可能拒啟，
+            # 而 SIGTERM 常留下 /tmp/.X{n}-lock），讓新顯示器能順利啟動
+            for _stale in (f"/tmp/.X{n}-lock", f"/tmp/.X11-unix/X{n}"):
+                if os.path.exists(_stale):
+                    try:
+                        os.unlink(_stale)
+                    except Exception:
+                        pass
+            break
+        if display_num is None:
+            raise RuntimeError("找不到可用的 Xvfb 顯示器編號（2-99 皆被佔用）")
         xvfb_proc = subprocess.Popen(
             ["Xvfb", f":{display_num}", "-screen", "0", "1920x1080x24", "-ac",
              "+extension", "RANDR"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        os.environ["DISPLAY"] = f":{display_num}"
+        # 不再改全域 DISPLAY；改由 _browser_env(display) 逐實例注入
 
     if profile not in _instances:
         _instances[profile] = {}
@@ -372,46 +444,121 @@ def naturalize_browser_result(user_text: str = "", raw_result: str = "", ollama_
 
 
 # ------------------------------------------------------------------------------------ #
-# 瀏覽器進程鎖：每次僅允許一位侍女使用瀏覽器
-# 任何 /browser 調用前必須先上鎖；若鎖被其他侍女持有，等待 10 秒再試，最多試 3 次
+# ------------------------------------------------------------------------------------ #
+# 瀏覽器進程鎖（per-profile）：
+#   - 鎖的粒度＝profile：不同侍女（各自專屬 profile）可並行，不再全機排隊
+#   - 同一 profile 仍序列化，避免兩個呼叫同時操作同一個 Chromium
+#   - 鎖檔以 JSON 記錄真正的持有者（agent/pid/chat/profile/ts=心跳時間）
+#   - 成功上鎖即覆寫鎖檔 → 自動清掉殘留的舊持有者；錯誤訊息顯示真正的持有者
 # ------------------------------------------------------------------------------------ #
 
-BROWSER_LOCK_FILE = "/tmp/mok_browser.lock"
-BROWSER_LOCK_WAIT = 10   # 等待秒數
-BROWSER_LOCK_MAX_TRIES = 3  # 最多嘗試次數
+BROWSER_LOCK_WAIT = 10       # 等待秒數
+BROWSER_LOCK_MAX_TRIES = 3   # 最多嘗試次數
+BROWSER_LOCK_STALE = 180     # 心跳超過此秒數視為疑似逾時（僅用於訊息標註）
 
 
-def _try_lock_browser(holder_info: str) -> Optional[int]:
-    """嘗試非阻塞獲取瀏覽器鎖，成功返回鎖 fd，失敗返回 None。"""
+def _browser_lock_file(profile) -> str:
+    """每個 profile 一條鎖檔：不同侍女（不同 profile）可並行。"""
+    name = re.sub(r"[^\w\u4e00-\u9fff.-]", "_", str(profile or "default")).strip("._") or "default"
+    return os.path.join("/tmp", f"mok_browser_{name}.lock")
+
+
+def _pid_alive(pid) -> bool:
+    """檢查 pid 是否仍存活（用於辨識已結束的殭屍鎖）。"""
     try:
-        fd = os.open(BROWSER_LOCK_FILE, os.O_CREAT | os.O_RDWR, 0o644)
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _read_lock_info(lock_file: str) -> dict:
+    """讀取鎖檔中的持有者資訊；JSON 為主，舊格式（裸字串）向後相容。"""
+    try:
+        with open(lock_file, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read().strip()
+        if not content:
+            return {}
+        try:
+            info = json.loads(content)
+            return info if isinstance(info, dict) else {"agent": content}
+        except Exception:
+            return {"agent": content}
+    except Exception:
+        return {}
+
+
+def _try_lock_browser(lock_file: str, holder_info: dict) -> Optional[int]:
+    """嘗試非阻塞獲取指定 profile 的鎖，成功返回 fd，失敗返回 None。
+
+    只有在真正拿到 flock 之後才寫入持有者資訊，因此不會有「沒搶到鎖卻蓋掉持有者名字」的情況；
+    寫入前先 ftruncate，等同自動清掉殘留的舊持有者內容。
+    """
+    try:
+        fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o644)
+    except Exception:
+        return None
+    try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             os.close(fd)
             return None
-        # 寫入持有者資訊，方便其他侍女看到是誰在使用
+        # 寫入「真正的」持有者（含心跳時間戳），方便其他侍女辨識
         try:
+            payload = dict(holder_info)
+            payload["ts"] = time.time()
             os.ftruncate(fd, 0)
-            os.write(fd, holder_info.encode("utf-8"))
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.write(fd, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
         except Exception:
             pass
         return fd
     except Exception:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
         return None
 
 
-def _get_lock_holder() -> str:
-    """讀取目前鎖持有者的資訊。"""
-    try:
-        with open(BROWSER_LOCK_FILE, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read().strip()
-        return content or "未知進程"
-    except Exception:
+def _get_lock_holder(lock_file: str) -> str:
+    """讀取並格式化真正的鎖持有者資訊（含存活檢查與持有時間）。"""
+    info = _read_lock_info(lock_file)
+    if not info:
         return "未知進程"
+    agent = info.get("agent") or "?"
+    pid = info.get("pid")
+    prof = info.get("profile")
+    chat = info.get("chat")
+    ts = info.get("ts")
+    parts = [f"agent={agent}"]
+    if pid:
+        parts.append(f"pid={pid}" + ("" if _pid_alive(pid) else "(已結束)"))
+    if prof:
+        parts.append(f"profile={prof}")
+    if chat:
+        parts.append(f"chat={chat}")
+    if ts:
+        try:
+            held = int(time.time() - float(ts))
+            parts.append(f"已持有{held}秒" + ("(疑似逾時)" if held > BROWSER_LOCK_STALE else ""))
+        except Exception:
+            pass
+    return " ".join(parts)
 
 
-def _release_browser_lock(fd: int) -> None:
+def _release_browser_lock(fd: int, lock_file: str = None) -> None:
     """釋放瀏覽器鎖並關閉 fd。"""
     try:
         fcntl.flock(fd, fcntl.LOCK_UN)
@@ -423,13 +570,13 @@ def _release_browser_lock(fd: int) -> None:
         pass
 
 
-async def _acquire_browser_lock(holder_info: str) -> Optional[int]:
+async def _acquire_browser_lock(lock_file: str, holder_info: dict) -> Optional[int]:
     """
-    獲取瀏覽器鎖：先試一次，被佔用則等 10 秒再試，最多試 3 次。
+    獲取指定 profile 的瀏覽器鎖：先試一次，被佔用則等 10 秒再試，最多試 3 次。
     成功返回鎖 fd；3 次都失敗返回 None。
     """
     for attempt in range(BROWSER_LOCK_MAX_TRIES):
-        fd = _try_lock_browser(holder_info)
+        fd = _try_lock_browser(lock_file, holder_info)
         if fd is not None:
             return fd
         if attempt < BROWSER_LOCK_MAX_TRIES - 1:
@@ -480,11 +627,10 @@ async def handle_browser(args: Union[str, dict], chat_id: str = None, agent_conf
     else:
         return json.dumps({"success": False, "error": "無效的參數格式"}, ensure_ascii=False)
 
-    # --- 進程鎖：每次僅允許一位侍女使用瀏覽器 ---
+    # --- 進程鎖（per-profile）：不同 profile 可並行；同一 profile 才需排隊 ---
     agent_name = "?"
     if agent_config and isinstance(agent_config, dict):
         agent_name = agent_config.get("MOK_AGENT_NAME") or agent_config.get("name") or "?"
-    holder_info = f"agent={agent_name} pid={os.getpid()} chat={chat_id or chr(63)}"
 
     # --- 依呼叫端侍女決定「預設 profile」；切換侍女時同步重置 _last_profile ---
     global _default_profile, _default_profile_agent, _last_profile
@@ -493,11 +639,26 @@ async def handle_browser(args: Union[str, dict], chat_id: str = None, agent_conf
         _default_profile_agent = agent_name
         _last_profile = _default_profile
 
-    lock_fd = await _acquire_browser_lock(holder_info)
+    # 鎖的粒度＝本次實際操作的 profile（顯式 profile= 優先，否則用侍女預設）
+    try:
+        _, _lock_profile = _extract_profile(action_args or "")
+    except Exception:
+        _lock_profile = None
+    _lock_profile = _lock_profile or _default_profile
+    lock_file = _browser_lock_file(_lock_profile)
+
+    holder_info = {
+        "agent": agent_name,
+        "pid": os.getpid(),
+        "chat": str(chat_id) if chat_id else "?",
+        "profile": _lock_profile,
+    }
+
+    lock_fd = await _acquire_browser_lock(lock_file, holder_info)
     if lock_fd is None:
         return json.dumps({
             "success": False,
-            "error": f"瀏覽器正在使用中（{_get_lock_holder()}），請等對方用完再試。",
+            "error": f"瀏覽器（profile={_lock_profile}）正在使用中：{_get_lock_holder(lock_file)}，請等對方用完再試。",
             "action": action,
             "locked": True
         }, ensure_ascii=False)
@@ -749,6 +910,7 @@ async def _handle_launch(args: str) -> str:
                         "--disable-dev-shm-usage",
                     ],
                     executable_path=chromium_path,
+                    env=_browser_env(display),
                 ),
                 timeout=60
             )
@@ -757,6 +919,7 @@ async def _handle_launch(args: str) -> str:
         else:
             launch_opts = {
                 "headless": False,
+                "env": _browser_env(display),
                 "args": [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",

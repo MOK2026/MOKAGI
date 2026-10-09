@@ -97,14 +97,19 @@ def _cron_confirm_warning(warning: str, token: str) -> str:
 
 
 def is_admin(chat_id: str, agent_config: dict = None) -> bool:
-    """簡易管理員檢查（網頁版放行）"""
+    """owner/admin 判定（2026-10-03 by 凜）：一律走 owner_auth 唯一真相。
+
+    舊版對任何非數字 chat_id 一律放行（網頁全員變 admin）且用字串比對撞名；
+    現在以 member.db users.is_admin 為準，數值 chat_id 只認明確的 ADMIN_CHAT_ID。
+    """
     if agent_config is None:
         import mokagi
         agent_config = mokagi._agent_config
-    admin_chat_id = agent_config.get("ADMIN_CHAT_ID", "")
-    if chat_id and not chat_id.isdigit():
-        return True  # 網頁版
-    return str(chat_id) == admin_chat_id
+    try:
+        from owner_auth import is_admin_identity
+        return bool(is_admin_identity(chat_id, agent_config))
+    except Exception:
+        return False
 
 # ------------------ 核心 Crontab 操作 ------------------
 

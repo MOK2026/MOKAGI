@@ -31,6 +31,7 @@ PLUGIN_INFO = {
     "command": "/intent",
     "icon":"🧩",
     "description": "內部意圖識別引擎，非必要不需要直接調用。用於將自然語言轉換為命令。",
+    "intent_keywords": ["/intent", "意圖識別", "意圖分類", "意圖分析"],
     "handler": "dummy_handler",
     "tool_schema": {
         "name": "intent",
@@ -98,7 +99,7 @@ _model_timeout = 300.0
 #   每個工具可以在 PLUGIN_INFO 的 intent_keywords 中定義兩種格式:
 #     1. 簡單字串:         "搜尋"            → 自動對應到該工具的根命令 (如 /search)
 #     2. 元組 (關鍵詞, 命令): ("記住", "/memory remember") → 明確指定完整命令
-#   若工具未定義 intent_keywords，則自動從工具的描述文字中提取中文字詞當作關鍵詞（較弱）。
+#   若工具未定義 intent_keywords，則只以命令名本身作關鍵詞（【E修正】不再從描述文字亂抽中文字詞，避免誤路由）。
 #   這樣設計是為了讓使用者能夠用自然語言觸發工具，同時支援工具的獨立定義，無需修改意圖模組。
 # 參數:
 #   cmd_map: dict {命令字串: handler函數}，由主程式提供。
@@ -124,12 +125,11 @@ def build_keyword_map(cmd_map: dict, tools: dict) -> Dict[str, str]:
         info = mod.PLUGIN_INFO
         keywords_raw = info.get("intent_keywords", [])
         if not keywords_raw:
-            # 若無關鍵詞，可根據指令名稱和描述產生簡單詞（原有邏輯）
-            desc = info.get("description", "")
-            words = re.findall(r'[\u4e00-\u9fa5]+', desc)
-            keywords = words if words else [cmd.lstrip("/")]
-            for kw in keywords:
-                kw_map[kw.lower()] = cmd
+            # 【E修正】無 intent_keywords 時，只用命令名本身當關鍵詞。
+            # 不再從 description 自動抽中文詞——description 是給人看的說明書，
+            # 內含「與」「需該」「設定檔有」這類孤立殘詞，當成子字串觸發詞會嚴重誤路由
+            # （例：任何含「與」的句子都會被判成 /dream）。寧可少命中，也不要錯命中。
+            kw_map[cmd.lstrip("/").lower()] = cmd
         else:
             # 處理新的元組格式或傳統列表
             for item in keywords_raw:
@@ -177,6 +177,9 @@ async def rule_based_intent(user_text: str, kw_map: dict) -> tuple:
     """回傳 (完整命令, 參數) 或 (None, None)"""
     text_lower = user_text.lower()
     for kw, full_cmd in kw_map.items():
+        # 【E修正】防護：跳過長度 < 2 的關鍵詞，避免單一漢字（如「與」）造成子字串誤命中。
+        if len(kw) < 2:
+            continue
         if kw in text_lower:
             # 提取參數：移除第一個匹配的關鍵詞後的部分
             # 注意：用戶訊息可能包含關鍵詞的前後文，直接移除關鍵詞
@@ -232,11 +235,12 @@ async def llm_intent(user_text: str, cmd_map: dict, tools: dict, ollama_api: str
 
     agent_name = os.environ.get("MOK_AGENT_NAME")
     MOK_ADMIN_NAME = os.environ.get("MOK_ADMIN_NAME")# 用戶名稱
-    MOK_AGENT_SPEAKING_STYLE = os.environ.get("MOK_AGENT_SPEAKING_STYLE")# 語氣風格
-    MOK_AGENT_COMMON_LANGUAGE = os.environ.get("MOK_AGENT_COMMON_LANGUAGE")# 慣用語言
 
 
     # 建立指令描述列表
+    # A（2026-10-01 靜）：改用 intent_keywords 當「判別特徵」。
+    #   舊法灌整份 description（給人看的說明書，充滿行銷詞/注意事項）＝純噪音；
+    #   intent_keywords 本來就是為路由準備的觸發詞 —— 資料齊備，只是接錯線。
     cmd_desc = []
     for cmd, handler in cmd_map.items():
         if cmd in ["/start", "/clear", "/tools", "/reload"]:
@@ -246,10 +250,26 @@ async def llm_intent(user_text: str, cmd_map: dict, tools: dict, ollama_api: str
             if hasattr(m, "PLUGIN_INFO") and m.PLUGIN_INFO.get("command") == cmd:
                 mod = m
                 break
-        desc = cmd
+        # 取 intent_keywords（支援 "詞" 與 ("詞","/完整 命令") 兩種格式）：去斜線、去重，再以字元預算挑選
+        hints = []
         if mod and hasattr(mod, "PLUGIN_INFO"):
-            desc = mod.PLUGIN_INFO.get("description", cmd)
-        cmd_desc.append(f"- {cmd}: {desc}")
+            for kw in (mod.PLUGIN_INFO.get("intent_keywords") or []):
+                t = (kw if isinstance(kw, str) else kw[0]).strip().lstrip("/")
+                if t and t not in hints:
+                    hints.append(t)
+        # 以字元預算（≤40）決定放幾個關鍵詞，太長的清單會讓 prompt 再次膨脹
+        picked = []
+        for _h in hints:
+            if len('、'.join(picked + [_h])) > 40:
+                break
+            picked.append(_h)
+        hints = picked[:10]
+        if hints:
+            cmd_desc.append(f"- {cmd}: {'、'.join(hints)}")
+        else:
+            # 沒填關鍵詞的工具：退回短描述（截斷），避免該命令整個從 prompt 消失
+            desc = (getattr(mod, "PLUGIN_INFO", {}) or {}).get("description", cmd) if mod else cmd
+            cmd_desc.append(f"- {cmd}: {str(desc)[:30]}")
 
     prompt = f"""妳是{agent_name}，是一個意圖分類助手。根據{MOK_ADMIN_NAME}輸入，輸出 JSON：
 - 無需工具且純聊天：{{"command": "chat"}}
@@ -257,7 +277,7 @@ async def llm_intent(user_text: str, cmd_map: dict, tools: dict, ollama_api: str
 - 需要多步驟任務（如搜索後整理）：{{"command": "/workflow create", "args": "目標"}}
 - 無法匹配：{{"command": "none"}}
 
-可用命令說明：
+可用命令說明（command 只能從以下清單挑選，不可自創）：
 {chr(10).join(cmd_desc)}
 
 規則：
@@ -273,7 +293,9 @@ async def llm_intent(user_text: str, cmd_map: dict, tools: dict, ollama_api: str
             prompt=prompt,
             stream=False,
             temperature=0.1,
-            num_predict=2000
+            num_predict=1024,
+            disable_thinking=True,
+            response_format={"type": "json_object"},
         )
         output = response_text.strip()
         # 嘗試提取 JSON 對象

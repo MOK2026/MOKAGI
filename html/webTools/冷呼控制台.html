@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>賺錢王 · Cold Call 控制台</title>
+<style>
+  :root {
+    --bg: #0f1420; --card: #1a2233; --card2: #202a40; --line: #2c3a55;
+    --txt: #e6edf7; --dim: #8fa3bf; --ok: #34d399; --warn: #fbbf24;
+    --bad: #f87171; --blue: #60a5fa; --purple: #a78bfa;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--txt);
+    font-family: -apple-system, "PingFang HK", "Microsoft JhengHei", sans-serif;
+    padding: 20px; min-height: 100vh;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 18px; flex-wrap: wrap; gap: 10px;
+  }
+  h1 { font-size: 22px; letter-spacing: 1px; }
+  h1 .dot { color: var(--ok); }
+  .clock { color: var(--dim); font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .card h3 { font-size: 12px; color: var(--dim); font-weight: 500; margin-bottom: 6px; letter-spacing: .5px; }
+  .card .big { font-size: 26px; font-weight: 700; }
+  .card .sub { font-size: 12px; color: var(--dim); margin-top: 4px; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .pill.ok { background: rgba(52,211,153,.15); color: var(--ok); }
+  .pill.warn { background: rgba(251,191,36,.15); color: var(--warn); }
+  .pill.bad { background: rgba(248,113,113,.15); color: var(--bad); }
+  .pill.blue { background: rgba(96,165,250,.15); color: var(--blue); }
+  .quota-bar { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+  .q-item { background: var(--card2); border-radius: 8px; padding: 8px 12px; flex: 1; min-width: 130px; }
+  .q-item .label { font-size: 11px; color: var(--dim); }
+  .q-item .val { font-size: 18px; font-weight: 700; margin-top: 2px; }
+  .q-item .val small { font-size: 12px; color: var(--dim); font-weight: 400; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 18px; }
+  .panel h2 { font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .panel h2 .ico { color: var(--purple); }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  select, input[type=number] {
+    background: var(--card2); color: var(--txt); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; font-size: 13px;
+  }
+  button {
+    background: var(--blue); color: #fff; border: none; border-radius: 8px;
+    padding: 9px 18px; font-size: 13px; font-weight: 600; cursor: pointer; transition: .15s;
+  }
+  button:hover { filter: brightness(1.15); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--txt); }
+  button.green { background: var(--ok); color: #062; }
+  button.warn-b { background: var(--warn); color: #3a2a00; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; }
+  td a { color: var(--blue); text-decoration: none; word-break: break-all; }
+  td .mini { font-size: 11px; color: var(--dim); }
+  .log-box {
+    background: #0b0f18; border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; font-family: "SF Mono", Consolas, monospace; font-size: 12px;
+    max-height: 260px; overflow-y: auto; line-height: 1.6;
+  }
+  .log-box .t { color: var(--dim); }
+  .log-box .err { color: var(--bad); }
+  .toast {
+    position: fixed; top: 18px; right: 18px; background: var(--card2);
+    border: 1px solid var(--line); border-left: 4px solid var(--ok);
+    padding: 12px 18px; border-radius: 10px; font-size: 13px; z-index: 99;
+    opacity: 0; transform: translateY(-8px); transition: .25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: none; }
+  .toast.err { border-left-color: var(--bad); }
+  .empty { color: var(--dim); text-align: center; padding: 24px; font-size: 13px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.sent { background: rgba(52,211,153,.15); color: var(--ok); }
+  .badge.link { background: rgba(96,165,250,.15); color: var(--blue); }
+  .badge.draft { background: rgba(167,139,250,.15); color: var(--purple); }
+  .badge.failed { background: rgba(248,113,113,.15); color: var(--bad); }
+  .badge.none { background: rgba(143,163,191,.12); color: var(--dim); }
+  .status-line { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 14px; color: var(--dim); }
+  /* ── 商家網頁追蹤：卡片式 + 手機版 RWD ── */
+  .track-stats { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 10px; font-size: 12px; }
+  .track-stats .ts-block { flex: 1; min-width: 150px; }
+  .track-stats .ts-title { color: var(--dim); margin-bottom: 4px; font-size: 12px; }
+  .ts-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+  .ts-tag { background: rgba(167,139,250,.12); color: var(--purple); border-radius: 6px; padding: 2px 7px; font-size: 11px; }
+  .ts-tag b { font-weight: 700; }
+  .recent-list { display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto; padding-right: 4px; }
+  .r-item {
+    background: var(--card2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 12px; font-size: 13px;
+  }
+  .r-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .r-page { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+  .r-time { color: var(--dim); font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+  .r-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+  .r-src { margin-top: 5px; color: var(--dim); font-size: 11px; overflow-wrap: anywhere; word-break: break-all; line-height: 1.45; }
+  .r-url { margin-top: 4px; font-size: 10px; color: var(--dim); opacity: .72; overflow-wrap: anywhere; word-break: break-all; line-height: 1.45; }
+  .r-meta .pill { max-width: 100%; overflow-wrap: anywhere; word-break: break-all; }
+  /* 手機版優化 */
+  @media (max-width: 640px) {
+    body { padding: 12px; }
+    h1 { font-size: 18px; }
+    .panel { padding: 12px; }
+    .grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .card { padding: 10px 12px; }
+    .card .big { font-size: 22px; }
+    .recent-list { max-height: none; }
+    #trackRecent .r-item { padding: 8px 10px; }
+    #trackRecent .r-page { font-size: 12.5px; }
+    #trackRecent .r-time { font-size: 10px; }
+    .r-meta .pill { padding: 1px 8px; font-size: 11px; }
+    .r-url, .r-src { font-size: 10px; }
+    .controls label { width: 100%; }
+    .track-stats { flex-direction: column; gap: 8px; }
+  }
+</style></head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="dot">◆</span> 賺錢王 · Cold Call 控制台</h1>
+    <div class="clock" id="clock">載入中…</div>
+  </header>
+
+  <div class="status-line" id="windowStatus">讀取狀態中…</div>
+
+  <!-- 統計卡片 -->
+  <div class="grid" id="statCards"></div>
+
+  <!-- 配額 -->
+  <div class="panel">
+    <h2><span class="ico">◈</span> 滑動窗口限流配額</h2>
+    <div class="quota-bar" id="quotaBox"></div>
+  </div>
+
+  <!-- 操作 -->
+  <div class="panel">
+    <h2><span class="ico">⚡</span> 操作</h2>
+    <div class="controls">
+      <label>WhatsApp 模式
+        <select id="waMode">
+          <option value="link">link（wa.me 直連連結）</option>
+          <option value="auto">auto（Playwright 自動發送）</option>
+        </select>
+      </label>
+      <label>Email 模式
+        <select id="emailMode">
+          <option value="draft">draft（.eml 草稿）</option>
+          <option value="auto">auto（Playwright 自動發送）</option>
+        </select>
+      </label>
+      <label>本輪上限
+        <input type="number" id="limit" value="10" min="1" max="100" style="width:70px">
+      </label>
+      <button class="ghost" id="btnDryRun">🔍 預覽（dry-run）</button>
+      <button id="btnRun">▶ 執行</button>
+      <button class="warn-b" id="btnSend">🚀 實際發送（wa+email auto）</button>
+    </div>
+    <p style="font-size:12px; color:var(--dim); margin-top:10px">
+      ⚠️ 僅香港時間 09:00–14:00 會真正執行；auto 模式需 WhatsApp Web / Gmail 已登入（browser_profile2），失敗會自動退回連結/草稿。
+    </p>
+  </div>
+
+  <!-- 待處理清單 -->
+  <div class="panel">
+    <h2><span class="ico">▤</span> 客戶清單
+      <span class="pill blue" id="pendingCount">0</span>
+      <span style="margin-left:auto; display:flex; gap:6px">
+        <button class="ghost" id="tabPending" style="padding:4px 12px; font-size:12px">待處理</button>
+        <button class="ghost" id="tabAll" style="padding:4px 12px; font-size:12px">全部</button>
+      </span>
+    </h2>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>#</th><th>名稱</th><th>類別</th><th>WhatsApp</th><th>Email</th>
+          <th>優先方式</th><th>狀態</th><th>開場白</th>
+        </tr></thead>
+        <tbody id="leadBody"></tbody>
+      </table>
+      <div class="empty" id="leadEmpty" style="display:none">🎉 沒有客戶資料</div>
+    </div>
+  </div>
+
+  <!-- 網頁追蹤（Cold Call 客戶開啟統計） -->
+  <div class="panel">
+    <h2><span class="ico">👁</span> 商家網頁追蹤 <button class="ghost" style="margin-left:auto; padding:4px 12px; font-size:12px" onclick="loadTracking()">↻ 刷新</button></h2>
+    <div class="grid" id="trackCards" style="margin-bottom:10px"></div>
+    <div class="track-stats" id="trackStats"></div>
+    <div style="display:flex; gap:20px; flex-wrap:wrap">
+      <div style="flex:1; min-width:250px">
+        <div class="label" style="margin-bottom:6px">🔥 最多被打開的商家</div>
+        <div id="trackTop" style="font-size:13px"></div>
+      </div>
+      <div style="flex:2; min-width:300px">
+        <div class="label" style="margin-bottom:6px">🕒 最近開啟</div>
+        <div id="trackRecent" class="recent-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 日誌 -->
+  <div class="panel">
+    <h2><span class="ico">☰</span> 執行日誌 <button class="ghost" style="margin-left:auto; padding:4px 12px; font-size:12px" onclick="loadLog()">↻ 刷新</button></h2>
+    <div class="log-box" id="logBox"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let statusCache = null;
+
+function fmtNum(n) { return (n ?? 0).toLocaleString(); }
+
+// API 基底：直接由冷呼伺服器(8765)提供頁面時用相對路徑；
+// 若由 mok_web(5000/公網) 提供頁面，則改打同源代理 /skill/賺錢王/api/*（mok_web 會轉發到 8765）
+let API_BASE = (location.port === '8765') ? '' : '/skill/賺錢王';
+async function api(path, opt) {
+  let lastErr;
+  for (const base of [API_BASE, '']) {
+    try {
+      const r = await fetch(base + path, opt);
+      if (!r.ok) throw new Error(path + ' ' + r.status);
+      return r.json();
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+function toast(msg, isErr) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.className = 'toast', 3000);
+}
+
+function badge(status) {
+  if (!status) return '<span class="badge none">未處理</span>';
+  const map = { sent:'sent', link_created:'link', draft:'draft', failed:'failed', preview:'none' };
+  const label = { sent:'已發送', link_created:'連結', draft:'草稿', failed:'失敗', preview:'預覽' };
+  const cls = map[status] || 'none';
+  return `<span class="badge ${cls}">${label[status] || status}</span>`;
+}
+
+function quotaItem(name, q) {
+  const used = q['1小時'].used, left1 = q['1小時'].left;
+  const left24 = q['24小時'].left;
+  const ok1 = q['1小時'].ok, ok24 = q['24小時'].ok;
+  return `<div class="q-item">
+    <div class="label">${name} · 1小時 <span style="color:${ok1?'var(--ok)':'var(--bad)'}">${left1} 剩</span></div>
+    <div class="val">${used} <small>/ ${q['1小時'].limit}</small></div>
+    <div class="label" style="margin-top:4px">24小時 <span style="color:${ok24?'var(--ok)':'var(--bad)'}">${left24} 剩</span></div>
+    <div class="val" style="font-size:15px">${q['24小時'].used} <small>/ ${q['24小時'].limit}</small></div>
+  </div>`;
+}
+
+function renderStatus(st) {
+  statusCache = st;
+  $('clock').textContent = '🕐 香港時間 ' + st.hk_now;
+  const win = st.in_window
+    ? '<span class="pill ok">✓ 發送窗內</span> 現在可執行（' + st.window + '）'
+    : '<span class="pill bad">✗ 非發送時間</span> 僅 ' + st.window + ' 可執行（現為非時段）';
+  $('windowStatus').innerHTML = '⏱ 發送時間窗：' + win;
+
+  const s = st.stats;
+  const cards = [
+    { label:'總客戶', val: fmtNum(s.total), sub:'leads_7days.jsonl', color:'var(--blue)' },
+    { label:'待處理', val: fmtNum(s.pending), sub:'未 cold call', color:'var(--warn)' },
+    { label:'WA 連結已生成', val: fmtNum(s.wa_link), sub:'wa.me 直連', color:'var(--blue)' },
+    { label:'WA 已發送', val: fmtNum(s.wa_sent), sub:'auto 成功', color:'var(--ok)' },
+    { label:'Email 草稿', val: fmtNum(s.email_draft), sub:'.eml 已產出', color:'var(--purple)' },
+    { label:'Email 已發送', val: fmtNum(s.email_sent), sub:'auto 成功', color:'var(--ok)' },
+  ];
+  $('statCards').innerHTML = cards.map(c =>
+    `<div class="card"><h3>${c.label}</h3><div class="big" style="color:${c.color}">${c.val}</div><div class="sub">${c.sub}</div></div>`
+  ).join('');
+
+  $('quotaBox').innerHTML =
+    quotaItem('WhatsApp', st.quota.whatsapp) +
+    quotaItem('Email', st.quota.email);
+  $('pendingCount').textContent = fmtNum(s.pending);
+}
+
+function statusBadge(wa, em) {
+  if (wa === 'sent' || em === 'sent') return badge('sent');
+  if (wa === 'link_created') return badge('link');
+  if (em === 'draft') return badge('draft');
+  if (wa === 'failed' || em === 'failed') return badge('failed');
+  return badge('');
+}
+
+async function loadStatus() {
+  try {
+    const st = await api('/api/status');
+    renderStatus(st);
+  } catch (e) {
+    console.warn(e);
+    $('clock').textContent = '⚠️ 後端連線失敗';
+    $('windowStatus').innerHTML = '<span class="pill bad">✗ 連線失敗</span> 無法讀取狀態（後端可能未啟動）';
+  }
+}
+
+let leadTab = 'pending';
+async function loadLeads() {
+  try {
+    const d = await api('/api/leads?status=' + leadTab);
+    const tbody = $('leadBody');
+    $('leadEmpty').style.display = d.leads.length ? 'none' : 'block';
+    tbody.innerHTML = d.leads.map((l, i) => {
+      const ch = l.whatsapp ? 'WhatsApp' : (l.mail ? 'Email' : '—');
+      const waLink = l.whatsapp ? `https://wa.me/${l.whatsapp.replace(/\D/g,'')}` : '';
+      return `<tr>
+        <td class="mini">${l.idx}</td>
+        <td>${l.name || ''}</td>
+        <td class="mini">${l.category || ''}</td>
+        <td>${l.whatsapp ? `<a href="${waLink}" target="_blank">${l.whatsapp}</a>` : '<span class="mini">—</span>'}</td>
+        <td class="mini">${l.mail || '—'}</td>
+        <td><span class="pill blue">${ch}</span></td>
+        <td>${statusBadge(l.wa_status, l.email_status)}</td>
+        <td class="mini">${l.opener ? l.opener.slice(0, 40) + '…' : ''}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) { console.warn(e); }
+}
+
+async function loadLog() {
+  try {
+    const d = await api('/api/log?lines=60');
+    $('logBox').innerHTML = (d.lines || []).map(l => {
+      const cls = /ERROR|失敗|Traceback/i.test(l) ? 'err' : '';
+      return `<div class="${cls}"><span class="t">${l}</span></div>`;
+    }).join('') || '<div class="empty">暫無日誌</div>';
+    const box = $('logBox');
+    box.scrollTop = box.scrollHeight;
+  } catch (e) { console.warn(e); }
+}
+
+
+async function loadTracking() {
+  try {
+    const d = await api('/api/tracking');
+    if (!d || !d.total) {
+      $('trackCards').innerHTML = '<div class="card" style="grid-column:1/-1; color:var(--dim)">📭 尚無網頁開啟記錄 — 當客戶打開商家 demo 頁後會自動顯示</div>';
+      $('trackTop').innerHTML = '<span style="color:var(--dim)">—</span>';
+      $('trackRecent').innerHTML = '<div class="r-item mini" style="color:var(--dim)">尚無記錄</div>';
+      $('trackStats').innerHTML = '';
+      return;
+    }
+    // ── 統計卡片 ──
+    const cards = [
+      { label:'累計開啟', val: fmtNum(d.total), sub:'tracking.jsonl', color:'var(--blue)' },
+      { label:'今日開啟', val: fmtNum(d.today), sub:'香港時間今天', color:'var(--ok)' },
+      { label:'近 7 日', val: fmtNum(d.week), sub:'過去一週', color:'var(--warn)' },
+      { label:'平均停留', val: fmtDur(d.avg_duration), sub:'每次開啟', color:'var(--purple)' },
+    ];
+    $('trackCards').innerHTML = cards.map(c => `
+      <div class="card"><div class="label">${c.label}</div>
+      <div class="val" style="color:${c.color}">${c.val}</div>
+      <div class="sub">${c.sub}</div></div>`).join('');
+
+    // ── 裝置 / 地區 小統計 ──
+    const devTags = (d.top_devices || []).map(x =>
+      `<span class="ts-tag">${esc(x.device)} <b>${x.count}</b></span>`).join('');
+    const regTags = (d.top_regions || []).map(x =>
+      `<span class="ts-tag">${esc(x.region)} <b>${x.count}</b></span>`).join('');
+    $('trackStats').innerHTML = `
+      <div class="ts-block"><div class="ts-title">📱 裝置分佈</div>
+        <div class="ts-tags">${devTags || '<span class="mini" style="color:var(--dim)">—</span>'}</div></div>
+      <div class="ts-block"><div class="ts-title">📍 地區分佈</div>
+        <div class="ts-tags">${regTags || '<span class="mini" style="color:var(--dim)">—</span>'}</div></div>`;
+
+    // ── 最多被打開的商家（還原 URL 編碼）──
+    const max = d.top_pages[0] ? d.top_pages[0].count : 1;
+    $('trackTop').innerHTML = d.top_pages.map((p, i) => {
+      const pct = Math.round(p.count / max * 100);
+      const name = dec(p.page);
+      return `<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px">
+        <span style="width:20px; color:var(--dim)">${i+1}</span>
+        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${esc(name)}">${esc(name)}</span>
+        <span style="color:var(--blue); font-weight:600">${p.count}</span>
+        <div style="width:70px; height:6px; background:rgba(255,255,255,.08); border-radius:3px; overflow:hidden">
+          <div style="width:${pct}%; height:100%; background:var(--blue); border-radius:3px"></div>
+        </div></div>`;
+    }).join('');
+
+    // ── 最近開啟（卡片式，手機自動換行）──
+    $('trackRecent').innerHTML = d.recent.map(t => {
+      const name = dec(t.page) || dec(String(t.url || '').split('/').pop() || '');
+      const fullUrl = dec(t.url);
+      const src_ = t.referrer ? dec(t.referrer).replace(/^https?:\/\//,'') : '';
+      const dev = t.device ? (t.device === '手機' ? '📱' : t.device === '平板' ? '💻' : '🖥') + ' ' + t.device : '';
+      const dur = t.duration ? '⏱ ' + fmtDur(t.duration) : '';
+      const loc = fmtLoc(t);
+      const ipv = t.ip || '';
+      const isLocal = !ipv || ipv === '127.0.0.1' || ipv === '::1' || ipv.startsWith('192.168.') || ipv.startsWith('10.') || ipv.startsWith('172.16.');
+      const ip = isLocal ? '🏠 本機測試' : '🌐 ' + ipv;
+      const tz = t.tz ? '🕐 ' + t.tz : '';
+      const pills = [dev, dur, loc, ip, tz].filter(Boolean).map(x =>
+        `<span class="pill">${x}</span>`).join('');
+      return `<div class="r-item">
+        <div class="r-top">
+          <span class="r-page">${esc(name)}</span>
+          <span class="r-time">${t.ts ? t.ts.slice(5,16) : ''}</span>
+        </div>
+        ${pills ? '<div class="r-meta">' + pills + '</div>' : ''}
+        ${fullUrl ? '<div class="r-url">🔗 ' + esc(fullUrl) + '</div>' : ''}
+        ${src_ ? '<div class="r-src mini">⬅ 來自 ' + esc(src_) + '</div>' : ''}
+      </div>`;
+    }).join('');
+  } catch (e) {
+    console.warn('追蹤載入失敗', e);
+    $('trackCards').innerHTML = '<div class="card" style="grid-column:1/-1; color:var(--bad)">⚠️ 追蹤資料載入失敗（後端可能未啟動）</div>';
+  }
+}
+
+// ── 追蹤輔助函數 ──
+function dec(s) { try { return decodeURIComponent(s || ''); } catch(e) { return s || ''; } }
+function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtDur(sec) {
+  sec = parseInt(sec) || 0;
+  if (sec <= 0) return '—';
+  if (sec < 60) return sec + '秒';
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m < 60) return s ? m + '分' + s + '秒' : m + '分';
+  const h = Math.floor(m / 60); return h + '時' + (m % 60) + '分';
+}
+const FLAGS = {'香港':'🇭🇰','中国':'🇨🇳','台湾':'🇹🇼','澳门':'🇲🇴','日本':'🇯🇵','韩国':'🇰🇷','美国':'🇺🇸','英国':'🇬🇧','加拿大':'🇨🇦','澳大利亚':'🇦🇺','新加坡':'🇸🇬','马来西亚':'🇲🇾','泰国':'🇹🇭','越南':'🇻🇳','菲律宾':'🇵🇭','印尼':'🇮🇩','印度':'🇮🇳','德国':'🇩🇪','法国':'🇫🇷','意大利':'🇮🇹','荷兰':'🇳🇱','西班牙':'🇪🇸','葡萄牙':'🇵🇹','瑞士':'🇨🇭','瑞典':'🇸🇪','挪威':'🇳🇴','丹麦':'🇩🇰','芬兰':'🇫🇮','新西兰':'🇳🇿','俄罗斯':'🇷🇺','巴西':'🇧🇷','墨西哥':'🇲🇽','阿联酋':'🇦🇪','土耳其':'🇹🇷','以色列':'🇮🇱','南非':'🇿🇦'};
+function fmtLoc(t) {
+  const parts = [];
+  if (t.city) parts.push(t.city);
+  if (t.region) parts.push(t.region);
+  if (t.country) parts.push((FLAGS[t.country] || '') + t.country);
+  return parts.length ? '📍 ' + parts.join(' ') : '';
+}
+
+async function triggerRun(dryRun, waMode, emailMode) {
+  const limit = parseInt($('limit').value) || 10;
+  try {
+    const r = await api('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: dryRun, wa_mode: waMode, email_mode: emailMode, limit })
+    });
+    toast(r.started
+      ? (dryRun ? '🔍 預覽任務已啟動' : '▶ 執行任務已啟動')
+      : '❌ 啟動失敗', !r.started);
+    setTimeout(() => { loadStatus(); loadLeads(); loadLog(); }, 2500);
+    setTimeout(() => { loadStatus(); loadLeads(); loadLog(); }, 8000);
+  } catch (e) {
+    toast('❌ 請求失敗: ' + e.message, true);
+  }
+}
+
+$('tabPending').onclick = () => { leadTab = 'pending'; $('pendingCount').style.display = ''; loadLeads(); };
+$('tabAll').onclick = () => { leadTab = 'all'; $('pendingCount').style.display = 'none'; loadLeads(); };
+$('btnDryRun').onclick = () => triggerRun(true, $('waMode').value, $('emailMode').value);
+$('btnRun').onclick = () => triggerRun(false, $('waMode').value, $('emailMode').value);
+$('btnSend').onclick = () => triggerRun(false, 'auto', 'auto');
+
+// 自動刷新
+loadStatus(); loadLeads(); loadLog(); loadTracking();
+setInterval(loadStatus, 15000);
+setInterval(loadLeads, 30000);
+setInterval(loadTracking, 20000);
+</script>
+</body>
+</html>

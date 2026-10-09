@@ -34,27 +34,35 @@ def main():
         wal_trim(apply_now)
 
     if do_profiles:
-        all_profiles = "--all-profiles" in sys.argv
+        # 記憶分庫（2026-10-03 by 凜）：profile 已按對話者(uid)分庫，
+        # 改為刷新「已存在分庫檔」的每個對話者；不再依賴 soul/user.md 的舊動態標記。
         n = 0
         skipped = 0
+        refs = 0
+        users_root = os.path.join(MOK, "user")
         for ag in M._all_agent_names():
             p = os.path.join(MOK, "agent", ag, "soul", "user.md")
             if not os.path.exists(p):
                 continue
-            if not all_profiles:
-                try:
-                    if "MOK_PROFILE_DYNAMIC_BEGIN" not in io.open(p, encoding="utf-8").read():
-                        skipped += 1
-                        continue
-                except Exception:
-                    skipped += 1
-                    continue
+            uids = []
             try:
-                M.update_user_profile(ag, load_agent_config(ag), dry_run=not apply_now)
-                n += 1
-            except Exception as e:
-                print(f"[mem] profile {ag} ERR {e}")
-        print(f"[mem] profiles refreshed: {n} skipped(not-profile-ized): {skipped} apply={apply_now}")
+                if os.path.isdir(users_root):
+                    for uid in sorted(os.listdir(users_root)):
+                        if os.path.exists(os.path.join(users_root, uid, "profile", ag + ".md")):
+                            uids.append(uid)
+            except Exception:
+                pass
+            if not uids:
+                skipped += 1
+                continue
+            for uid in uids:
+                try:
+                    M.update_user_profile(ag, uid=uid, agent_config=load_agent_config(ag), dry_run=not apply_now)
+                    n += 1
+                    refs += 1
+                except Exception as e:
+                    print(f"[mem] profile {ag}/{uid} ERR {e}")
+        print(f"[mem] profiles refreshed: {n} skipped(no per-user profile): {skipped} apply={apply_now}")
 
 
 def wal_trim(apply_now):

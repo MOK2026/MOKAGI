@@ -396,6 +396,7 @@ async function deleteBackup(name) {
 })();
 
 var rsBackupName = "";
+var rsNote = "";
 function rsToggleAll(on) {
   var boxes = document.querySelectorAll(".rs-check");
   for (var i = 0; i < boxes.length; i++) { boxes[i].checked = on; }
@@ -403,37 +404,56 @@ function rsToggleAll(on) {
 function rsModeChanged() {
   var only = document.querySelector("input[name=rsMode]:checked").value === "only";
   var el = document.getElementById("rsMsg");
-  if (el) el.textContent = only ? "只還原：勾選的項目會被覆蓋，其餘保持不變。" : "還原全部：勾選的項目將被排除，不會被覆蓋。";
+  if (el) el.textContent = (only ? "只還原：勾選的項目會被覆蓋，其餘保持不變。" : "還原全部：勾選的項目將被排除，不會被覆蓋。") + (rsNote ? "  " + rsNote : "");
+}
+function rsEsc(x) {
+  return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function renderRestoreItems(items, note) {
+  rsNote = note || "";
+  var list = document.getElementById("rsList");
+  if (!items || items.length === 0) { list.innerHTML = '<p class="muted">沒有可選項目</p>'; rsModeChanged(); return; }
+  var html = "";
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    html += '<label class="bk-item"><input type="checkbox" class="rs-check" value="' + rsEsc(it.name) + '"><span class="nm">' + (it.is_dir ? "📁 " : "📄 ") + rsEsc(it.name) + '</span><span class="sz">' + rsEsc(it.size || "") + '</span></label>';
+  }
+  list.innerHTML = html;
+  rsModeChanged();
 }
 function openRestoreDialog(name) {
   rsBackupName = name;
+  rsNote = "";
   document.getElementById("rsName").textContent = name;
   var list = document.getElementById("rsList");
   document.getElementById("rsMsg").textContent = "";
   document.querySelector("input[name=rsMode][value=only]").checked = true;
   rsModeChanged();
   document.getElementById("rsDialog").style.display = "flex";
-  if (allItems && allItems.length) {
-    var h0 = "";
-    for (var j = 0; j < allItems.length; j++) {
-      var jt = allItems[j];
-      h0 += `<label class="bk-item"><input type="checkbox" class="rs-check" value="${jt.name}"><span class="nm">${jt.is_dir ? "📁 " : "📄 "}${jt.name}</span><span class="sz">${jt.size}</span></label>`;
+  list.innerHTML = '<p class="muted">讀取備份內容…</p>';
+  fetch("/api/backup/contents/" + encodeURIComponent(name)).then(function(r){ return r.json(); }).then(function(data){
+    if (!data || !data.success || !data.items || data.items.length === 0) {
+      var em = (data && data.error) ? data.error : "備份內沒有可還原的頂層項目";
+      renderRestoreItems(allItems || [], "⚠️ 讀不到備份內容（" + em + "），改列目前系統項目。");
+      return;
     }
-    list.innerHTML = h0;
-    return;
-  }
-  list.innerHTML = '<p class="muted">載入中…</p>';
-  fetch("/api/backup/items").then(function(r){ return r.json(); }).then(function(data){
-    var items = data.items || [];
-    if (items.length === 0) { list.innerHTML = '<p class="muted">沒有可選項目</p>'; return; }
-    var html = "";
-    for (var i = 0; i < items.length; i++) {
-      var it = items[i];
-      html += `<label class="bk-item"><input type="checkbox" class="rs-check" value="${it.name}"><span class="nm">${it.is_dir ? "📁 " : "📄 "}${it.name}</span><span class="sz">${it.size}</span></label>`;
+    var items = [];
+    for (var k = 0; k < data.items.length; k++) {
+      var nm = data.items[k];
+      var isDir = true;
+      if (allItems && allItems.length) {
+        for (var q = 0; q < allItems.length; q++) { if (allItems[q].name === nm) { isDir = !!allItems[q].is_dir; break; } }
+      }
+      items.push({ name: nm, is_dir: isDir, size: "" });
     }
-    list.innerHTML = html;
-  }).catch(function(e){ list.innerHTML = '<p class="muted">載入失敗: ' + e.message + '</p>'; });
+    var note = "只列出此備份內實際存在的頂層項目（共 " + data.items.length + " 項）";
+    if (data.has_pgdata) { note += "；含 pgdata 資料庫，還原時會自動停／啟 postgres 容器"; }
+    renderRestoreItems(items, note);
+  }).catch(function(e){
+    renderRestoreItems(allItems || [], "⚠️ 讀取備份內容失敗（" + e.message + "），改列目前系統項目。");
+  });
 }
+
 function closeRestoreDialog() {
   document.getElementById("rsDialog").style.display = "none";
 }

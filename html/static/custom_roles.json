@@ -158,5 +158,13 @@
     "specialty": "四柱八字排盤 · 命理典籍分析（窮通寶典/三命通會/滴天髓/淵海子平）· 大運流年",
     "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/bazi/SKILL.md",
     "id": "custom_bazi"
+  },
+  {
+    "name": "吸睛設計師（Attention Designer）",
+    "emoji": "🎯",
+    "division": "🎭 自訂角色",
+    "specialty": "縮圖封面 · 廣告素材 · 點擊率（CTR）優化 · 圖文合體",
+    "raw_url": "/home/ubuntu/.mok/skill/nuwa/角色/吸睛設計師-framework/SKILL.md",
+    "id": "custom_attention_designer"
   }
 ]

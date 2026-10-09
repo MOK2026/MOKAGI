@@ -114,8 +114,25 @@ PLUGIN_INFO = {
 }
 
 
+def _read_agent_token(path):
+    """從設定檔讀取 MOK_TG_TOKEN；非檔案或讀不到回空字串。"""
+    try:
+        if not os.path.isfile(path):
+            return ""
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("MOK_TG_TOKEN="):
+                    val = line.split("=", 1)[1].strip()
+                    if val:
+                        return val
+    except Exception:
+        pass
+    return ""
+
+
 def _get_bot_token(agent_config=None):
-    """從多個來源獲取 Telegram Bot Token"""
+    """從多個來源獲取 Telegram Bot Token（不綁定單一設定檔名）"""
     # 1. agent_config 字典
     if agent_config and isinstance(agent_config, dict):
         token = agent_config.get("MOK_TG_TOKEN", "")
@@ -125,16 +142,29 @@ def _get_bot_token(agent_config=None):
     token = os.environ.get("MOK_TG_TOKEN", "")
     if token:
         return token
-    # 3. 嘗試讀取配置文件
+    # 3. 讀取設定檔：優先用當前 agent 自己的（~/.<MOKAGI_HOME>/.<agent_name>）、
+    #    再退回 .default，最後掃描兜底；不再寫死單一檔名。
     try:
         mok_home = os.environ.get("MOKAGI_HOME", "MokAgi")
-        config_path = os.path.expanduser(f"~/.{mok_home}/.稚")
-        if os.path.exists(config_path):
-            with open(config_path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("MOK_TG_TOKEN="):
-                        return line.split("=", 1)[1].strip()
+        base = os.path.expanduser(f"~/.{mok_home}")
+        agent_name = ""
+        if isinstance(agent_config, dict):
+            agent_name = agent_config.get("MOK_AGENT_NAME", "") or ""
+        cands = []
+        if agent_name:
+            cands.append(os.path.join(base, f".{agent_name}"))
+        cands.append(os.path.join(base, ".default"))
+        for path in cands:
+            tok = _read_agent_token(path)
+            if tok:
+                return tok
+        if os.path.isdir(base):
+            for name in sorted(os.listdir(base)):
+                if not name.startswith("."):
+                    continue
+                tok = _read_agent_token(os.path.join(base, name))
+                if tok:
+                    return tok
     except Exception:
         pass
     return ""
@@ -147,6 +177,20 @@ def _is_valid_tg_chat_id(cid):
     if not s:
         return False
     return s.lstrip('-').isdigit()
+
+
+def _get_platform(explicit=None):
+    """當前來源平台：explicit > 協程 contextvar > 環境變數 MOK_PLATFORM > 空字串。"""
+    if explicit:
+        return str(explicit).strip().lower()
+    try:
+        from context import get_platform as _gp
+        p = _gp()
+        if p:
+            return str(p).strip().lower()
+    except Exception:
+        pass
+    return (os.environ.get("MOK_PLATFORM") or "").strip().lower()
 
 
 def _get_chat_id(args_dict, chat_id, agent_config=None):
@@ -203,7 +247,7 @@ def _publish_web_audio(mp3_path):
         return None
 
 
-async def handle_tts(args, chat_id="web", agent_config=None):
+async def handle_tts(args, chat_id="web", agent_config=None, platform=None):
     """
     處理 /tts 命令或 LLM 工具調用。
     args 可以是:
@@ -259,12 +303,14 @@ async def handle_tts(args, chat_id="web", agent_config=None):
     voice = _resolve_voice(voice_name)
 
     # --- 決定發送方式：Telegram 或 Web（回傳語音 URL）---
+    # 平台旗標：web 進來的一律走 Web 模式（會員帳號是數字，不可誤判為 TG chat_id）
+    platform = _get_platform(platform)
     target_chat_id = _get_chat_id(
         args if isinstance(args, dict) else {},
         chat_id,
         agent_config
     )
-    if target_chat_id:
+    if target_chat_id and platform != "web":
         # Telegram 模式：需要 Bot Token
         bot_token = _get_bot_token(agent_config)
         if not bot_token:

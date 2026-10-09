@@ -27,6 +27,35 @@ import logging
 import asyncio
 from typing import Callable, Optional, Dict, Any, Awaitable
 
+
+# ===== L2 重試層（2026-09-29）=====
+try:
+    from retry_layer import (
+        run_with_retry as _l2_run_with_retry,
+        classify as _l2_classify,
+        backoff_delay as _l2_backoff,
+        total_attempts as _l2_total_attempts,
+        write_event as _l2_event,
+        AutofixNeeded as _L2_AutofixNeeded,
+        FatalStop as _L2_FatalStop,
+        TRANSIENT as _L2_TRANSIENT,
+        BUG as _L2_BUG,
+        FATAL as _L2_FATAL,
+    )
+except ImportError:  # 套件式匯入
+    from core.retry_layer import (
+        run_with_retry as _l2_run_with_retry,
+        classify as _l2_classify,
+        backoff_delay as _l2_backoff,
+        total_attempts as _l2_total_attempts,
+        write_event as _l2_event,
+        AutofixNeeded as _L2_AutofixNeeded,
+        FatalStop as _L2_FatalStop,
+        TRANSIENT as _L2_TRANSIENT,
+        BUG as _L2_BUG,
+        FATAL as _L2_FATAL,
+    )
+
 async def _generate_error_report(
     original_prompt: str,
     error_message: str,
@@ -56,7 +85,7 @@ async def _generate_error_report(
                 agent_config=agent_config,
                 stream=False,
                 temperature=0.3,
-                #max_tokens=300
+                disable_thinking=True,  # 2026-10-06 凜：甲案（關推理）
             )
             if isinstance(response, dict):
                 response = response.get("content", "")
@@ -128,19 +157,24 @@ async def retry_with_autofix(
     user_id = autofix_extra_args.get("user_id", "")
 
     # ---------- 第一階段：嘗試執行 ----------
-    for attempt in range(1, max_retries_before_autofix + 1):
-        try:
-            return await _call_handler(action_func, *action_args, **action_kwargs)
-        except Exception as e:
-            last_exception = e
-            logging.warning(
-                f"[retry_with_autofix] 第 {attempt} 次嘗試失敗 ({type(e).__name__}): {str(e)[:100]}"
-            )
-            await asyncio.sleep(0.3)
-            continue
+    # ---- 第一階段：交給 L2 重試層（transient 退避重試；bug 直接 autofix；fatal 不 autofix）----
+    async def _l2_once():
+        return await _call_handler(action_func, *action_args, **action_kwargs)
+
+    _l2_fatal = False
+    try:
+        return await _l2_run_with_retry(_l2_once, label="retry_with_autofix")
+    except _L2_AutofixNeeded as _need:
+        last_exception = _need.exc          # transient 用盡 / bug → 進 autofix
+        logging.warning(f"[retry_with_autofix][L2] 轉 autofix（{_need.kind}，{_need.attempts} 次嘗試）: "
+                        f"{type(_need.exc).__name__}: {str(_need.exc)[:120]}")
+    except _L2_FatalStop as _stop:
+        last_exception = _stop.exc          # fatal → 不進 autofix，直接走錯誤報告
+        _l2_fatal = True
+        logging.error(f"[retry_with_autofix][L2] fatal，不 autofix: {_stop.exc}")
 
     # ---------- 第二階段：呼叫 autofix 修復 ----------
-    if autofix_handler is not None:
+    if autofix_handler is not None and not _l2_fatal:
         # 建構錯誤資訊
         if error_info_builder:
             error_info = error_info_builder(last_exception, action_kwargs)
@@ -221,7 +255,7 @@ async def autofix_run(
     func: Callable[..., Awaitable[Any]],
     func_args: tuple = (),
     func_kwargs: dict = None,
-    max_attempts: int = 5,
+    max_attempts: Optional[int] = None,   # L2：None/0 = 由錯誤分類決定（transient 首次+5 次退避重試）
     autofix_handler: Optional[Callable] = None,
     autofix_extra_args: dict = None,
     autofix_max_retries: Optional[int] = None,
@@ -246,6 +280,11 @@ async def autofix_run(
     if agent_config is None:
         agent_config = {}
 
+    # ---- L2：呼叫方未指定時，嘗試次數由錯誤分類決定 ----
+    _l2_auto = not max_attempts          # True = 完全交給 L2（連 autofix 時機也由分類決定）
+    if _l2_auto:
+        max_attempts = _l2_total_attempts(_L2_TRANSIENT)
+
     # 保留傳入的 autofix_max_retries 但目前不改變主重試邏輯；僅供日誌與未來擴充使用
     max_autofix_retries = None
     if autofix_max_retries is not None:
@@ -256,6 +295,7 @@ async def autofix_run(
 
     attempt = 0
     last_exception = None
+    _l2_used_autofix = False   # L2：本輪是否已把 autofix 額度用掉
 
     while attempt < max_attempts:
         attempt += 1
@@ -264,6 +304,36 @@ async def autofix_run(
         except Exception as e:
             last_exception = e
             logging.error(f"[autofix_run] 第 {attempt} 次執行失敗: {type(e).__name__}: {str(e)}")
+            # ---------------- L2 重試層 ----------------
+            _l2_cls = _l2_classify(e)
+            if _l2_cls.kind == _L2_TRANSIENT:
+                if attempt < max_attempts:
+                    _l2_w = _l2_backoff(_l2_cls.kind, attempt)
+                    logging.warning(f"[autofix_run][L2] transient，退避 {_l2_w:.2f}s 後重試 "
+                                    f"({attempt}/{max_attempts})，不進 autofix")
+                    _l2_event(kind=_l2_cls.kind, event="retry", label="autofix_run",
+                              attempt=attempt, wait=_l2_w, error=e)
+                    await asyncio.sleep(_l2_w)
+                    continue
+                if _l2_auto and not _l2_used_autofix:
+                    _l2_used_autofix = True      # 退避重試全失敗 → 只允許進一次 autofix
+                    max_attempts = attempt + 1
+                    logging.warning("[autofix_run][L2] transient 重試用盡，最後一次轉 autofix")
+                else:
+                    break
+            elif _l2_cls.kind == _L2_FATAL:
+                logging.error(f"[autofix_run][L2] fatal 錯誤，不重試亦不 autofix: {e}")
+                _l2_event(kind=_l2_cls.kind, event="fatal", label="autofix_run",
+                          attempt=attempt, error=e)
+                break
+            else:
+                if _l2_auto:
+                    if _l2_used_autofix:
+                        break
+                    _l2_used_autofix = True  # bug：直接 autofix（只一次）
+                _l2_event(kind=_l2_cls.kind, event="bug", label="autofix_run",
+                          attempt=attempt, error=e)
+            # -------------- L2 結束 --------------
             if attempt == max_attempts:
                 break
 
@@ -357,7 +427,7 @@ async def autofix_run(
                         agent_config=agent_config,
                         stream=False,
                         temperature=0.3,
-                        # max_tokens=2000
+                        disable_thinking=True,  # 2026-10-06 凜：甲案（關推理）
                     )
                     if isinstance(llm_response, dict):
                         response_text = llm_response.get("content", "")
@@ -473,6 +543,7 @@ async def generate_fix(
             stream=False,
             temperature=0.2,
             num_predict=1500,
+            disable_thinking=True,
             agent_config=agent_config
         )
         # 處理字典類型的回應

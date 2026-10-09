@@ -4,126 +4,162 @@
     "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n先讀取現有檔案，了解結構。完整讀取 index.html，及 html 目錄結構：需要完整讀取 index.html 和相關 JS 檔案：內容被截斷了，分段讀取：現在看 main.js 了解對話框渲染邏輯：查看現有工具（搜尋）的實作結構：",
     "agent": "🤖 · indexPage .mok/html/工程師",
     "role": "assistant",
-    "timestamp": 1786502480.443
+    "timestamp": 1786502480.443,
+    "id": "bbcbc9e3f7d545f6b38d018db10377e2",
+    "user_id": "admin"
   },
   {
     "conv_id": "24719",
     "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n讓我同時看看本地檔案和遠端網頁的實際內容，來找出問題。明顯差異！本地 971 行豐富內容，遠端只抓到一句。讓我直接看伺服器返回的原始 HTML，確認是提取問題還是渲染問題。curl 沒輸出，換個方式試：用 Python 來抓原始回應：讓我",
     "agent": "🤮 · 稚 修bug侍女",
     "role": "assistant",
-    "timestamp": 1786502566.383
+    "timestamp": 1786502566.383,
+    "id": "b34b1867a3d7407d9ca1b502f4cc16ed",
+    "user_id": "admin"
   },
   {
     "conv_id": "24837",
     "snippet": "💭 思考過程（點擊展開）\n🏗️ 靜 思考中...\n使用者用粵語/中文混雜的語言告訴我，`.mok/html/index.html` 這個 HTML 檔案右側“卓面”（桌面）顯示的是“斷線”，而不是主機內容。他們希望我修復這個問題。\n\n`.mok/html/webTools/novnc*` 中已經",
     "agent": "🏗️ · 靜 後端架構師",
     "role": "assistant",
-    "timestamp": 1786569640.003
+    "timestamp": 1786569640.003,
+    "id": "e1a2521575ae40f5b7ef4c79ac2a4a3c",
+    "user_id": "admin"
   },
   {
     "conv_id": "25001",
     "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n\ntotal 76\ndrwxrwxrwx 9 ubuntu ubuntu 4096 Aug 13 14:56 .\ndrwx------ 16 1001 1001 4096 Aug 13 14:05 ..\ndrwxrwxrwx 2 ubun",
     "agent": "🤖 · indexPage .mok/html/工程師",
     "role": "assistant",
-    "timestamp": 1786642011.511
+    "timestamp": 1786642011.511,
+    "id": "702f5da9b7cf4b7c833650676dc20f25",
+    "user_id": "admin"
   },
   {
     "conv_id": "24993",
     "snippet": ".mok/core/mokagi.py\n的設計是否錯了\n我是想用\n\n\n.mok/MOKAGI.sh\n安裝到主機\n\n.mok/frontends/mok_web.py\n.mok/frontends/mok_tg.py（這個是多用戶公開用）\n.mok/frontends/mok_ws.py（這個是多用戶",
     "agent": "🤖 · mokagi說明 mokagi專家",
     "role": "user",
-    "timestamp": 1786644326.166
+    "timestamp": 1786644326.166,
+    "id": "50d80dc3b26b428cb9f6a812b6559709",
+    "user_id": "admin"
   },
   {
     "conv_id": "25093",
     "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n\n用法: /admin htop <action>\n例：/admin htop action\n\n查看系統負載（top 前5行）。無需參數。\n\n\n用法: /admin htop <action>\n例：/admin htop action\n\n",
     "agent": "🤖 · API平台工程師 API平台工程師",
     "role": "assistant",
-    "timestamp": 1786733072.004
+    "timestamp": 1786733072.004,
+    "id": "0c0a733896f047f4941b397016de70e7",
+    "user_id": "admin"
   },
   {
     "conv_id": "25083",
     "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n\n\n# security-engineer-wang · Work Skill\n\n## Core Skills\n\n- Web 安全审计（SQL注入/XSS/CSRF）\n\n- 代码 Review：鉴权、输入校验、依赖安全\n\n- 安全架构设计",
     "agent": "🌻 · 春 網頁前端",
     "role": "assistant",
-    "timestamp": 1786734686.401
+    "timestamp": 1786734686.401,
+    "id": "e24c16a4367e4ea0947bf4431a390e01",
+    "user_id": "admin"
   },
   {
     "conv_id": "25097",
     "snippet": "💭 思考過程（點擊展開）\n📄 較舊內容（點擊摺疊/展開）\n主人: <引用對話: [ID:25087]> `references/research/` 是甚麼重要必須的東西嗎?\nindexPage: 主人: 建立新Agent\n可否加入這\nhttps://github.com/alchaincyf/",
     "agent": "🤖 · indexPage .mok/html/工程師",
     "role": "assistant",
-    "timestamp": 1786736387.862
+    "timestamp": 1786736387.862,
+    "id": "bb477075c72d4bf49e0c90897e8c435d",
+    "user_id": "admin"
   },
   {
     "conv_id": "25199",
     "snippet": "",
     "agent": "🤖 · 312",
     "role": "assistant",
-    "timestamp": 1786801102.159
+    "timestamp": 1786801102.159,
+    "id": "f4966f4f8e1c4b92819e0f04f0ff6d8b",
+    "user_id": "admin"
   },
   {
     "conv_id": "25201",
     "snippet": "",
     "agent": "🤖 · 312",
     "role": "assistant",
-    "timestamp": 1786801121.4
+    "timestamp": 1786801121.4,
+    "id": "a6749bc249d74f388f33d7762c1158ab",
+    "user_id": "admin"
   },
   {
     "conv_id": "26189",
     "snippet": "",
     "agent": "🤖 · 賺錢王 自動營商程式",
     "role": "assistant",
-    "timestamp": 1787511815.651
+    "timestamp": 1787511815.651,
+    "id": "001a862664f644c1a028d84b169d8257",
+    "user_id": "admin"
   },
   {
     "conv_id": "26565",
     "snippet": "",
     "agent": "🎩 · 懂王 談判與權力分析師",
     "role": "assistant",
-    "timestamp": 1787856642.831
+    "timestamp": 1787856642.831,
+    "id": "ed56acbef6774004a2049b272153913e",
+    "user_id": "admin"
   },
   {
     "conv_id": "26541",
     "snippet": "",
     "agent": "🎩 · 懂王 短影音帶貨",
     "role": "assistant",
-    "timestamp": 1788003772.279
+    "timestamp": 1788003772.279,
+    "id": "9477972c437349d0a16a7a894b02fc49",
+    "user_id": "admin"
   },
   {
     "conv_id": "27079",
     "snippet": "",
     "agent": "🤖 · 影片女 影片生成",
     "role": "assistant",
-    "timestamp": 1788017099.204
+    "timestamp": 1788017099.204,
+    "id": "b88829a2b923488e8501cbc56392a200",
+    "user_id": "admin"
   },
   {
     "conv_id": "27093",
     "snippet": "",
     "agent": "🤖 · 影片女 影片生成",
     "role": "assistant",
-    "timestamp": 1788024377.897
+    "timestamp": 1788024377.897,
+    "id": "ccc6f01191e44d898928382a35df62cb",
+    "user_id": "admin"
   },
   {
     "conv_id": "34043",
     "snippet": "",
     "agent": "🤮 · 稚 修bug侍女",
     "role": "assistant",
-    "timestamp": 1788291469.195
+    "timestamp": 1788291469.195,
+    "id": "4d653fcb8a834e0c93becf22832bead0",
+    "user_id": "admin"
   },
   {
     "conv_id": "45447",
     "snippet": "",
     "agent": "🤰 · 泠 生產女",
     "role": "assistant",
-    "timestamp": 1788534085.784
+    "timestamp": 1788534085.784,
+    "id": "56330560ddfd42c58bc34c263bc39d0f",
+    "user_id": "admin"
   },
   {
     "conv_id": "58775",
     "snippet": "",
     "agent": "🤮 · 稚 修bug侍女",
     "role": "assistant",
-    "timestamp": 1788682947.773
+    "timestamp": 1788682947.773,
+    "id": "ed0dcd12c6e04f4abcf04046f2a1eb1c",
+    "user_id": "admin"
   },
   {
     "conv_id": "58261",
@@ -131,7 +167,9 @@
     "agent": "🤮 · 稚 修bug侍女",
     "role": "user",
     "timestamp": 1788684604.551,
-    "title": "vast.ai 喉嚨特寫段"
+    "title": "vast.ai 喉嚨特寫段",
+    "id": "73dd3a0269db40d9823723d6a234582d",
+    "user_id": "admin"
   },
   {
     "conv_id": "55799",
@@ -139,7 +177,9 @@
     "agent": "🤮 · 稚 修bug侍女",
     "role": "user",
     "timestamp": 1788684714.46,
-    "title": ""
+    "title": "",
+    "id": "5b110ed1682845f2a8feead03553b398",
+    "user_id": "admin"
   },
   {
     "conv_id": "64785",
@@ -147,7 +187,9 @@
     "agent": "🤮 · 稚 修bug侍女",
     "role": "assistant",
     "title": "gpuLlm等主人一句「開跑」）",
-    "timestamp": 1788791161.697
+    "timestamp": 1788791161.697,
+    "id": "5cb0c8f180984d7e819e100591ecfbb3",
+    "user_id": "admin"
   },
   {
     "conv_id": "65671",
@@ -155,7 +197,9 @@
     "agent": "🏗️·靜 架構師",
     "role": "assistant",
     "title": "記憶流優化0908",
-    "timestamp": 1788804812.011
+    "timestamp": 1788804812.011,
+    "id": "ed77b61fd8b843a68124cb1068d38c51",
+    "user_id": "admin"
   },
   {
     "conv_id": "65719",
@@ -163,7 +207,9 @@
     "agent": "🏗️ · 靜 後端架構師",
     "role": "assistant",
     "title": "kd快取原理",
-    "timestamp": 1788807760.348
+    "timestamp": 1788807760.348,
+    "id": "aa72554e616d4dc3aa062f0dccc29f47",
+    "user_id": "admin"
   },
   {
     "conv_id": "64029",
@@ -171,7 +217,9 @@
     "agent": "🔒 · 凜 權限女",
     "role": "assistant",
     "title": "演奏音楽芸術中心",
-    "timestamp": 1788812397.443
+    "timestamp": 1788812397.443,
+    "id": "3812a234f50e4560ae238f28aad8c9fe",
+    "user_id": "admin"
   },
   {
     "conv_id": "69559",
@@ -179,7 +227,9 @@
     "agent": "🤮 · 稚 修bug侍女",
     "role": "assistant",
     "title": "`enable_thinking:false`（所有 agent",
-    "timestamp": 1788895817.864
+    "timestamp": 1788895817.864,
+    "id": "cd3f744736eb4754bbabce54329277f0",
+    "user_id": "admin"
   },
   {
     "conv_id": "69601",
@@ -187,7 +237,9 @@
     "agent": "🤮 · 稚 修bug侍女",
     "role": "assistant",
     "title": "要修",
-    "timestamp": 1788896215.196
+    "timestamp": 1788896215.196,
+    "id": "d70a0e705da8422088041da0fad83025",
+    "user_id": "admin"
   },
   {
     "conv_id": "246283",
@@ -195,7 +247,9 @@
     "agent": "🤖 · 影片女 影片生成",
     "role": "assistant",
     "title": "mokagi日常短劇",
-    "timestamp": 1789203234.127
+    "timestamp": 1789203234.127,
+    "id": "10e6d00b2e58409cbdc30634ad6b2f27",
+    "user_id": "admin"
   },
   {
     "conv_id": "252855",
@@ -203,28 +257,36 @@
     "agent": "🤖 · mokagi說明 mokagi專家",
     "role": "assistant",
     "title": "core 這 5 個模組目前**全系統找不到任何引用**，疑似孤兒檔",
-    "timestamp": 1789247731.423
+    "timestamp": 1789247731.423,
+    "id": "cb06c1ed33b2428d8111b81078e20de9",
+    "user_id": "admin"
   },
   {
     "conv_id": "253131",
     "snippet": "",
     "agent": "🤖 · 影片女 影片生成",
     "role": "assistant",
-    "timestamp": 1789506160.323
+    "timestamp": 1789506160.323,
+    "id": "f4772fec847f45dba8ea63a4a0221e5b",
+    "user_id": "admin"
   },
   {
     "conv_id": "253405",
     "snippet": "",
     "agent": "🤖 · 備 備份中心負責",
     "role": "assistant",
-    "timestamp": 1789528695.393
+    "timestamp": 1789528695.393,
+    "id": "67c06648a1ff42c6bd8a0f462c2f4938",
+    "user_id": "admin"
   },
   {
     "conv_id": "253443",
     "snippet": "",
     "agent": "🤖 · mokagi說明 mokagi專家",
     "role": "assistant",
-    "timestamp": 1789545506.358
+    "timestamp": 1789545506.358,
+    "id": "b8233fe312224488a5876b6f38b4c142",
+    "user_id": "admin"
   },
   {
     "conv_id": "253931",
@@ -232,7 +294,9 @@
     "agent": "🤰 · 泠 生產女",
     "role": "assistant",
     "title": "agent互動",
-    "timestamp": 1789876527.388
+    "timestamp": 1789876527.388,
+    "id": "d7b06aa90f2148f69dd02c485eb545ac",
+    "user_id": "admin"
   },
   {
     "conv_id": "254267",
@@ -240,7 +304,9 @@
     "agent": "🤖 · mokagi說明 mokagi專家",
     "role": "assistant",
     "title": "預設 6 輪 LLM 摘要",
-    "timestamp": 1790093522.854
+    "timestamp": 1790093522.854,
+    "id": "90e30be78d1840128896c855738d48c1",
+    "user_id": "admin"
   },
   {
     "conv_id": "254837",
@@ -248,7 +314,9 @@
     "agent": "🤰 · 泠 生產女",
     "role": "assistant",
     "title": "免註冊、免金鑰、社群算力供養的開放式生成 API，可生圖／文／音／影",
-    "timestamp": 1790264189.215
+    "timestamp": 1790264189.215,
+    "id": "73e057f4c45d427fbfcdda16d302e6b3",
+    "user_id": "admin"
   },
   {
     "conv_id": "255215",
@@ -256,6 +324,118 @@
     "agent": "🤰 · 泠 生產女",
     "role": "assistant",
     "title": "mokagi token選擇",
-    "timestamp": 1790379362.467
+    "timestamp": 1790379362.467,
+    "id": "84995e819d3a49b2a403bd36718e8449",
+    "user_id": "admin"
+  },
+  {
+    "conv_id": "255505",
+    "snippet": "",
+    "agent": "🤰 · 泠 生產女",
+    "role": "assistant",
+    "title": "model_list 機制不行",
+    "timestamp": 1790452049.423,
+    "id": "dfa13a101d3741bfb7305f41996463b7",
+    "user_id": "admin"
+  },
+  {
+    "conv_id": "255619",
+    "snippet": "<引用對話: [ID:255617]> 將這生圖做成教學網頁\n\n📋",
+    "agent": "🤖 · 客服 客服",
+    "role": "user",
+    "title": "者幻",
+    "timestamp": 1790510111.788,
+    "id": "d294d58f20854b87aa22509ae4a547ce",
+    "user_id": "admin"
+  },
+  {
+    "conv_id": "255703",
+    "snippet": "",
+    "agent": "🤰 · 泠 生產女",
+    "role": "assistant",
+    "title": "DeepSeek卓面登入",
+    "timestamp": 1790514013.171,
+    "id": "bcb443f9d6ad495db55cb79f50537d5b",
+    "user_id": "admin"
+  },
+  {
+    "conv_id": "255767",
+    "snippet": "",
+    "agent": "🤰 · 泠 生產女",
+    "role": "assistant",
+    "title": "系統自己就是用「背景延遲重啟」這招",
+    "timestamp": 1790536695.827,
+    "id": "11ec82bffdc847e68e561b2378bda13e",
+    "user_id": "admin"
+  },
+  {
+    "id": "f15faf351a084622952a77bef19832e8",
+    "user_id": "a01",
+    "conv_id": "254131",
+    "snippet": "大陸妹",
+    "agent": "👼 · 天使金主 天使投資金主",
+    "role": "user",
+    "title": "大狗",
+    "timestamp": 1790567632.4
+  },
+  {
+    "id": "52ae90e2eac240fbb7acd87937362850",
+    "user_id": "admin",
+    "conv_id": "256055",
+    "snippet": "",
+    "agent": "🤮 · 稚 修bug侍女",
+    "role": "assistant",
+    "title": "index.html 重複尾句",
+    "timestamp": 1790696859.229
+  },
+  {
+    "id": "96960b4f7937452e920cef8a49abc6e3",
+    "user_id": "a02",
+    "conv_id": "256143",
+    "snippet": "",
+    "agent": "🤖 · a01測",
+    "role": "assistant",
+    "title": "大陀地",
+    "timestamp": 1790741270.597
+  },
+  {
+    "id": "103e1114d5d04ec69b0eefd3d92669c5",
+    "user_id": "a02",
+    "conv_id": "256105",
+    "snippet": "",
+    "agent": "👼 · 天使金主 天使投資金主",
+    "role": "assistant",
+    "title": "",
+    "timestamp": 1790777534.652
+  },
+  {
+    "id": "b9ead014b5594896b18ca42d5f8376fc",
+    "user_id": "a01",
+    "conv_id": "256047",
+    "snippet": "",
+    "agent": "👼 · 天使金主 天使投資金主",
+    "role": "assistant",
+    "title": "",
+    "timestamp": 1790777547.219
+  },
+  {
+    "id": "5c95fbbe90654c229216d34394ab08f8",
+    "user_id": "admin",
+    "conv_id": "256915",
+    "snippet": "",
+    "agent": "🤖 · 支付女 金流接駁",
+    "role": "assistant",
+    "title": "金流開始",
+    "timestamp": 1791024300.47
+  },
+  {
+    "id": "a4c3e2b7ce984a6cb55fb837daf7489d",
+    "user_id": "admin",
+    "conv_id": "258865",
+    "snippet": "",
+    "agent": "🐶 · 汐 cpu機",
+    "role": "assistant",
+    "title": "cpu機費用",
+    "timestamp": 1791466356.404
   }
 ]

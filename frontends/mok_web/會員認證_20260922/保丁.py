@@ -563,6 +563,10 @@ def member_login_v2():
             audit(username, 'login_blocked', 'too many failures')
             return _login_page('嘗試次數過多，請 15 分鐘後再試')
         user = get_user(username)
+        if user and user.get('disabled'):
+            audit(username, 'login_blocked', 'disabled')
+            session.pop('member_user', None)
+            return _login_page('此帳號已被停用，請聯絡管理員')
         ok, need_up = verify_pw(pw, user.get('password_hash') if user else None)
         if not ok:
             record_fail(username)
@@ -857,7 +861,13 @@ def install(app):
         if name in app.view_functions:
             continue
         app.add_url_rule(path, name, fn, methods=methods)
-    print('✅ 會員認證P0 已載入：bcrypt + TOTP + TG OTP（/login 已升級：%s）' % (','.join(swapped) or '無'))
+    if not swapped:
+        # ★ 2026-10-01 凜：換裝失敗會靜默退回「只認舊式」原版登入，最危險，必須大聲報錯。
+        print('!!! 會員認證P0 嚴重警告：找不到 /login 端點，登入未被升級！')
+        print('!!! 系統將退回「只認舊式 sha256」的原版登入，可能造成密碼驗證不一致、失敗無紀錄。')
+        print('!!! 請立即檢查 mok_web 路由載入順序（會員系統補丁是否先於本補丁載入）。')
+    else:
+        print('✅ 會員認證P0 已載入：bcrypt + TOTP + TG OTP（/login 已升級：%s）' % ','.join(swapped))
     return True
 
 

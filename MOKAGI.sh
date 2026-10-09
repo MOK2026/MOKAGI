@@ -8,7 +8,7 @@
 
 
 
-set -o pipefail
+set -o pipefail ; export DISPLAY=:1  # 泠 2026-10-01 修復 GUI 工具(Missing X server)
 update_date="202608260224_我覺得可以版"
 MOKAGIName="mok"
 PROJECT_DIR="${HOME}/.${MOKAGIName}"
@@ -297,7 +297,7 @@ pm2 start "${PROJECT_DIR}/core/launcher.py" \
     --name "mok_agi" \
     --interpreter python3 \
     --cwd "${PROJECT_DIR}" \
-    --log-date-format "YYYY-MM-DD HH:MM:SS"
+    --log-date-format "YYYY-MM-DD HH:mm:ss"
 
 # launcher 統一管理 mok_web 與所有 Agent；只有獨立維修台由另一個 PM2 進程管理。
 pm2 delete mok_web 2>/dev/null || true

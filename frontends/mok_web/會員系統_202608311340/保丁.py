@@ -19,7 +19,7 @@
   - 加方案：INSERT INTO plans ...
 """
 
-import sys, os, sqlite3, time, json, hashlib, secrets, threading
+import sys, os, sqlite3, time, json, hashlib, secrets, threading, hmac
 from functools import wraps
 
 main = sys.modules.get('__main__')          # mok_web 核心模組（被 exec 載入時 __main__ 即 mok_web）
@@ -58,6 +58,37 @@ DEFAULT_PLANS = {
     'pro':  {'agents': ['*'], 'monthly_tokens': 500000, 'desc': '專業版：全部 agent 可用'},
     'vip':  {'agents': ['*'], 'monthly_tokens': 2000000, 'desc': '尊貴版：全部 agent + 高額度'},
 }
+
+# ---------- 統一計費：HK$ 顯示（唯一價格源：core/mok_price.py） ----------
+#   ⚠️ 收費標準只在 core/mok_price.py 定義，本檔不硬編價；讀不到才退回內建預設（HK$68 / 百萬 token）。
+try:
+    from mok_price import price_per_token as _mok_price_per_token
+    PRICE_PER_TOKEN_HKD = _mok_price_per_token()
+except Exception:
+    try:
+        from mok_token import price_per_token as _mok_price_per_token
+        PRICE_PER_TOKEN_HKD = _mok_price_per_token()
+    except Exception:
+        PRICE_PER_TOKEN_HKD = 0.000068
+
+
+def _hkd(tokens):
+    """token 數 -> HK$ 顯示字串（算法同「MOKAGI 用量帳單」頁；負數照顯示不夾成 0）
+
+    例：6,655,772 -> 'HK$452.59'；-6,155,772 -> '-HK$418.59'
+    """
+    try:
+        v = float(tokens or 0) * PRICE_PER_TOKEN_HKD
+    except Exception:
+        return u'HK$0.00'
+    sign = u'-' if v < 0 else u''
+    a = abs(v)
+    if a < 0.01:
+        return sign + u'HK$' + format(a, u'.4f')
+    if a < 1:
+        return sign + u'HK$' + format(a, u'.3f')
+    return sign + u'HK$' + format(a, u',.2f')
+
 
 # 訪客模式：False=未登入不能聊天（嚴格多用戶）；True=未登入可用預設額度
 ALLOW_GUEST_CHAT = False
@@ -100,6 +131,45 @@ def _init_db():
             ts REAL NOT NULL
         );
         ''')
+        # ★ 2026-10-07 凜：自動升降級用的持久旗標（vip_eligible）
+        #   只在「新建立此欄」當下由帳本回填一次，之後永不回填 ——
+        #   否則被降級(餘額<=0)的用戶會因舊充值紀錄再被標記，下月回補額度時誤彈回 vip。
+        try:
+            _cols = [r[1] for r in conn.execute('PRAGMA table_info(users)').fetchall()]
+            if 'vip_eligible' not in _cols:
+                conn.execute('ALTER TABLE users ADD COLUMN vip_eligible INTEGER DEFAULT 0')
+                print('[會員系統] users.vip_eligible 已建立')
+                _tbls = [r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+                if 'ledger' in _tbls:
+                    # 回填兩類：① 帳本有成功付款者 ② 現時已是 vip 者（祖父條款，
+                    # 免得上線瞬間把「管理員手動設定的 vip 既有帳號」掃成 pro）。
+                    conn.execute("UPDATE users SET vip_eligible=1 WHERE plan='vip' OR EXISTS ("
+                                 "SELECT 1 FROM ledger l WHERE l.username=users.username "
+                                 "AND l.delta_tokens>0 AND l.reason LIKE 'recharge%')")
+                    print('[會員系統] vip_eligible 回填完成（一次性）')
+        except Exception as _e:
+            print('[會員系統] vip_eligible 遷移失敗: %s' % _e)
+        # 2026-10-07 凜：祖父白名單（member_vip_grandfather）
+        #   名單內帳號一律維持 vip（plan 屬於 {pro,vip}），不受「未付費」「餘額<=0」影響；
+        #   用途＝保護上線前既有／管理員手動授予的 vip，不被自動降級掃走。
+        try:
+            _gtbls = [r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            # 只在「首次建立此表」當下回填一次；之後永不自動回填，
+            # 否則付費戶餘額一旦歸零會被回填成祖父、永遠降不下來。
+            if 'member_vip_grandfather' not in _gtbls:
+                conn.execute('CREATE TABLE member_vip_grandfather ('
+                             "username TEXT PRIMARY KEY, reason TEXT DEFAULT '', "
+                             "added_at REAL, added_by TEXT DEFAULT '凜')")
+                if 'ledger' in _gtbls:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO member_vip_grandfather (username, reason, added_at, added_by) "
+                        "SELECT username, '上線前既有vip且無付費帳本紀錄', ?, '凜' FROM users "
+                        "WHERE plan='vip' AND NOT EXISTS (SELECT 1 FROM ledger l WHERE l.username=users.username "
+                        "AND l.delta_tokens>0 AND l.reason LIKE 'recharge%')", (time.time(),))
+        except Exception as _e:
+            print('[會員系統] 祖父白名單初始化失敗: %s' % _e)
         # 種子方案
         for p, cfg in DEFAULT_PLANS.items():
             conn.execute('INSERT OR IGNORE INTO plans (plan, agents, monthly_tokens, desc) VALUES (?,?,?,?)',
@@ -114,9 +184,77 @@ def _init_db():
 def _month_key():
     return time.strftime('%Y-%m')
 
+def _auth2():
+    """優先取得 P0（會員認證）的 bcrypt 實作；沒有則回 None。"""
+    a2 = getattr(main, 'mok_auth2', None)
+    if a2 and callable(a2.get('hash_pw')):
+        return a2
+    return None
+
+
+def _bcrypt_hash(pw):
+    try:
+        import bcrypt as _b
+        return _b.hashpw(pw.encode('utf-8'), _b.gensalt(rounds=12)).decode()
+    except Exception:
+        return None
+
+
 def _hash_pw(pw):
-    salt = 'mok_member_v1'
-    return hashlib.sha256((salt + pw).encode()).hexdigest()
+    """統一雜湊：優先 bcrypt（與 P0 一致），bcrypt 不可用才退回舊式 sha256。"""
+    a2 = _auth2()
+    if a2 is not None:
+        try:
+            return a2['hash_pw'](pw)
+        except Exception:
+            pass
+    h = _bcrypt_hash(pw)
+    if h:
+        return h
+    return hashlib.sha256(('mok_member_v1' + pw).encode()).hexdigest()
+
+
+def _verify_pw(pw, stored):
+    """驗證密碼，回傳 (是否正確, 是否為舊格式需升級為 bcrypt)。"""
+    a2 = _auth2()
+    if a2 is not None and callable(a2.get('verify_pw')):
+        try:
+            ok, up = a2['verify_pw'](pw, stored)
+            return bool(ok), bool(up)
+        except Exception:
+            pass
+    if not stored:
+        return False, False
+    if stored.startswith('$2'):
+        try:
+            import bcrypt as _b
+            return _b.checkpw(pw.encode('utf-8'), stored.encode()), False
+        except Exception:
+            return False, False
+    if hmac.compare_digest(stored, hashlib.sha256(('mok_member_v1' + pw).encode()).hexdigest()):
+        return True, True
+    return False, False
+
+
+def _audit(username, action, detail=''):
+    """寫入 auth_audit；原版登入原本完全不記，失敗無痕。"""
+    a2 = _auth2()
+    if a2 is not None and callable(a2.get('audit')):
+        try:
+            a2['audit'](username, action, detail)
+            return
+        except Exception:
+            pass
+    try:
+        with _connect() as conn:
+            conn.execute("""CREATE TABLE IF NOT EXISTS auth_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, username TEXT,
+                action TEXT, detail TEXT, ip TEXT)""")
+            conn.execute('INSERT INTO auth_audit (ts, username, action, detail) VALUES (?,?,?,?)',
+                         (time.time(), username, action, str(detail)[:500]))
+            conn.commit()
+    except Exception:
+        pass
 
 def _get_user(username):
     with _connect() as conn:
@@ -129,12 +267,24 @@ def _get_plan(plan):
         return dict(row) if row else None
 
 def _ensure_month(user):
-    """跨月重置 monthly_used"""
+    """跨月重置：monthly_used 歸零，並把 balance_tokens 重設為本月方案額度。
+    ★ indexPage 2026-09-30：原本只重置 monthly_used、balance_tokens 只減不增，
+      使「每月 Token 額度」實際上只發一次，用戶額度會逐月耗盡。"""
     if user.get('month_key') != _month_key():
+        new_bal = user.get('balance_tokens')
+        try:
+            if str(user.get('plan')).lower() not in ('admin', 'root'):
+                q = int((_get_plan(user.get('plan')) or {}).get('monthly_tokens') or 0)
+                if q > 0:
+                    new_bal = q
+        except Exception:
+            new_bal = user.get('balance_tokens')
         with _db_lock, _connect() as conn:
-            conn.execute('UPDATE users SET month_key=?, monthly_used=0 WHERE username=?', (_month_key(), user['username']))
+            conn.execute('UPDATE users SET month_key=?, monthly_used=0, balance_tokens=? WHERE username=?',
+                         (_month_key(), new_bal, user['username']))
         user['month_key'] = _month_key()
         user['monthly_used'] = 0
+        user['balance_tokens'] = new_bal
     return user
 
 def _plan_agents(plan):
@@ -146,12 +296,25 @@ def _plan_agents(plan):
     except Exception:
         return []
 
+def _own_agents(username):
+    """凜 2026-09-30：會員「自己創建」的 agent（agent_owners），不受方案白名單限制。"""
+    if not username:
+        return set()
+    try:
+        with _db_lock, _connect() as conn:
+            rows = conn.execute('SELECT agent FROM agent_owners WHERE owner=?', (str(username),)).fetchall()
+        return set(r['agent'] for r in rows if r['agent'])
+    except Exception:
+        return set()
+
 def _agent_allowed(username, agent_name):
-    """檢查用戶方案是否允許使用該 agent"""
+    """檢查用戶方案是否允許使用該 agent（會員自創的 agent 一律放行）"""
     user = _get_user(username)
     if not user:
         return False, '用戶不存在'
     user = _ensure_month(user)
+    if agent_name and agent_name in _own_agents(username):
+        return True, ''
     agents = _plan_agents(user['plan'])
     if '*' in agents or agent_name in agents:
         return True, ''
@@ -177,6 +340,68 @@ def _deduct_tokens(username, tokens):
         conn.execute('INSERT INTO usage (username, agent, tokens, ts) VALUES (?,?,?,?)',
                      (username, None, tokens, time.time()))
         conn.commit()
+    # ★ 2026-10-07 凜：扣到餘額 <= 0 → 即刻降回 pro（旗標歸零，下月免費額度不會再彈回 vip）
+    sync_plan(username)
+
+# ---------- 自動升降級（唯一真相，2026-10-07 凜） ----------
+#   規則（主人核定）：
+#     vip = 曾成功付款(vip_eligible=1) 且 餘額 > 0
+#     餘額 <= 0 → vip_eligible=0，並把 plan 降回 pro
+#     free / admin / root 一律不動；_ensure_month 的「每月回補方案額度」是正確機制，不改。
+#   為什麼要用持久旗標：_ensure_month 每月會把 balance_tokens 重設為方案額度，
+#   若只靠「餘額>0 且有充值紀錄」，降回 pro 的用戶下月一被回補就會誤彈回 vip，形成迴圈。
+_PAID_PLANS = ('pro', 'vip')
+# 祖父白名單：名單內帳號一律 vip（不受餘額／付費紀錄影響）。
+_GF_EXPR = "EXISTS (SELECT 1 FROM member_vip_grandfather g WHERE g.username=users.username)"
+_PLAN_EXPR = ("CASE WHEN " + _GF_EXPR + " THEN 'vip' "
+              "WHEN vip_eligible=1 AND balance_tokens>0 THEN 'vip' ELSE 'pro' END")
+
+
+def mark_paid(username):
+    """入帳成功 → 標記為付費戶（冪等，只設旗標，等級交由 sync_plan 算）。"""
+    if not username:
+        return
+    try:
+        with _db_lock, _connect() as conn:
+            conn.execute('UPDATE users SET vip_eligible=1 WHERE username=?', (str(username),))
+            conn.commit()
+    except Exception as _e:
+        print('[會員系統] mark_paid 失敗: %s' % _e)
+
+
+def sync_plan(username=None, paid=False):
+    """把 plan 校正到與「旗標 + 餘額」一致；回傳實際被改的筆數。
+    paid=True → 先把該用戶標記為付費戶（金流入帳路徑用）。
+    username=None → 掃全表（cron / 定時兜底用）。
+    只作用於 plan ∈ {pro, vip}；free / admin / root 不碰。"""
+    changed = 0
+    try:
+        with _db_lock, _connect() as conn:
+            if paid and username:
+                conn.execute('UPDATE users SET vip_eligible=1 WHERE username=?', (str(username),))
+            else:
+                _sql = ('UPDATE users SET vip_eligible=0 WHERE balance_tokens<=0 AND plan IN (?,?) '
+                        'AND username NOT IN (SELECT username FROM member_vip_grandfather)')
+                _p = list(_PAID_PLANS)
+                if username:
+                    _sql += ' AND username=?'
+                    _p.append(str(username))
+                conn.execute(_sql, _p)
+            _sql = ('UPDATE users SET plan = ' + _PLAN_EXPR +
+                    ' WHERE plan IN (?,?) AND plan <> ' + _PLAN_EXPR)
+            _p = list(_PAID_PLANS)
+            if username:
+                _sql += ' AND username=?'
+                _p.append(str(username))
+            changed = conn.execute(_sql, _p).rowcount or 0
+            conn.commit()
+    except Exception as _e:
+        print('[會員系統] sync_plan 失敗: %s' % _e)
+        return 0
+    if changed:
+        print('[會員系統] 自動升降級：更新 %d 筆%s' % (changed, ('（%s）' % username) if username else ''))
+    return changed
+
 
 def _sum_tokens(username, after_ts=None):
     """統計 token_usage 表中該用戶的總用量"""
@@ -199,7 +424,8 @@ def _sum_tokens(username, after_ts=None):
 _orig_process_message = _mokagi.process_message
 
 async def _patched_process_message(user_id, text, stream_callback=None, agent_name=None, agent_config=None,
-                                   auto_mode=False, initial_prompt=None, context_files=None):
+                                   auto_mode=False, initial_prompt=None, context_files=None,
+                                   **kwargs):
     """包裝 process_message：登入檢查 → 權限檢查 → 餘額檢查 → 呼叫 → 結算"""
     # 判斷是否網頁 API 請求（有 Flask request context 且路徑是 /api）
     is_web = False
@@ -239,9 +465,10 @@ async def _patched_process_message(user_id, text, stream_callback=None, agent_na
 
     try:
         result = await _orig_process_message(
-            user_id=user_id, text=text, stream_callback=stream_callback,
-            agent_name=agent_name, agent_config=agent_config,
-            auto_mode=auto_mode, initial_prompt=initial_prompt, context_files=context_files)
+        user_id=user_id, text=text, stream_callback=stream_callback,
+        agent_name=agent_name, agent_config=agent_config,
+        auto_mode=auto_mode, initial_prompt=initial_prompt, context_files=context_files,
+        **kwargs)
     finally:
         if is_web and username:
             after = _sum_tokens(username)
@@ -288,14 +515,33 @@ if app is not None and request is not None:
             username = (request.form.get('username') or '').strip()
             pw = request.form.get('password') or ''
             user = _get_user(username)
-            if user and user['password_hash'] == _hash_pw(pw):
+            ok, need_up = (False, False)
+            if user:
+                ok, need_up = _verify_pw(pw, user.get('password_hash'))
+            if ok and user.get('disabled'):
+                session.pop('member_user', None)
+                _audit(username, 'login_blocked', 'disabled')
+                err = '此帳號已被停用，請聯絡管理員'
+            elif ok:
+                if need_up:
+                    try:
+                        new_hash = _hash_pw(pw)
+                        with _db_lock, _connect() as conn:
+                            conn.execute('UPDATE users SET password_hash=? WHERE username=?', (new_hash, username))
+                            conn.commit()
+                        _audit(username, 'pw_upgrade', 'legacy sha256 -> bcrypt')
+                    except Exception:
+                        pass
                 session['member_user'] = username
                 session.permanent = True
                 with _db_lock, _connect() as conn:
                     conn.execute('UPDATE users SET last_login=? WHERE username=?', (time.time(), username))
                     conn.commit()
+                _audit(username, 'login_ok', 'legacy_login')
                 return redirect('/member')
-            err = '帳號或密碼錯誤'
+            else:
+                err = '帳號或密碼錯誤'
+                _audit(username, 'login_fail', 'bad password' if user else 'no such user')
         inner = f"""<p class="sub">登入後即可使用 AI 服務</p>
         <form method="post">
           <label>帳號</label><input name="username" required autocomplete="username">
@@ -312,7 +558,11 @@ if app is not None and request is not None:
             username = (request.form.get('username') or '').strip()
             pw = request.form.get('password') or ''
             pw2 = request.form.get('password2') or ''
-            if len(username) < 2 or not username.isalnum():
+            # 2026-09-27：系統/管理員保留字一律禁止註冊
+            if username.lower() in ('admin', 'root', 'system', 'administrator',
+                                    'mokagi', 'mok', 'sys', 'operator'):
+                err = '此帳號為系統保留，請換一個'
+            elif len(username) < 2 or not username.isalnum():
                 err = '帳號需為 2 個以上英數字'
             elif len(pw) < 6:
                 err = '密碼至少 6 碼'
@@ -342,6 +592,52 @@ if app is not None and request is not None:
         session.pop('member_user', None)
         return member_login()
 
+    _MEMBER_CSS = """
+    <style>
+      :root{--bg:#0f1220;--card:#181d31;--line:#2b3357;--txt:#e9ebf5;--dim:#8b93b5;--acc1:#7aa2ff;--acc2:#c084fc;--warn:#ff6b81;--ok:#34d399}
+      *{box-sizing:border-box}
+      body{margin:0;background:radial-gradient(1100px 560px at 50% -12%,#1c2450 0%,#0f1220 62%);color:var(--txt);font-family:-apple-system,'PingFang TC','Microsoft JhengHei',sans-serif;min-height:100vh}
+      .mc{max-width:100%;padding:18px 18px 28px;display:flex;flex-direction:column;gap:14px}
+      .mc-hero{position:relative;overflow:hidden;border-radius:18px;padding:18px;background:linear-gradient(135deg,#2a2f6e 0%,#3a2a63 52%,#4a2a5e 100%);border:1px solid #3b4377;box-shadow:0 10px 30px rgba(0,0,0,.35);display:flex;align-items:center;gap:14px}
+      .mc-hero:before{content:"";position:absolute;top:-60px;right:-40px;width:220px;height:220px;background:radial-gradient(circle,rgba(192,132,252,.5),transparent 70%);pointer-events:none}
+      .mc-avatar{position:relative;z-index:1;flex:0 0 auto;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--acc1),var(--acc2));display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#0f1220;box-shadow:0 6px 16px rgba(122,162,255,.35)}
+      .mc-who{position:relative;z-index:1;flex:1;min-width:0}
+      .mc-welcome{font-size:12px;color:#cfd4ff;opacity:.85;letter-spacing:.6px}
+      .mc-name{font-size:20px;font-weight:800;margin-top:2px;color:#eaf0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .mc-planbadge{position:relative;z-index:1;font-size:12px;font-weight:800;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.26);color:#fff;white-space:nowrap}
+      .mc-desc{margin:0;font-size:12.5px;line-height:1.7;color:var(--dim);background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+      .mc-bal{border:1px solid var(--line);border-radius:16px;padding:16px;background:linear-gradient(180deg,#1a2038,#151a2c)}
+      .mc-bal-label{font-size:11.5px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase}
+      .mc-bal-num{font-size:30px;font-weight:900;margin:5px 0 14px;color:#8fd0ff;font-variant-numeric:tabular-nums}
+      .mc-bal-num.neg{color:var(--warn)}
+      .mc-bal-hkd{font-size:15px;font-weight:800;margin:-11px 0 14px;color:#8fd0ff;opacity:.92;font-variant-numeric:tabular-nums}
+      .mc-bal-hkd.neg{color:var(--warn);opacity:1}
+      .mc-hkd{font-size:11.5px;font-weight:700;color:#8fd0ff;opacity:.85;margin-left:5px;font-variant-numeric:tabular-nums}
+      .mc-hkd.q{color:var(--dim);opacity:.6}
+      .mc-hkd.neg{color:var(--warn);opacity:1}
+      .mc-usage-top{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--dim);margin-bottom:7px}
+      .mc-usage-top b{color:#c7cdf0;font-variant-numeric:tabular-nums}
+      .mc-bar{height:10px;border-radius:999px;background:#0d1020;border:1px solid var(--line);overflow:hidden}
+      .mc-bar>i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--acc1),var(--acc2))}
+      .mc-bar>i.over{background:linear-gradient(90deg,#ff8a5c,#ff4d6d)}
+      .mc-note{margin-top:9px;font-size:11.5px;line-height:1.5;color:#ffb3c1}
+      .mc-recharge{display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;padding:14px;border-radius:14px;font-size:15px;font-weight:800;color:#241600;background:linear-gradient(90deg,#ffd166,#ff9f1c);box-shadow:0 8px 22px rgba(255,159,28,.28);transition:transform .12s,filter .12s}
+      .mc-recharge:hover{transform:translateY(-1px);filter:brightness(1.05)}
+      .mc-sec-title{font-size:13px;font-weight:700;color:#cfd4ff;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+      .mc-count{color:var(--dim);font-weight:500;font-size:12px}
+      .mc-chips{display:flex;flex-wrap:wrap;gap:7px}
+      .mc-chip{font-size:12px;padding:5px 11px;border-radius:999px;background:#20263f;border:1px solid var(--line);color:#c7cdf0;white-space:nowrap}
+      .mc-chip.all{background:linear-gradient(90deg,rgba(122,162,255,.22),rgba(192,132,252,.22));border-color:#4a5590;color:#e2e7ff;font-weight:700}
+      .mc-foot{display:flex;justify-content:center;padding-top:12px;border-top:1px solid var(--line)}
+      .mc-foot a{color:var(--dim);font-size:13px;text-decoration:none}
+      .mc-foot a:hover{color:#ffb3c1}
+    </style>"""
+
+    def _member_page(inner):
+        return ("<!doctype html><html lang=\"zh-Hant\"><head><meta charset=\"utf-8\">"
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                "<title>會員中心</title>" + _MEMBER_CSS + "</head><body>" + inner + "</body></html>")
+
     @app.route('/member', methods=['GET', 'POST'])
     def member_center():
         username = session.get('member_user')
@@ -349,18 +645,71 @@ if app is not None and request is not None:
             return member_login()
         user = _get_user(username)
         user = _ensure_month(user)
-        plan = _get_plan(user['plan'])
+        if sync_plan(username):        # ★ 2026-10-07 凜：讀取即校正 pro/vip
+            user = _get_user(username) or user
+        plan = _get_plan(user['plan']) or {}
         plan_agents = _plan_agents(user['plan'])
-        agents_str = '全部 agent' if '*' in plan_agents else ('、'.join(plan_agents) or '無')
-        inner = f"""<p class="sub">歡迎回來，{username}</p>
-        <div style="font-size:14px;line-height:2">
-          <div>方案：<b style="color:#c084fc">{user['plan'].upper()}</b>　{plan['desc'] if plan else ''}</div>
-          <div>Token 餘額：<b style="color:#7aa2ff">{user['balance_tokens']:,}</b></div>
-          <div>本月已用：{user['monthly_used']:,} / {plan['monthly_tokens'] if plan else 0:,}</div>
-          <div>可用 agent：{agents_str}</div>
-        </div>
-        <div class="meta"><span><a href="/">← 返回聊天</a></span><a href="/logout">登出</a></div>"""
-        return _page('會員中心', inner)
+        all_agents = ('*' in plan_agents)
+        if all_agents:
+            chips = '<span class="mc-chip all">✨ 全部 Agent</span>'
+            agent_count = '全部'
+        else:
+            chips = ''.join('<span class="mc-chip">' + str(a) + '</span>' for a in plan_agents)
+            if not chips:
+                chips = '<span class="mc-chip">暫無可用 agent</span>'
+            agent_count = len(plan_agents)
+        balance = user.get('balance_tokens') or 0
+        used = user.get('monthly_used') or 0
+        quota = int(plan.get('monthly_tokens') or 0)
+        _unlmt = str(user.get('plan') or '').lower() in ('admin', 'root')   # ★ 2026-10-03 indexPage：admin/root 為無限方案 → 額度顯示 ∞
+        if _unlmt:
+            quota_txt = '∞'; pct = 0
+        else:
+            quota_txt = format(quota, ',')
+            pct = min(100, int(round(used * 100.0 / quota))) if quota else 0
+        neg = balance < 0
+        # ★ 2026-10-07 凜：警示與紅條一律以「Token 餘額為負」為判準，不再看免費月額度
+        over = neg
+        bal_hkd = _hkd(balance)                                   # ★ 2026-10-03 春：Token 餘額的 HK$ 金額（負數照顯示）
+        used_hkd = _hkd(used)                                     # ★ 本月已用的 HK$ 金額
+        quota_hkd = u'' if (_unlmt or not quota) else _hkd(quota)   # ★ 額度的 HK$ 金額（∞ 方案不顯示）
+        if neg:
+            note = '⚠️ Token 餘額為負，請充值或升級方案。'
+        elif quota and pct >= 80:
+            note = '本月用量已達 ' + str(pct) + '%，接近上限。'
+        else:
+            note = ''
+        note_html = ('<div class="mc-note">' + note + '</div>') if note else ''
+        bar_cls = ' class="over"' if over else ''
+        plan_label = str(user.get('plan') or '').upper()
+        initial = (str(username) or '?')[:1].upper()
+        desc_html = ('<p class="mc-desc">' + str(plan.get('desc') or '') + '</p>') if plan.get('desc') else ''
+        inner = (
+            '<div class="mc">'
+            '<div class="mc-hero">'
+            '<div class="mc-avatar">' + initial + '</div>'
+            '<div class="mc-who"><div class="mc-welcome">歡迎回來</div>'
+            '<div class="mc-name">' + str(username) + '</div></div>'
+            '<div class="mc-planbadge">' + plan_label + '</div>'
+            '</div>'
+            + desc_html +
+            '<div class="mc-bal">'
+            '<div class="mc-bal-label">Token 餘額</div>'
+            '<div class="mc-bal-num' + (' neg' if neg else '') + '">' + format(balance, ',') + '</div>'
+            '<div class="mc-bal-hkd' + (' neg' if neg else '') + '">' + bal_hkd + '</div>'
+            '<div class="mc-usage-top"><span>本月已用</span><span><b>' + format(used, ',') + '</b>'
+            + '<span class="mc-hkd">' + used_hkd + '</span> / ' + quota_txt
+            + (('<span class="mc-hkd q">' + quota_hkd + '</span>') if quota_hkd else '') + '</span></div>'
+            '<div class="mc-bar"><i' + bar_cls + ' style="width:' + str(pct) + '%"></i></div>'
+            + note_html +
+            '</div>'
+            '<a class="mc-recharge" href="/recharge">⚡ 立即充值 / 升級方案</a>'
+            '<div class="mc-sec"><div class="mc-sec-title">可用 Agent <span class="mc-count">(' + str(agent_count) + ')</span></div>'
+            '<div class="mc-chips">' + chips + '</div></div>'
+            '<div class="mc-foot"><a href="/logout">登出</a></div>'
+            '</div>'
+        )
+        return _member_page(inner)
 
     @app.route('/api/member/me')
     def api_member_me():
@@ -369,6 +718,8 @@ if app is not None and request is not None:
             return jsonify({'logged_in': False})
         user = _get_user(username)
         user = _ensure_month(user)
+        if sync_plan(username):        # ★ 2026-10-07 凜：讀取即校正 pro/vip
+            user = _get_user(username) or user
         return jsonify({'logged_in': True, 'username': username, 'plan': user['plan'],
                         'balance_tokens': user['balance_tokens'], 'monthly_used': user['monthly_used']})
 
@@ -379,299 +730,9 @@ _init_db()
 
 
 # ============================================================
-# ============ 身分感知注入 Identity Awareness Injection =========
-# ------------------------------------------------------------
-# 目的：讓 LLM 在每次對話都能「知道」對面是誰、什麼會員等級、
-#       餘額與可用範圍，並據此調整「稱呼語氣」與「權限判斷」。
-#
-# 設計（不動核心，純 wrap 疊加）：
-#   注入點 C  process_message   → 決定「當前請求」的身分（存進 ContextVar）
-#   注入點 A  get_system_context → 在 system prompt 末尾追加身分區塊
-#   注入點 B  call_llm          → 每一輪即時刷新身分區塊（餘額、等級變動同步）
-#
-# 開關：環境變數 MOK_IDENTITY_INJECT=0 可整體關閉。
-# 管理員名單：MOK_MEMBER_ADMIN（逗號分隔，預設 admin）。
+# 【已停用】身分感知注入 Identity Awareness Injection（2026-09-27）
+#   原舊身分塊已整段移出，改由唯一真相來源提供：
+#     身分核心_202609250200/保丁.py → admin 判定 = member.db users.is_admin=1
+#     （不再有帳號名白名單、不再有 plan == 'admin' 提權、不再有 MOK_MEMBER_ADMIN fallback）
+#   本檔保留 /login /register /logout /member /api/member/me 與 token 扣費。
 # ============================================================
-
-import contextvars
-
-_IDENTITY_ENABLED = (os.environ.get('MOK_IDENTITY_INJECT', '1').strip().lower()
-                     not in ('0', 'false', 'no', 'off'))
-_IDENTITY_MARK = '【身分感知】'
-_IDENTITY_MAX_CHARS = 1500
-_IDENTITY_ADMIN_USERS = {u.strip() for u in os.environ.get('MOK_MEMBER_ADMIN', 'admin').split(',') if u.strip()}
-
-# 每個請求獨立的當前身分（async、多線程安全）
-_identity_ctx = contextvars.ContextVar('mok_member_identity', default=None)
-
-
-def get_identity():
-    return _identity_ctx.get()
-
-
-def set_identity(username, agent_name=None):
-    return _identity_ctx.set({'username': username, 'agent_name': agent_name})
-
-
-def clear_identity(token=None):
-    try:
-        if token is not None:
-            _identity_ctx.reset(token)
-        else:
-            _identity_ctx.set(None)
-    except Exception:
-        pass
-
-
-# 各等級的稱呼語氣與政策（可自由調整）
-_IDENTITY_PLAN_POLICY = {
-    'free': {'label': '免費會員', 'tone': '親切友善、標準服務',
-             'note': '僅能使用基礎 agent；高階功能與大量額度需升級。',
-             'upsell': '若對方要求超額或高階功能，可提示升級 PRO / VIP。'},
-    'pro': {'label': 'PRO 專業會員', 'tone': '更主動、更詳細、可提供進階協助',
-            'note': '可使用全部 agent，額度較高。', 'upsell': ''},
-    'vip': {'label': 'VIP 尊貴會員', 'tone': '尊榮、貼心、優先且主動',
-            'note': '最高等級與額度，優先處理所有需求。', 'upsell': ''},
-    'admin': {'label': '管理員', 'tone': '直接、精確、可執行系統操作',
-              'note': '擁有最高權限。', 'upsell': ''},
-}
-
-
-def _identity_plan_key(username, plan):
-    if username in _IDENTITY_ADMIN_USERS or plan == 'admin':
-        return 'admin'
-    return plan if plan in _IDENTITY_PLAN_POLICY else 'free'
-
-
-def _collect_identity(username, agent_name=None):
-    """收集某會員的完整身分快照；非會員回傳 None。"""
-    if not username:
-        return None
-    try:
-        user = _get_user(username)
-    except Exception:
-        user = None
-    if not user:
-        return None
-    try:
-        user = _ensure_month(user)
-    except Exception:
-        pass
-    plan = (user.get('plan') or 'free')
-    plan_key = _identity_plan_key(username, plan)
-    try:
-        planrow = _get_plan(plan) or {}
-    except Exception:
-        planrow = {}
-    try:
-        agents = json.loads(planrow.get('agents') or '[]')
-    except Exception:
-        agents = []
-    quota = planrow.get('monthly_tokens') or 0
-    used = user.get('monthly_used') or 0
-    remaining_month = max(0, quota - used) if quota else 0
-    return {
-        'username': username,
-        'plan': plan,
-        'plan_key': plan_key,
-        'plan_label': _IDENTITY_PLAN_POLICY.get(plan_key, {}).get('label', plan),
-        'plan_desc': planrow.get('desc', '') or '',
-        'is_admin': plan_key == 'admin',
-        'is_vip': plan_key == 'vip',
-        'agents': agents,
-        'agents_str': '全部 agent' if '*' in agents else ('、'.join(agents) if agents else '無'),
-        'balance_tokens': user.get('balance_tokens') or 0,
-        'monthly_used': used,
-        'month_quota': quota,
-        'remaining_month': remaining_month,
-        'last_login': user.get('last_login') or 0,
-        'agent_name': agent_name,
-        'ts': time.time(),
-    }
-
-
-def _build_identity_block(ident):
-    """把身分快照變成要注入 system prompt 的文字區塊。"""
-    if not ident:
-        return ''
-
-    def _fmt(n):
-        try:
-            return f"{int(n):,}"
-        except Exception:
-            return str(n)
-
-    pol = _IDENTITY_PLAN_POLICY.get(ident.get('plan_key'), {})
-    desc = ident.get('plan_desc') or ''
-    lines = [
-        _IDENTITY_MARK,
-        '（本區塊由系統自動注入，為當前對話對象的真實身分，請務必據此回應。）',
-        f"- 帳號：{ident.get('username')}",
-        f"- 會員等級：{ident.get('plan')}（{ident.get('plan_label')}）" + (f"｜{desc}" if desc else ''),
-        f"- 身分：{'管理員' if ident.get('is_admin') else ident.get('plan_label')}",
-        f"- 可用範圍：{ident.get('agents_str')}",
-        f"- Token 餘額：{_fmt(ident.get('balance_tokens'))}",
-        f"- 本月已用：{_fmt(ident.get('monthly_used'))} / 額度 {_fmt(ident.get('month_quota'))}（本月剩 {_fmt(ident.get('remaining_month'))}）",
-        f"- 當前 agent：{ident.get('agent_name') or '（預設）'}",
-    ]
-    if pol:
-        if pol.get('tone'):
-            lines.append(f"- 互動語氣：{pol.get('tone')}")
-        if pol.get('note'):
-            lines.append(f"- 權限提示：{pol.get('note')}")
-        if pol.get('upsell'):
-            lines.append(f"- 升級提示：{pol.get('upsell')}")
-    lines.append('遵守：'
-                 '1) 以符合該等級的語氣稱呼對方；'
-                 '2) 不得承諾超出其權限的功能，遇越權請禮貌說明並視情況提示升級；'
-                 '3) 對方詢問方案/額度/身分時，直接引用上述數據，切勿編造。')
-    block = '\n'.join(lines)
-    if len(block) > _IDENTITY_MAX_CHARS:
-        block = block[:_IDENTITY_MAX_CHARS] + '…'
-    return block
-
-
-# ---- 注入點 A：包裝 get_system_context（system prompt 末尾追加身分區塊） ----
-if _IDENTITY_ENABLED and not getattr(_mokagi.get_system_context, '_identity_aware', False):
-    _orig_get_system_context = _mokagi.get_system_context
-
-    def _identity_aware_get_system_context(agent_name, owner, owner_time=0, context_files=None):
-        body = _orig_get_system_context(agent_name, owner, owner_time, context_files=context_files)
-        try:
-            cur = _identity_ctx.get()
-            if cur and cur.get('username'):
-                ident = _collect_identity(cur.get('username'), agent_name=agent_name or cur.get('agent_name'))
-                block = _build_identity_block(ident)
-                if block:
-                    body = (body or '') + '\n\n' + block
-        except Exception:
-            pass
-        return body
-
-    _identity_aware_get_system_context._identity_aware = True
-    _mokagi.get_system_context = _identity_aware_get_system_context
-
-
-# ---- 注入點 B：包裝 call_llm（每一輪即時刷新身分區塊） ----
-if _IDENTITY_ENABLED and not getattr(_mokagi.call_llm, '_identity_aware', False):
-    _orig_call_llm = _mokagi.call_llm
-
-    async def _identity_aware_call_llm(*args, **kwargs):
-        try:
-            cur = _identity_ctx.get()
-            messages = kwargs.get('messages')
-            if messages is None and len(args) >= 6:
-                messages = args[5]
-            if cur and cur.get('username') and messages:
-                ident = _collect_identity(cur.get('username'), agent_name=cur.get('agent_name'))
-                block = _build_identity_block(ident)
-                if block:
-                    for m in messages:
-                        if m.get('role') == 'system' and isinstance(m.get('content'), str):
-                            idx = m['content'].find(_IDENTITY_MARK)
-                            if idx >= 0:
-                                m['content'] = m['content'][:idx].rstrip() + '\n\n' + block
-                            break
-        except Exception:
-            pass
-        return await _orig_call_llm(*args, **kwargs)
-
-    _identity_aware_call_llm._identity_aware = True
-    _mokagi.call_llm = _identity_aware_call_llm
-
-
-# ---- 注入點 C：包裝 process_message（決定當前請求的身分） ----
-if _IDENTITY_ENABLED and not getattr(_mokagi.process_message, '_member_identity_wrapper', False):
-    _member_base_process_message = _mokagi.process_message
-
-    async def _identity_process_message(user_id, text, stream_callback=None, agent_name=None,
-                                        agent_config=None, auto_mode=False, initial_prompt=None,
-                                        context_files=None):
-        token = None
-        username = None
-        try:
-            if session is not None:
-                username = session.get('member_user')
-        except Exception:
-            username = None
-        if not username:
-            try:
-                if _get_user(user_id):
-                    username = user_id
-            except Exception:
-                username = None
-        if username:
-            token = _identity_ctx.set({'username': username, 'agent_name': agent_name})
-        try:
-            return await _member_base_process_message(
-                user_id=user_id, text=text, stream_callback=stream_callback,
-                agent_name=agent_name, agent_config=agent_config, auto_mode=auto_mode,
-                initial_prompt=initial_prompt, context_files=context_files)
-        finally:
-            if token is not None:
-                clear_identity(token)
-
-    _identity_process_message._member_identity_wrapper = True
-    _mokagi.process_message = _identity_process_message
-    if hasattr(main, 'process_message'):
-        main.process_message = _identity_process_message
-
-
-# ---- 驗證/檢視端點 ----
-if app is not None and request is not None:
-    @app.route('/api/member/identity')
-    def member_identity_view():
-        username = None
-        try:
-            username = session.get('member_user')
-        except Exception:
-            username = None
-        if not username:
-            return jsonify({'logged_in': False})
-        ident = _collect_identity(username)
-        return jsonify({'logged_in': True, 'enabled': _IDENTITY_ENABLED,
-                        'mark': _IDENTITY_MARK, 'identity': ident,
-                        'block': _build_identity_block(ident)})
-
-    @app.route('/api/member/identity/selftest')
-    def member_identity_selftest():
-        username = None
-        try:
-            username = session.get('member_user')
-        except Exception:
-            username = None
-        if not username:
-            return jsonify({'ok': False, 'reason': '未登入'}), 401
-        if username not in _IDENTITY_ADMIN_USERS:
-            return jsonify({'ok': False, 'reason': '僅管理員可執行'}), 403
-        checks = {}
-        ident = _collect_identity(username, agent_name='selftest')
-        checks['collect_identity'] = bool(ident)
-        block = _build_identity_block(ident)
-        checks['block_has_mark'] = bool(block and _IDENTITY_MARK in block)
-        checks['get_system_context_patched'] = bool(getattr(_mokagi.get_system_context, '_identity_aware', False))
-        checks['call_llm_patched'] = bool(getattr(_mokagi.call_llm, '_identity_aware', False))
-        checks['process_message_patched'] = bool(getattr(_mokagi.process_message, '_member_identity_wrapper', False))
-        token = set_identity(username, agent_name='selftest')
-        try:
-            body = _mokagi.get_system_context('凜', '用戶', 0)
-            checks['mark_in_system_context'] = _IDENTITY_MARK in (body or '')
-        except Exception as e:
-            checks['mark_in_system_context'] = False
-            checks['error'] = str(e)
-        finally:
-            clear_identity(token)
-        return jsonify({'ok': all(checks.values()), 'enabled': _IDENTITY_ENABLED, 'checks': checks})
-
-
-# ---- 對外暴露給其他補丁使用 ----
-if main is not None:
-    for _n, _o in (('member_collect_identity', _collect_identity),
-                   ('member_build_identity_block', _build_identity_block),
-                   ('member_identity_ctx', _identity_ctx)):
-        try:
-            setattr(main, _n, _o)
-        except Exception:
-            pass
-
-print(f"[會員系統] 身分感知注入已載入 | enabled={_IDENTITY_ENABLED} | mark={_IDENTITY_MARK}")

@@ -5,7 +5,7 @@ mok_web.py
 202608260224_我覺得可以版
 """
 
-import os, sys, fnmatch
+import os, sys, fnmatch, mimetypes; mimetypes.add_type('image/webp', '.webp')
 import secrets
 import re
 import json
@@ -27,6 +27,8 @@ from contextlib import closing
 
 
 os.environ.setdefault("MOKAGI_HOME", "mok")
+# 2026-10-08 indexPage（修法B）：本進程＝網頁前端，宣告平台旗標，供工具層（tts…）分流。
+os.environ["MOK_PLATFORM"] = "web"
 
 
 
@@ -112,6 +114,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cor
 os.environ['AD_MOK_AGENT_NAME'] = 'default'
 import mokagi
 from mokagi import process_message, clear_history, reload_tools, MOKAGI_home
+from global_gate import gated as gate_call, gate_held, gate_stats
 from config import _agent_config_cache, _agent_config
 
 # 導入工具管理（用於獲取工具列表等）
@@ -179,6 +182,18 @@ WEB_BUILD_ID = 'mok-web-sse-fix-20260822-02'
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # 靜態檔不強緩存，靠 ETag/Last-Modified 每次驗證
 app.config['TEMPLATES_AUTO_RELOAD'] = True  # 修改 HTML 模板立即生效，不需重啟
 
+# ===== 暫停補丁（pause_patch）：仿 ChatGPT 暫停/繼續，不改 mokagi.py =====
+try:
+    import sys as _pp_sys, os as _pp_os
+    _pp_dir = _pp_os.path.join(_pp_os.path.dirname(_pp_os.path.dirname(_pp_os.path.abspath(__file__))), 'core', '暫停補丁')
+    if _pp_os.path.isdir(_pp_dir) and _pp_dir not in _pp_sys.path:
+        _pp_sys.path.insert(0, _pp_dir)
+    import pause_patch
+    pause_patch.register_routes(app)
+    print('[pause_patch] 已載入：/api/chat/pause（暫停/繼續生成）')
+except Exception as _pp_e:
+    print('[pause_patch] load failed:', _pp_e)
+
 @app.context_processor
 def inject_asset_version():
     '''模板用：{{ asset_url('api.js') }} 會自動輸出 /static/api.js?v=<檔案mtime>'''
@@ -222,7 +237,7 @@ def static_auto_version(resp):
     '''靜態資源與 HTML 頁面一律設 Cache-Control: no-cache，靠 ETag/Last-Modified 讓瀏覽器每次重新驗證：
     檔案 mtime 沒變 → 304 快取；變了 → 自動拿新版，實現「每次打開都更新」'''
     ct = resp.content_type or ''
-    if ct.startswith(('text/javascript', 'application/javascript', 'text/css', 'text/html')):
+    if not (resp.headers.get('Cache-Control') or '').startswith('public') and ct.startswith(('text/javascript', 'application/javascript', 'text/css', 'text/html')):
         resp.headers['Cache-Control'] = 'no-cache'   # 每次重新驗證（檔案沒變仍走 304，省流量）
     return resp
 
@@ -252,7 +267,8 @@ try:
         _ij_sys.path.insert(0, _ij_dir)
     import interject_patch
     interject_patch.install_call_llm_hook()
-    interject_patch.register_routes(app, is_running_fn=lambda a: (a in _running_agents) or _agent_has_live_session(a))
+    interject_patch.register_routes(app, is_running_fn=lambda a: (a in _running_agents) or _agent_has_live_session(a),
+                                    resolve_tenant_fn=lambda d: resolve_tenant(d))
     print("[interject_patch] 已載入：工作中可補充輸入 /api/chat/interject")
 except Exception as _ij_e:
     print(f"[interject_patch] 載入失敗（不影響主服務）: {_ij_e}")
@@ -289,6 +305,21 @@ def _agent_has_live_session(agent_name):
     except Exception:
         pass
     return False
+
+def _agent_live_tenants(agent_name):
+    """20260929（凜）：回傳目前正在跑該 agent 的 tenant 集合（供側欄 own/others 燈號）。"""
+    _ts = set()
+    if not agent_name:
+        return _ts
+    try:
+        with _sse_lock:
+            for _sid, _ag in _sse_agents.items():
+                if _ag == agent_name and not _sse_done.get(_sid, False):
+                    _ts.add(_sse_users.get(_sid) or "")
+    except Exception:
+        pass
+    return _ts
+
 
 def _schedule_sse_cleanup(session_id, delay_sec=180):
     """延遲清理 SSE session，給前端斷線後續流留出時間。"""
@@ -379,7 +410,8 @@ class FileChangeHandler(FileSystemEventHandler):
         rel_path = os.path.relpath(event.src_path, WATCH_PATH)
         if rel_path.startswith(self.ALLOWED_PREFIXES) and not rel_path.endswith('.tmp'):
             _tree_cache['data'] = None  # 檔案有變動 → 清除文件樹快取
-            self.socketio.emit('file_change', {'path': rel_path})
+            # 2026-09-30：前端沒有任何 socket.on('file_change') 監聽 → 這條廣播純浪費，關掉。
+            # self.socketio.emit('file_change', {'path': rel_path})
 
 # 文件樹 TTL 快取：避免每次請求都重新掃描整個 home（曾造成 2MB JSON / 1.5s+ 延遲）
 _tree_cache = {'data': None, 'ts': 0.0}
@@ -390,7 +422,8 @@ def get_file_tree_cached():
     now = time.time()
     if _tree_cache['data'] is not None and (now - _tree_cache['ts']) < TREE_CACHE_TTL:
         return _tree_cache['data']
-    tree = get_file_tree(WATCH_PATH)
+    # 2026-09-30：一律惰性 —— 根層只回一層，不再遞迴掃到 depth 5（前端展開時逐層要）
+    tree = get_file_tree(WATCH_PATH, 0, one_level=True)
     _tree_cache['data'] = tree
     _tree_cache['ts'] = now
     return tree
@@ -406,7 +439,7 @@ SKIP_DIRS = {
 MAX_TREE_DEPTH = 5
 MAX_TREE_ITEMS = 500
 
-def get_file_tree(path, depth=0):
+def get_file_tree(path, depth=0, one_level=False):
     if depth > MAX_TREE_DEPTH:
         return []
     tree = []
@@ -450,7 +483,7 @@ def get_file_tree(path, depth=0):
         full_path = os.path.join(current_path, item)
         is_dir = os.path.isdir(full_path)
         node = {'name': item, 'path': os.path.relpath(full_path, WATCH_PATH), 'is_dir': is_dir}
-        if is_dir:
+        if is_dir and not one_level:
             node['children'] = get_file_tree(full_path, depth + 1)
         tree.append(node)
     return tree
@@ -497,6 +530,42 @@ def resolve_tenant(data=None):
             if _is_guest_id(_c):
                 return _c
     return None
+
+
+# ---------- 產物落點（權威來源：core/output_router.py） ----------
+# 2026-09-29 凜：把「依身分決定輸出目錄」正式接進前端兩個呼叫點（不再只靠補丁）。
+# 註：mok_web/產物三層落點_* 補丁保留為備援（2026-10-03 方案A改名），其包裝層看到已有 output_dir 就不再覆蓋。
+def resolve_output_ctx(user_id, agent_name=None, job=None):
+    """回傳 (output_dir, anon_sid)：依身分決定本回合產物落點。
+
+    ⚠ 必須在「請求執行緒」呼叫（背景執行緒讀不到 flask.g / cookie）。
+    任何失敗都回 (None, None)，交給 core 自行推導，絕不影響主流程。
+    """
+    sid = None
+    try:
+        from flask import g as _g
+        sid = (getattr(_g, "_anon_sid", None)
+               or getattr(_g, "_anon_new_sid", None) or None)
+    except Exception:
+        sid = None
+    if not sid:
+        try:
+            from flask import request as _rq
+            _cv = _rq.cookies.get("mok_anon") or ""
+            sid = (_cv.split("|", 1)[0] or None)
+        except Exception:
+            sid = None
+    try:
+        import sys as _osys
+        _core = os.path.join(os.path.expanduser(f"~.{MOKAGI_home}"), "core")
+        if _core not in _osys.path:
+            _osys.path.insert(0, _core)
+        from output_router import output_dir_for_request, ensure_dir
+        _path, _role = output_dir_for_request(user_id, agent_name, sid=sid, job=job)
+        ensure_dir(_path)
+        return _path, sid
+    except Exception:
+        return None, None
 
 
 def resolve_tenant_arg():
@@ -582,7 +651,75 @@ def init_db():
         conn.execute('CREATE INDEX IF NOT EXISTS idx_token_workflow ON token_usage (workflow_id)')
         conn.commit()
 
-init_db()
+# ---------- 重工離線化（2026-10-04 稚）：chat_history 寫入改由單一背景寫入器批次落盤 ----------
+# 問題：stream_emit 每個事件都同步 UPDATE 同一個 chat_history.db（全體侍女共用一把 DB 寫鎖），
+#       而且是在事件迴圈裡做 → 多侍女並行時互相排隊、拖慢回合。
+# 作法：事件只把「最新內容」登記進記憶體；背景執行緒每 0.5s 批次寫一次（同 msg_id 去重）；
+#       回合結束(done)強制立即落盤。寫入器若異常 → 自動退回同步直寫（fail-safe，不會丟資料）。
+_db_pending = {}
+_db_dirty = set()
+_db_lock = threading.Lock()
+_db_wake = threading.Event()
+
+
+def _db_write_one_sync(msg_id, content, think_content):
+    try:
+        with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
+            conn.execute("UPDATE chat_history SET content = ?, think_content = ? WHERE id = ?",
+                         (content, think_content, msg_id))
+            conn.commit()
+        return True
+    except Exception as _e:
+        print(f"[db_writer] sync write failed: {_e}")
+        return False
+
+
+def _db_writer_loop():
+    while True:
+        try:
+            _db_wake.wait(timeout=0.5)
+            _db_wake.clear()
+            with _db_lock:
+                ids = list(_db_dirty)
+                _db_dirty.clear()
+                items = [(i, _db_pending.pop(i, None)) for i in ids]
+            items = [(i, v) for i, v in items if v is not None]
+            if not items:
+                continue
+            try:
+                with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
+                    for i, (c, t) in items:
+                        conn.execute("UPDATE chat_history SET content = ?, think_content = ? WHERE id = ?", (c, t, i))
+                    conn.commit()
+            except Exception as _e:
+                print(f"[db_writer] batch flush failed, fallback sync: {_e}")
+                for i, (c, t) in items:
+                    _db_write_one_sync(i, c, t)
+        except Exception as _e:
+            print(f"[db_writer] loop error: {_e}")
+
+
+threading.Thread(target=_db_writer_loop, name="mok-db-writer", daemon=True).start()
+
+
+def enqueue_chat_update(msg_id, content, think_content):
+    """登記最新內容，交由背景寫入器批次落盤（不卡事件迴圈、不與其他侍女搶 DB 寫鎖）。"""
+    if not msg_id:
+        return
+    with _db_lock:
+        _db_pending[msg_id] = (content, think_content)
+        _db_dirty.add(msg_id)
+    _db_wake.set()
+
+
+def flush_chat_update(msg_id):
+    """立即把某 msg_id 的最新內容寫入（回合結束／需要立即可讀時）。"""
+    with _db_lock:
+        v = _db_pending.pop(msg_id, None)
+        _db_dirty.discard(msg_id)
+    if v is not None:
+        _db_write_one_sync(msg_id, v[0], v[1])
+
 
 def _save_rounds_to_db(msg_id, rounds):
     """把輪次結構（思考/工具/回覆）以 JSON 持久化到 chat_history.rounds 欄位"""
@@ -820,6 +957,8 @@ def _start_sse_chat_session(data):
     user_id = resolve_tenant(data)
     if not user_id:
         raise PermissionError('unauthorized: 請先登入會員（/login）才能使用 AI 服務。')
+    # 產物落點（第 1/2/3 層）：在請求執行緒先算好，再帶進背景執行緒
+    _out_dir, _anon_sid = resolve_output_ctx(user_id, agent_name)
     context_files = data.get("context_files", None)
     if not user_msg:
         raise ValueError("empty message")
@@ -876,10 +1015,25 @@ def _start_sse_chat_session(data):
         user_msg_id = None
         agg_rounds = []   # 聚合輪次（鏡像 mokagi accumulated_rounds），供刷新後一鍵重建
 
+        # ===== 無縫接回（2026-10-03 稚）：把本輪「續寫座標」交給補丁持久化 =====
+        # 補丁未載入時 globals().get 取不到 -> 機制自動失效，零副作用。
+        def _resume_note(_ev=None):
+            try:
+                _h = globals().get("mok_resume_hook")
+                if _h:
+                    _h(_ev if isinstance(_ev, dict) else {},
+                       agent=agent_name, session_id=session_id, user_id=user_id,
+                       user_msg=user_msg, user_msg_id=user_msg_id,
+                       assistant_msg_id=assistant_msg_id,
+                       accumulated_reply=accumulated_reply,
+                       accumulated_think=accumulated_think)
+            except Exception:
+                pass
+
+
         def update_assistant_in_db(msg_id, content, think_content):
-            with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-                conn.execute('UPDATE chat_history SET content = ?, think_content = ? WHERE id = ?', (content, think_content, msg_id))
-                conn.commit()
+            # 重工離線化（2026-10-04 稚）：改登記進背景寫入器批次落盤，不在事件迴圈裡同步寫 DB
+            enqueue_chat_update(msg_id, content, think_content)
 
         def _feed_agg(event):
             try:
@@ -937,6 +1091,7 @@ def _start_sse_chat_session(data):
         def stream_emit(event):
             _emit_event(event)
             _feed_agg(event)
+            _resume_note(event)
 
         def _emit_event(event):
             nonlocal accumulated_think, accumulated_reply, assistant_msg_id
@@ -988,6 +1143,7 @@ def _start_sse_chat_session(data):
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
                 update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
+                flush_chat_update(assistant_msg_id)   # 回合結束：強制立即落盤
                 if event.get("rounds"):
                     _save_rounds_to_db(assistant_msg_id, event["rounds"])
                 conv_id = event.get("conv_id")
@@ -1006,11 +1162,18 @@ def _start_sse_chat_session(data):
         except Exception as _e:
             print(f"[SSE] user msg insert failed: {_e}")
 
+        _resume_note({})   # 無縫接回：本輪起點先落一次盤（此刻尚無正文）
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             async def _bg_coro():
                 async def async_stream_cb(event):
+                    # ===== 暫停補丁（pause_patch）：暫停時阻塞此回調，上游因背壓停住（不重送、不重複計費）=====
+                    try:
+                        await pause_patch.wait_if_paused(agent_name)
+                    except Exception:
+                        pass
                     # (B) 治本：偵測到客戶端已斷線 → 丟出中止例外，讓生成迴圈提前結束（連帶取消上游請求）
                     if _sse_disconnected.get(session_id):
                         raise _SSEClientGone()
@@ -1047,7 +1210,7 @@ def _start_sse_chat_session(data):
                 from autofix2 import autofix_run
                 from mokagi import find_tool_handler
                 async def run(agent_config, context_files=None):
-                    await mokagi.process_message(user_id=user_id, text=user_msg, stream_callback=async_stream_cb, agent_name=agent_name, agent_config=agent_config, context_files=context_files)
+                    await gate_call(mokagi.process_message, user_id=user_id, text=user_msg, stream_callback=async_stream_cb, agent_name=agent_name, agent_config=agent_config, context_files=context_files, output_dir=_out_dir, anon_sid=_anon_sid, platform="web")
                 result = await autofix_run(func=run, func_args=(agent_config, context_files), func_kwargs={}, max_attempts=3, autofix_handler=find_tool_handler("admin"), autofix_max_retries=2, original_text=user_msg, stream_callback=async_stream_cb)
                 if result == "__ERROR_REPORTED__":
                     _running_agents.discard(agent_name)
@@ -1074,7 +1237,7 @@ def _start_sse_chat_session(data):
             _schedule_sse_cleanup(session_id, delay_sec=120)
             # ===== 補充輸入（插話補丁）：本輪結束仍有未消費的插話 → 保留待下一輪併入 =====
             try:
-                _ij_left = interject_patch.peek_count(agent_name)
+                _ij_left = interject_patch.peek_count(agent_name, user_id)
                 if _ij_left:
                     print(f"[interject_patch] leftover {_ij_left} kept for {agent_name} (no new conversation)")
             except Exception as _ij_le:
@@ -1085,18 +1248,14 @@ def _start_sse_chat_session(data):
 
 
 def _latest_conv_id(agent, tenant=None):
-    '''取該侍女最近一筆對話的 conv_id。多租戶：一般租戶只看自己；admin 可看全部。'''
+    '''取該侍女最近一筆對話的 conv_id。20260929（凜）：一律比對 tenant，
+    連 admin 亦不再跨租戶，避免「當前對話」指針跳去別人那條而混流。'''
     try:
         with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-            if _can_read_all(tenant):
-                row = conn.execute(
-                    'SELECT conv_id FROM chat_history WHERE agent = ? AND conv_id IS NOT NULL '
-                    'ORDER BY id DESC LIMIT 1', (agent,)).fetchone()
-            else:
-                row = conn.execute(
-                    'SELECT conv_id FROM chat_history WHERE agent = ? AND conv_id IS NOT NULL '
-                    'AND (tenant = ? OR tenant IS NULL) ORDER BY id DESC LIMIT 1',
-                    (agent, tenant)).fetchone()
+            row = conn.execute(
+                'SELECT conv_id FROM chat_history WHERE agent = ? AND conv_id IS NOT NULL '
+                'AND (tenant = ? OR tenant IS NULL) ORDER BY id DESC LIMIT 1',
+                (agent, tenant)).fetchone()
         return row[0] if row else None
     except Exception:
         return None
@@ -1312,8 +1471,7 @@ def api_chat_sse():
                     if heartbeat_count > 120:
                         yield f"data: {json.dumps({'type': 'error', 'content': 'timeout', 'agent': agent_name}, ensure_ascii=False)}\n\n"
                         break
-                    # 🔧 發送 SSE 心跳註解（keep-alive），防止 Cloudflare/Nginx 超時斷線
-                    yield ": heartbeat\n\n"
+                    yield "data: " + json.dumps({"type": "ping"}, ensure_ascii=False) + "\n\n"
         except GeneratorExit:
             pass
         finally:
@@ -1362,7 +1520,12 @@ def api_chat_stream_sse(session_id):
     🔧 支援「刷新後續流」：連接時先重放緩衝區已發生的事件（思考/工具/回答），再繼續實時接收。"""
     with _sse_lock:
         q = _sse_queues.get(session_id)
-    if q is None:
+        _owner = _sse_users.get(session_id)
+    _caller = resolve_tenant_arg()
+    # 多租戶隔離（2026-09-27 凜）：SSE session 只允許「開啟該輪的同一 tenant」續流。
+    #   否則任何人取得 session_id（例如 /api/chat/active 洩漏）就能讀別人的思考/回覆，
+    #   並因共用同一條 queue 把事件吃掉 -> 原發問者（未登入訪客）反而收不到回覆。
+    if q is None or not _caller or _owner != _caller:
         # 🔧 未知/已過期的 session 不再回 404：404 會令前端 EventSource 反覆重連 → 像「不停刷新」。
         #    改為回一個「立即結束」的 SSE 串流，讓前端乾淨收尾（收起工作中動畫）。
         def _expired_stream():
@@ -1398,7 +1561,13 @@ def api_chat_stream_sse(session_id):
             # 🔧 以「絕對游標」sent_abs 追蹤已送出進度：after>0 時直接跳過已由快照重建的部分
             sent_abs = _after if _after <= len(buf) else len(buf)
             for ev in buf[sent_abs:]:
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                # 🔧C（2026-09-29 稚）：重播事件標記 replay=True，前端對重播只「重建」不「增量 append」。
+                try:
+                    _ev = ev.copy() if isinstance(ev, dict) else ev
+                    _ev["replay"] = True
+                except Exception:
+                    _ev = ev
+                yield f"data: {json.dumps(_ev, ensure_ascii=False)}\n\n"
                 sent_abs += 1
                 if ev.get('type') in ('done', 'error'):
                     stream_done = True
@@ -1415,7 +1584,7 @@ def api_chat_stream_sse(session_id):
                     if heartbeat_count > 120:  # 10 分鐘超時（5 秒心跳）
                         yield f"data: {json.dumps({'type': 'error', 'content': 'timeout'}, ensure_ascii=False)}\n\n"
                         break
-                    yield ": heartbeat\n\n"
+                    yield "data: " + json.dumps({"type": "ping"}, ensure_ascii=False) + "\n\n"
                     continue
                 with _sse_lock:
                     buf = list(_sse_buffers.get(session_id, []))
@@ -1456,10 +1625,17 @@ def api_chat_active():
     頁面刷新後前端可調用此 API 得知還有哪個 session 在跑，
     再以 EventSource 重新連接 /api/chat/stream/<session_id>，後端會先重放緩衝區再續流。"""
     agent = request.args.get('agent', '').strip()
+    # 多租戶隔離（2026-09-27 凜）：只回傳「本請求 tenant 自己」的進行中 session。
+    #   否則 A 重新載入頁面會接上 B 的串流（看到 B 的思考/回覆，並把事件從共用 queue 吃掉）。
+    _caller = resolve_tenant_arg()
+    if not _caller:
+        return jsonify({'ok': True, 'sessions': []})
     with _sse_lock:
         sessions = []
         for sid, ag in _sse_agents.items():
             if agent and ag != agent:
+                continue
+            if _sse_users.get(sid) != _caller:
                 continue
             if _sse_done.get(sid, False):
                 continue  # 已完成的不算「進行中」
@@ -1523,6 +1699,8 @@ def handle_chat_message(data):
             pass
         _running_agents.discard(agent_name)
         return
+    # 產物落點（第 1/2/3 層）：在請求執行緒先算好，再帶進背景執行緒
+    _out_dir, _anon_sid = resolve_output_ctx(user_id, agent_name)
     context_files = data.get("context_files", None)  # 🔧 前端控制 soul 文件載入
 
     # 🔧 客服模式：自動預先抓取頁面內容（不依賴 LLM 自己調用 web_fetch）
@@ -1579,6 +1757,22 @@ def handle_chat_message(data):
         accumulated_reply = ""
         assistant_msg_id = None
 
+        # ===== 無縫接回（2026-10-03 稚）：把本輪「續寫座標」交給補丁持久化 =====
+        # 補丁未載入時 globals().get 取不到 -> 機制自動失效，零副作用。
+        def _resume_note(_ev=None):
+            try:
+                _h = globals().get("mok_resume_hook")
+                if _h:
+                    _h(_ev if isinstance(_ev, dict) else {},
+                       agent=agent_name, session_id=_sse_session_id, user_id=user_id,
+                       user_msg=user_msg, user_msg_id=user_msg_id,
+                       assistant_msg_id=assistant_msg_id,
+                       accumulated_reply=accumulated_reply,
+                       accumulated_think=accumulated_think)
+            except Exception:
+                pass
+
+
         # 🔧 SSE 備援隊列：即使 Socket.IO 斷線也能通過 SSE 傳遞回應
         _sse_session_id = str(_uuid.uuid4())[:8]
         _sse_q = _queue.Queue()
@@ -1589,17 +1783,16 @@ def handle_chat_message(data):
             _sse_done[_sse_session_id] = False
         _sse_session_sent = False  # 只在第一次 stream_emit 時通知客戶端
 
+        _resume_note({})   # 無縫接回：本輪起點先落一次盤（此刻尚無正文）
+
         def update_assistant_in_db(msg_id, content, think_content):
-            with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-                conn.execute(
-                    'UPDATE chat_history SET content = ?, think_content = ? WHERE id = ?',
-                    (content, think_content, msg_id)
-                )
-                conn.commit()
+            # 重工離線化（2026-10-04 稚）：改登記進背景寫入器批次落盤，不在事件迴圈裡同步寫 DB
+            enqueue_chat_update(msg_id, content, think_content)
 
         def stream_emit(event):
             nonlocal accumulated_think, accumulated_reply, assistant_msg_id, _sse_session_sent
             event["agent"] = agent_name
+            _resume_note(event)
 
             # 🔧 SSE 備援：將事件放入 SSE 隊列（客戶端可通過 /api/chat/stream/<id> 獲取）
             try:
@@ -1666,6 +1859,7 @@ def handle_chat_message(data):
                         assistant_msg_id = cursor.lastrowid
                         conn.commit()
                 update_assistant_in_db(assistant_msg_id, accumulated_reply, accumulated_think)
+                flush_chat_update(assistant_msg_id)   # 回合結束：強制立即落盤
                 if event.get("rounds"):
                     _save_rounds_to_db(assistant_msg_id, event["rounds"])
                 conv_id = event.get("conv_id")
@@ -1692,13 +1886,16 @@ def handle_chat_message(data):
                 from mokagi import find_tool_handler
 
                 async def run(agent_config, context_files=None):
-                    await mokagi.process_message(
+                    await gate_call(mokagi.process_message,
                         user_id=user_id,
                         text=user_msg,
                         stream_callback=async_stream_cb,
                         agent_name=agent_name,
                         agent_config=agent_config,
-                        context_files=context_files
+                        context_files=context_files,
+                        output_dir=_out_dir,
+                        anon_sid=_anon_sid,
+                        platform="web",
                     )
 
                 result = await autofix_run(
@@ -2111,7 +2308,17 @@ def report_files(agent, filename):
     full = os.path.realpath(os.path.join(jobs_dir, filename))
     if not full.startswith(jobs_real + os.sep) or not os.path.isfile(full):
         return 'Not found', 404
-    return send_from_directory(jobs_dir, filename)
+    _r = send_from_directory(jobs_dir, filename); _e = os.path.splitext(filename)[1].lower(); _r.headers['Cache-Control'] = ('public, max-age=86400' if _e in ('.webp', '.png', '.jpg', '.jpeg', '.gif', '.moc3', '.mp3', '.ogg', '.mp4', '.webm', '.wasm') else _r.headers.get('Cache-Control', 'no-cache')); return _r
+
+# ================= P3A 自管收款後台 API 反向代理（工作區同源 → 本機 127.0.0.1:5120） =================
+_P3AW_UPSTREAM = 'http://127.0.0.1:5120'
+
+@app.route('/p3aw/api/<path:sub>', methods=['GET', 'POST', 'OPTIONS'])
+def p3aw_wallet_api(sub=''):
+    """工作區的 /p3aw/api/* → 本機 walletd(5120) 的 /api/*；只在主機迴路內轉發，不對外暴露。"""
+    if request.method == 'OPTIONS':
+        return Response('', status=204)
+    return _proxy_social(_P3AW_UPSTREAM + '/api/' + sub, timeout=30)
 
 # ================= mokagi 社交平台 API 反向代理（轉發到 8787） =================
 _SOCIAL_UPSTREAM = 'http://127.0.0.1:8787'
@@ -2358,6 +2565,35 @@ def api_backup_list():
             })
     return jsonify({'backups': backups})
 
+@app.route('/api/backup/contents/<path:filename>')
+def api_backup_contents(filename):
+    """列出某個備份檔內的頂層項目（還原對話框過濾用；2026-09-28 by 稚）。
+
+    目的：讓前端「選擇性還原」只列出該備份真的有的頂層項目，
+          避免使用者選到備份中不存在的項目 -> restore.sh 預檢中止（exit 5）。
+    """
+    import tarfile
+    backup_dir = os.path.join(os.path.expanduser('~'), '.mok', 'backups')
+    safe_name = os.path.basename(filename)
+    filepath = os.path.join(backup_dir, safe_name)
+    if not os.path.isfile(filepath):
+        return jsonify({'success': False, 'error': '找不到備份檔案'}), 404
+    names = set()
+    try:
+        with tarfile.open(filepath, 'r:gz') as tar:
+            for m in tar:
+                nm = m.name
+                if nm.startswith('./'):
+                    nm = nm[2:]
+                top = nm.split('/')[0]
+                if top and top not in ('.', '..'):
+                    names.add(top)
+    except Exception as e:
+        return jsonify({'success': False, 'error': '無法讀取備份內容: %s' % e}), 500
+    items = sorted(names)
+    return jsonify({'success': True, 'items': items, 'has_pgdata': ('pgdata' in names), 'count': len(items)})
+
+
 @app.route('/api/backup/restore/<path:filename>', methods=['POST'])
 def api_backup_restore(filename):
     # 一鍵還原：背景執行 restore.sh（停 pm2 -> 覆蓋檔案 -> 還原 cron -> 重啟所有服務）
@@ -2420,16 +2656,45 @@ def api_backup_delete(filename):
 
 @app.route('/api/tree')
 def api_tree():
-    return {'tree': get_file_tree_cached()}
+    """GET /api/tree[?path=<相對 /home/ubuntu 的路徑>]
+    2026-09-30：一律惰性展開 —— 每次只回「指定層」的一層項目（不含 children），
+    前端展開資料夾時再打一次。省略 path 時列出根層（WATCH_PATH）。"""
+    rel = (request.args.get('path') or '').strip().strip('/')
+    if not rel:
+        return {'tree': get_file_tree_cached()}
+    base = os.path.realpath(WATCH_PATH)
+    cur = os.path.realpath(os.path.join(base, rel))
+    # 安全：不得逃出 WATCH_PATH
+    if cur != base and not cur.startswith(base + os.sep):
+        return {'error': 'outside root', 'tree': []}
+    # 安全：路徑本身或其所屬樹必須落在白名單內（支援 .hermes/skills 這類多層項）
+    if cur != base:
+        rel_norm = os.path.relpath(cur, base).replace(os.sep, '/')
+        if not any(rel_norm == _a or rel_norm.startswith(_a + '/') for _a in ALLOWED_PATHS):
+            return {'error': 'not allowed', 'tree': []}
+    if not os.path.isdir(cur):
+        return {'error': 'not a folder', 'tree': []}
+    return {'tree': get_file_tree(cur, 0, one_level=True)}
 
-# ---------- 房間文件樹：只顯示單一 agent（侍女）自己的 ~/.mok/agent/<名字> ----------
+# ---------- 房間文件樹：侍女 ~/.mok/agent/<名字>；會員 ~/.mok/user/<會員帳號> ----------
 @app.route('/api/room_tree')
 def api_room_tree():
     """GET /api/room_tree?agent=<名字>[&path=<相對房間路徑>]
     回傳該 agent 房間內一層的項目；path 省略時列出房間根目錄。"""
     agent = (request.args.get('agent') or '').strip()
     rel = (request.args.get('path') or '').replace('\\', '/').strip()
-    agent_root = os.path.realpath(ENV_DIR)   # ~/.mok/agent
+    # 2026-09-30：會員房間移出 agent/（~/.mok/user/<會員>），侍女仍在 ~/.mok/agent/<侍女>
+    _root = ENV_DIR
+    try:
+        import sys as _sys2
+        _core2 = os.path.join(os.path.expanduser(f'~.{MOKAGI_home}'), 'core')
+        if _core2 not in _sys2.path:
+            _sys2.path.insert(0, _core2)
+        from output_router import room_root_for as _room_root_for
+        _root = _room_root_for(agent)
+    except Exception:
+        pass
+    agent_root = os.path.realpath(_root)
     room = os.path.realpath(os.path.join(agent_root, agent)) if agent else None
     if not agent or not room or room == agent_root or not room.startswith(agent_root + os.sep):
         return {'error': 'unknown agent', 'tree': []}
@@ -2594,6 +2859,25 @@ def create_file():
         # 安全檢查
         if not any(full_path.startswith(os.path.join(WATCH_PATH, p)) for p in ALLOWED_PATHS):
             return {"status": "error", "error": "Access denied"}, 403
+
+        # ===== 2026-10-08 凜：存檔內容防呆（後端治本，繞過前端也擋得住）=====
+        # 1) 大小上限 5MB：避免超大內容寫爆磁碟／拖垮房間頁
+        if isinstance(content, str) and len(content.encode('utf-8')) > 5 * 1024 * 1024:
+            return {"status": "error", "code": "content_too_large",
+                    "error": "內容超過 5MB 上限，已拒絕寫入"}, 413
+        # 2) JSON 防呆：*.json 必須是合法 JSON；壞資料當場退回、不落地
+        if isinstance(content, str) and path.lower().endswith('.json'):
+            if content.lstrip('\ufeff').strip():
+                try:
+                    json.loads(content.lstrip('\ufeff'))
+                except (json.JSONDecodeError, ValueError) as _je:
+                    _msg = getattr(_je, 'msg', str(_je))
+                    _ln = getattr(_je, 'lineno', '?')
+                    _col = getattr(_je, 'colno', '?')
+                    return {"status": "error", "code": "invalid_json",
+                            "error": f"JSON 格式錯誤，已拒絕寫入（第 {_ln} 行、第 {_col} 欄：{_msg}）"}, 400
+        # ===== 防呆結束 =====
+
         # 確保目錄存在
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, 'w', encoding='utf-8') as f:
@@ -2895,6 +3179,8 @@ def api_eml_view(sub_path):
 def get_env_files_api():
     files = get_env_files()
     current = os.path.basename(CURRENT_ENV_PATH) if CURRENT_ENV_PATH else ""
+    # 20260929（凜）：側欄 last_active / 工作中燈號改為「只看自己 tenant」，免被其他會員帶動。
+    _caller_tenant = resolve_tenant_arg()
     agents = []
     for f in files:
         agent_name = f.lstrip('.')
@@ -2934,13 +3220,20 @@ def get_env_files_api():
             pass
 
         # ----- 新增：查詢該 agent 最後一條消息的時間 -----
+        # 20260929（凜）：last_active 只算「自己 tenant」的訊息，避免側欄排序被其他會員帶動。
         last_active = 0
         try:
             with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-                cursor = conn.execute(
-                    'SELECT timestamp FROM chat_history WHERE agent = ? ORDER BY timestamp DESC LIMIT 1',
-                    (agent_name,)
-                )
+                if _caller_tenant:
+                    cursor = conn.execute(
+                        'SELECT timestamp FROM chat_history WHERE agent = ? AND (tenant = ? OR tenant IS NULL) ORDER BY timestamp DESC LIMIT 1',
+                        (agent_name, _caller_tenant)
+                    )
+                else:
+                    cursor = conn.execute(
+                        'SELECT timestamp FROM chat_history WHERE agent = ? ORDER BY timestamp DESC LIMIT 1',
+                        (agent_name,)
+                    )
                 row = cursor.fetchone()
                 if row:
                     last_active = row[0]
@@ -2948,7 +3241,14 @@ def get_env_files_api():
             print(f"獲取 agent {agent_name} 最後活躍時間失敗: {e}")
         # ----- 結束 -----
 
-        agents.append({"name": agent_name, "file": f, "icon": icon, "post": post, "desc": desc, "tags": tags, "group": group, "last_active": last_active, "is_running": agent_name in _running_agents})
+        # 20260929（凜）：is_running 拆成「自己 tenant 在跑(own)」與「其他人也在跑(others)」，
+        #   前端仍以 is_running（=own）維持工作中燈號，但不會再被其他會員帶動。
+        _live_tenants = _agent_live_tenants(agent_name)
+        _own_running = (_caller_tenant in _live_tenants) if _caller_tenant else False
+        _others_running = any((t or "") != (_caller_tenant or "") for t in _live_tenants)
+        if (not _live_tenants) and (agent_name in _running_agents):
+            _own_running = True  # 無法判定租戶時，維持舊行為
+        agents.append({"name": agent_name, "file": f, "icon": icon, "post": post, "desc": desc, "tags": tags, "group": group, "last_active": last_active, "is_running": _own_running, "others_running": _others_running})
 
     # ----- 按 last_active 降序排序（最新排最前）-----
     agents.sort(key=lambda x: x.get('last_active', 0), reverse=True)
@@ -3342,7 +3642,7 @@ _MOK_CONFIG_WHITELIST_PREFIXES = (
     'MOK_MODEL_NAME', 'MOK_MODEL_url', 'MOK_NUM_THREADS',
     'MOK_temperature', 'MOK_top_p', 'MOK_top_k', 'MOK_num_predict', 'MOK_num_ctx',
     'MOK_repeat_penalty', 'MOK_presence_penalty', 'MOK_frequency_penalty',
-    'MOK_max_iterations', 'MOK_max_tack_rounds', 'MOK_dream_EXP', 'MOK_DEMO_',
+    'MOK_max_iterations', 'MOK_max_tack_rounds', 'MOK_dream_EXP', 'MOK_DEMO_', 'MOK_start_msg',
 )
 _MOK_CONFIG_DENY_SUBSTR = ('token', 'secret', 'key', 'password', 'passwd', 'users', 'chat_id')
 
@@ -3471,6 +3771,85 @@ def heart_status():
         return {"status": "ok", "result": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# ---------- 做夢：一鍵全體做夢（admin-only，背景執行）2026-10-04 by 衍 ----------
+# 面板「🌙 侍女做夢總管」的按鈕呼叫；本體在 core/做夢補丁/dream_core.py
+# （CLI：--all --ignore-throttle）。語意：強制立即（略過自流＋份數門檻），
+# 但完全沒有新 log 的侍女自動跳過（不空轉）。
+_DREAM_ALL_STATE = {'running': False, 'started_at': 0.0, 'finished_at': 0.0,
+                    'started_by': '', 'result': None, 'error': '', 'counts': None}
+_DREAM_ALL_LOCK = threading.Lock()
+
+
+def _dream_core_path():
+    return os.path.join(os.path.expanduser(f"~/.{MOKAGI_home}"), "core", "做夢補丁", "dream_core.py")
+
+
+def _run_dream_all_task():
+    """背景執行緒：跑 dream_core CLI，解析 JSON 結果回填狀態。"""
+    cmd = [sys.executable, _dream_core_path(), "--all", "--ignore-throttle"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+        raw = (proc.stdout or "").strip()
+        parsed = None
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            i = raw.find("[")
+            if i >= 0:
+                try:
+                    parsed = json.loads(raw[i:])
+                except Exception:
+                    parsed = None
+        counts = {}
+        if isinstance(parsed, list):
+            for r in parsed:
+                k = (r or {}).get("status", "unknown")
+                counts[k] = counts.get(k, 0) + 1
+        _DREAM_ALL_STATE.update({
+            'result': parsed, 'counts': counts,
+            'error': '' if proc.returncode == 0 else ((proc.stderr or '')[-500:]),
+        })
+    except subprocess.TimeoutExpired:
+        _DREAM_ALL_STATE.update({'error': '執行逾時（>7200s）'})
+    except Exception as e:
+        _DREAM_ALL_STATE.update({'error': str(e)})
+    finally:
+        _DREAM_ALL_STATE['running'] = False
+        _DREAM_ALL_STATE['finished_at'] = time.time()
+
+
+@app.route('/api/dream/run_all', methods=['POST'])
+def api_dream_run_all():
+    """admin-only（見 _ADMIN_ONLY_PREFIXES）：背景對所有已啟用做夢的侍女跑一次『全體做夢』。"""
+    with _DREAM_ALL_LOCK:
+        if _DREAM_ALL_STATE.get('running'):
+            return jsonify({'success': False, 'running': True,
+                            'error': '已有全體做夢在背景執行中，請稍候'}), 409
+        _DREAM_ALL_STATE.update({
+            'running': True, 'started_at': time.time(), 'finished_at': 0.0,
+            'started_by': _session_member_user() or '', 'result': None,
+            'error': '', 'counts': None,
+        })
+    try:
+        threading.Thread(target=_run_dream_all_task,
+                         name='mok-dream-all', daemon=True).start()
+    except Exception as e:
+        _DREAM_ALL_STATE['running'] = False
+        return jsonify({'success': False, 'error': str(e)}), 500
+    return jsonify({'success': True, 'started': True,
+                    'message': '🌙 全體做夢已於背景開始（略過節流/門檻，只跳過沒有新 log 的侍女）'})
+
+
+@app.route('/api/dream/status')
+def api_dream_status():
+    """admin-only：查詢全體做夢背景任務狀態。"""
+    st = dict(_DREAM_ALL_STATE)
+    st['success'] = True
+    return jsonify(st)
+
+
 # ---------- 系統監控 API（保持不變）----------
 @app.route('/api/system/cpu')
 def system_cpu():
@@ -3560,6 +3939,24 @@ def token_stats():
     agent = request.args.get('agent')
     model = request.args.get('model')
     user = request.args.get('user')
+    # 2026-09-27 權限收斂（凜）：只剩 admin/root 能查全量；
+    # 其他身分（登入會員 / 訪客）一律強制只查自己，未識別者擋掉。
+    _viewer = _session_member_user()
+    if _viewer not in _PRIVILEGED_TENANTS:
+        if not _viewer:
+            try:
+                from flask import g as _fg
+                _sid = getattr(_fg, '_anon_sid', None) or getattr(_fg, '_anon_new_sid', None)
+            except Exception:
+                _sid = None
+            _viewer = ('guest:' + _sid) if _sid else resolve_tenant_arg()
+        if not _viewer:
+            try:
+                return jsonify({'success': False, 'error': 'forbidden'}), 403
+            except Exception:
+                return ('forbidden', 403)
+        if user != _viewer:
+            user = _viewer
     
     where_clauses = []
     params = []
@@ -3635,7 +4032,9 @@ def get_chat_history():
     tenant = resolve_tenant_arg()
     if tenant is None:
         return {"messages": [], "has_more": False}
-    _read_all = _can_read_all(tenant)
+    # 20260929（凜）：預設一律收斂到「自己的 tenant」（連 admin 亦同），避免 admin 讀到其他會員
+    #   在同一 agent 的對話而出現「對話流污染」。admin 需跨租戶總覽時請明示 ?scope=all。
+    _read_all = (request.args.get('scope') == 'all') and _can_read_all(tenant)
 
     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
         conn.row_factory = sqlite3.Row
@@ -3713,17 +4112,27 @@ def post_chat_history():
 @app.route('/api/chat_history', methods=['DELETE'])
 def delete_chat_history():
     # 多租戶隔離(20260921)：清空 agent 歷史屬全域破壞性操作，僅特權租戶可執行
+    # 2026-09-27（凜）：訪客/會員對話改為雲端保留後，非特權租戶也需能清空「自己」的歷史，
+    #   否則未登入訪客按下「清空對話」會拿到 401，重整後雲端歷史又被拉回來（看起來像清不掉）。
     _tenant = resolve_tenant_arg()
-    if _tenant is None or not _can_read_all(_tenant):
+    if _tenant is None:
         return {"error": "unauthorized: 僅管理員可清空對話歷史", "code": "UNAUTHORIZED"}, 401
     agent = request.args.get('agent', '')
     if not agent:
         return {"error": "Missing agent parameter"}, 400
+    # 20260929（凜）：預設只清「自己 tenant」（連 admin 亦同），避免一鍵清空誤刪其他會員對話；
+    #   真要全清需明示 ?scope=all，且仍限特權租戶。
+    _global_clear = (request.args.get('scope') == 'all') and _can_read_all(_tenant)
     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-        conn.execute('DELETE FROM chat_history WHERE agent = ?', (agent,))
+        if _global_clear:
+            conn.execute('DELETE FROM chat_history WHERE agent = ?', (agent,))
+        else:
+            # 只刪自己 tenant 的列，絕不影響他人
+            conn.execute('DELETE FROM chat_history WHERE agent = ? AND tenant = ?', (agent, _tenant))
         conn.commit()
-    # 同時清除 mokagi 內存中的歷史
-    clear_history(agent)
+    # 同時清除 mokagi 內存中的歷史（僅特權租戶＝真正的全域清除）
+    if _global_clear:
+        clear_history(agent)
     return {"status": "ok"}
 
 # ---------- 文件監控（保持不變）----------
@@ -4021,6 +4430,21 @@ def handle_get_agent_jobs(data):
                 out_lines.append(f'<div style="padding:8px; border-bottom:1px solid #3e3e42; color:#4ec9b0; font-weight:bold;">📄 工作報告 共 {len(reports)} 份</div>')
                 for rel, full, size, mtime in reports:
                     url = '/report/' + quote(agent_name) + '/' + quote(rel)
+                    # 🗑 刪除鍵字串（2026-10-07 by indexPage｜Jobs 面板非 admin 亦看得到，故僅對特權 session 渲染；後端端點仍二次把關）
+                    # 📋 複製路徑鍵（2026-10-08 by indexPage｜主人要求：👁 預覽 後可一鍵複製相對路徑，如「賺錢王/jobs/2026-10-07/coldcall_漏斗升級指標/report.html」）
+                    from html import escape as _htmlesc
+                    copy_btn = (
+                        f'<button onclick="copyReportPath(this)" data-copypath="{_htmlesc(agent_name + "/jobs/" + rel, quote=True)}" '
+                        'title="複製相對路徑（agent/jobs/…）" style="background:#2a2a2e; color:#c9a0ff; border:1px solid #40345a; border-radius:10px; padding:2px 10px; cursor:pointer; font-size:0.75rem;">📋 複製路徑</button>'
+                    )
+                    # 🗑 刪除鍵字串（2026-10-07 by indexPage｜Jobs 面板非 admin 亦看得到，故僅對特權 session 渲染；後端端點仍二次把關）
+                    # indexPage|主人：🗑 刪除 移到最右、與預覽太近|del_btn 加 margin-left:auto 推至列最右|202610080120(香港)
+                    del_btn = ''
+                    if _is_privileged_session():
+                        del_btn = (
+                            f'<button onclick="deleteReport(this)" data-agent="{_htmlesc(agent_name, quote=True)}" data-path="{_htmlesc(rel, quote=True)}" '
+                            'title="移入回收站，30 天內可還原" style="margin-left:auto; background:#2a2a2e; color:#ff9b9b; border:1px solid #5a3a3a; border-radius:10px; padding:2px 10px; cursor:pointer; font-size:0.75rem;">🗑 刪除</button>'
+                        )
                     size_kb = size / 1024.0
                     time_str = time.strftime('%m-%d %H:%M', time.localtime(mtime))
                     out_lines.append(
@@ -4028,8 +4452,10 @@ def handle_get_agent_jobs(data):
                         f'<a href="{url}" target="_blank" style="color:#4ec9b0; text-decoration:none; font-weight:bold; font-size:0.85rem;">📄 {rel}</a>'
                         f'<span style="color:#888; font-size:0.7rem;">({size_kb:.1f}KB · {time_str})</span>'
                         f'<button onclick="toggleReportPreview(this)" data-src="{url}" style="background:#2a2a2e; color:#4ec9b0; border:1px solid #3e3e42; border-radius:10px; padding:2px 10px; cursor:pointer; font-size:0.75rem;">👁 預覽</button>'
-                        '</div>'
-                        '<div style="display:none; margin:0 8px 8px 8px;">'
+                        + copy_btn
+                        + del_btn
+                        + '</div>'
+                        + '<div style="display:none; margin:0 8px 8px 8px;">'
                         f'<iframe style="width:100%; height:420px; border:1px solid #3e3e42; border-radius:6px; background:#fff;"></iframe>'
                         '</div>'
                     )
@@ -4087,6 +4513,45 @@ def handle_get_agent_jobs(data):
         socketio.emit('agent_jobs_result', {'content': output}, room=request.sid)
     except Exception as e:
         socketio.emit('agent_jobs_result', {'error': f'獲取失敗: {str(e)}'}, room=request.sid)
+
+
+@socketio.on('delete_agent_report')
+def handle_delete_agent_report(data):
+    """刪除單一工作報告（2026-10-07 by indexPage｜Jobs 面板「🗑 刪除」鍵專用）。
+
+    admin-only；僅接受該 agent jobs/ 底下的 .html；一律走 trash.sh 進回收站（30 天可還原），不物理刪除。
+    """
+    if not _is_privileged_session():
+        socketio.emit('agent_report_deleted', {'error': 'forbidden: admin only'}, room=request.sid)
+        return
+    data = data or {}
+    agent_name = str(data.get('agent') or '').strip()
+    rel_path = str(data.get('path') or '').strip()
+    if (not agent_name or '/' in agent_name or '\\' in agent_name or '..' in agent_name
+            or not rel_path or rel_path.startswith('/') or '..' in rel_path or '\\' in rel_path):
+        socketio.emit('agent_report_deleted', {'error': '參數不合法'}, room=request.sid)
+        return
+    if os.path.splitext(rel_path)[1].lower() != '.html':
+        socketio.emit('agent_report_deleted', {'error': '僅能刪除 .html 工作報告'}, room=request.sid)
+        return
+    jobs_dir = os.path.join(ENV_DIR, agent_name, 'jobs')
+    jobs_real = os.path.realpath(jobs_dir)
+    full = os.path.realpath(os.path.join(jobs_dir, rel_path))
+    if not full.startswith(jobs_real + os.sep) or not os.path.isfile(full):
+        socketio.emit('agent_report_deleted', {'error': '找不到該報告'}, room=request.sid)
+        return
+    try:
+        import subprocess
+        r = subprocess.run(['bash', os.path.expanduser('~/.mok/tools/trash.sh'), full],
+                           capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            msg = (r.stderr or r.stdout or '').strip() or ('exit %s' % r.returncode)
+            socketio.emit('agent_report_deleted', {'error': '刪除失敗: ' + msg}, room=request.sid)
+            return
+        socketio.emit('agent_report_deleted', {'success': True, 'agent': agent_name, 'path': rel_path}, room=request.sid)
+    except Exception as e:
+        socketio.emit('agent_report_deleted', {'error': '刪除失敗: ' + str(e)}, room=request.sid)
+
 
 # ========== 🌸 Agent Logs 面板（讀取 agent logs/ 目錄） ==========
 @socketio.on('get_agent_logs')
@@ -4184,6 +4649,15 @@ def handle_save_agent_settings(data):
     except Exception as e:
         socketio.emit('agent_settings_saved', {'error': f'儲存失敗: {str(e)}'}, room=request.sid)
 
+# ===== /static/ 白名單（2026-10-03 by mokagi說明；主人指示「static 不是雜物櫃」）=====
+_STATIC_ALLOWED_EXT = {
+    '.js', '.mjs', '.css', '.map',
+    '.json', '.html', '.htm',
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.bmp', '.avif',
+    '.woff', '.woff2', '.ttf', '.otf', '.eot',
+    '.mp3', '.wav', '.ogg', '.wasm',
+}
+
 @app.before_request
 def handle_static():
     if request.path.startswith('/static/'):
@@ -4191,10 +4665,28 @@ def handle_static():
         # admin-only：noVNC 桌面靜態頁（/static/novnc/*）僅限 admin（2026-09-23 by 凜）
         if filename.startswith('novnc/') and not _is_privileged_session():
             return jsonify({'success': False, 'error': 'forbidden: admin only'}), 403
+        # 白名單管制（2026-10-03）：非白名單副檔名一律 404，static 不再當雜物櫃
+        _ext = os.path.splitext(filename)[1].lower()
+        if _ext not in _STATIC_ALLOWED_EXT:
+            return jsonify({'success': False, 'error': 'forbidden: static file type not allowed'}), 404
         return send_from_directory(static_dir, filename)
 
+
+@app.route('/webTools/gpu_status_snapshot.json')
+def gpu_status_snapshot():
+    """GPU 快照（退回用）：僅限 admin。原檔已從公開 /static/ 撤出（2026-10-03 by mokagi說明）。"""
+    if not _is_privileged_session():
+        return jsonify({'success': False, 'error': 'forbidden: admin only'}), 403
+    _p = os.path.expanduser(f"~/.{MOKAGI_home}/html/webTools/gpu_status_snapshot.json")
+    try:
+        with open(_p, encoding='utf-8') as _f:
+            return app.response_class(_f.read(), mimetype='application/json')
+    except Exception as _e:
+        return jsonify({'success': False, 'error': str(_e)}), 404
+
+
 # ===== admin-only 管制（2026-09-23 by 凜）：緊急重啟 / 進化 / admin 桌面 / 備份 =====
-_ADMIN_ONLY_PREFIXES = ('/api/backup/', '/webTools/admin.html', '/skill/進化/','/webTools/novnc')
+_ADMIN_ONLY_PREFIXES = ('/api/backup/', '/webTools/admin.html', '/skill/進化/','/webTools/novnc','/api/pm2panel/','/api/dream/')
 
 
 def _is_privileged_session():
@@ -4246,6 +4738,32 @@ def coldcall_api_proxy(sub_path):
     except Exception as e:
         return jsonify({'error': 'coldcall proxy failed: %s' % e}), 502
 
+# ---------- PM2 一鍵開關面板 API 代理（轉發到獨立服務 127.0.0.1:8331；解決 iframe 跨埠／混用內容問題）----------
+@app.route('/api/pm2panel/<path:sub_path>', methods=['GET', 'POST', 'OPTIONS'])
+def pm2panel_api_proxy(sub_path):
+    import urllib.request, urllib.error
+    if request.method == 'OPTIONS':
+        _o = Response('', status=204)
+        _o.headers['Access-Control-Allow-Origin'] = '*'
+        _o.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        _o.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return _o
+    target = 'http://127.0.0.1:8331/api/' + sub_path
+    if request.query_string:
+        target += '?' + request.query_string.decode('utf-8')
+    data = request.get_data() if request.method == 'POST' else None
+    req = urllib.request.Request(target, data=data, method=request.method)
+    req.add_header('Content-Type', request.headers.get('Content-Type') or 'application/json')
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            body = resp.read()
+            return Response(body, status=resp.status,
+                            content_type=resp.headers.get('Content-Type', 'application/json'))
+    except urllib.error.HTTPError as e:
+        return Response(e.read(), status=e.code, content_type='application/json')
+    except Exception as e:
+        return jsonify({'ok': False, 'error': 'pm2panel proxy failed: %s' % e}), 502
+
 # ---------- 公開追蹤端點（客戶 Demo 頁回報開啟，/project/* 為公開路徑）----------
 @app.route('/api/track', methods=['POST', 'OPTIONS'])
 @app.route('/project/track', methods=['POST', 'OPTIONS'])
@@ -4280,6 +4798,48 @@ def public_track():
             return out
     except Exception as e:
         return jsonify({'error': 'track proxy failed: %s' % e}), 502
+
+# ---------- 會議模式持久化（P0：任務/輸出保存，2026-09-27 by 春）----------
+# 全站追蹤 collector 掛載（蹤 2026-10-06；載入失敗不影響本站）
+try:
+    sys.path.insert(0, '/home/ubuntu/.mok/agent/蹤/jobs/2026-10-06/tracking_system')
+    import mok_track_routes
+    mok_track_routes.register(app)
+except Exception as _track_err:
+    print('mok tracker routes not loaded:', _track_err)
+
+_MEETING_DIR = os.path.join(BASE_DIR, '會議模式')
+_MEETING_STATE = os.path.join(_MEETING_DIR, 'state.json')
+
+
+@app.route('/api/meeting/save', methods=['POST', 'OPTIONS'])
+def meeting_save():
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    try:
+        payload = request.get_json(force=True, silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({'success': False, 'error': 'invalid payload'}), 400
+        os.makedirs(_MEETING_DIR, exist_ok=True)
+        tmp = _MEETING_STATE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False)
+        os.replace(tmp, _MEETING_STATE)
+        return jsonify({'success': True, 'saved': len(payload.get('tasks') or []), 'ts': payload.get('ts')})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/meeting/load', methods=['GET'])
+def meeting_load():
+    try:
+        if os.path.isfile(_MEETING_STATE):
+            with open(_MEETING_STATE, encoding='utf-8') as f:
+                return jsonify({'success': True, 'state': json.load(f)})
+        return jsonify({'success': True, 'state': None})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 # ---------- 動態頁面路由（自動匹配 templates 下的 .html）----------
 @app.route('/<path:page>')
@@ -4434,7 +4994,7 @@ def add_static_cache(response):
     # 跳過靜態資源，避免 passthrough 錯誤
     if path.startswith("/static/"):
         return response
-    if path.endswith((".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff2", ".woff")):
+    if path.endswith((".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff2", ".woff", ".webp", ".moc3")):
         response.headers["Cache-Control"] = f"public, max-age={STATIC_CACHE_SECONDS}"
         response.headers["Vary"] = "Accept-Encoding"
         if path.endswith((".js", ".css", ".html")) and len(response.data) > 512:
@@ -4789,6 +5349,109 @@ def serve_bookmark_page():
     if os.path.exists(bookmark_path):
         return send_file(bookmark_path)
     return "<h1>書籤頁面不存在</h1>", 404
+
+
+# ===== 未讀標記（per 會員／訪客，跨裝置同步）=====
+# indexPage|主人乙案：未讀存後端 per 會員、跨裝置同步、點進去才清除|新增 /api/unread/list、/api/unread/set、/api/unread/clear 三端點與原子 JSON 儲存|202610080215(香港)
+UNREAD_FILE = os.path.expanduser(f"~/.{MOKAGI_home}/.memory/unread_marks.json")
+UNREAD_TTL = 90 * 24 * 3600
+_UNREAD_LOCK = threading.Lock()
+
+
+def _unread_load():
+    try:
+        with open(UNREAD_FILE, "r", encoding="utf-8") as f:
+            _d = json.load(f)
+        return _d if isinstance(_d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _unread_prune(store):
+    _now = time.time()
+    for _t in list(store.keys()):
+        _marks = store.get(_t) or {}
+        _keep = {a: v for a, v in _marks.items()
+                 if isinstance(v, dict) and (_now - float(v.get("t") or 0)) < UNREAD_TTL}
+        if _keep:
+            store[_t] = _keep
+        else:
+            store.pop(_t, None)
+
+
+def _unread_save(store):
+    try:
+        os.makedirs(os.path.dirname(UNREAD_FILE), exist_ok=True)
+        _tmp = UNREAD_FILE + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
+            json.dump(store, f, ensure_ascii=False, indent=2)
+        os.replace(_tmp, UNREAD_FILE)
+        return True
+    except Exception as e:
+        print(f"[unread] 儲存失敗: {e}")
+        return False
+
+
+def _unread_deny():
+    return {"success": False, "error": "unauthorized: 請先登入會員，或重新整理頁面後再試",
+            "code": "UNAUTHORIZED"}, 401
+
+
+@app.route("/api/unread/list", methods=["GET"])
+def unread_list():
+    _tenant = resolve_tenant_arg()
+    if _tenant is None:
+        return _unread_deny()
+    with _UNREAD_LOCK:
+        _marks = _unread_load().get(_tenant) or {}
+    return {"success": True, "marks": _marks}
+
+
+@app.route("/api/unread/set", methods=["POST"])
+def unread_set():
+    data = request.get_json(silent=True) or {}
+    _tenant = resolve_tenant(data)
+    if _tenant is None:
+        return _unread_deny()
+    _agent = str(data.get("agent") or "").strip()
+    if not _agent:
+        return {"success": False, "error": "缺少 agent"}, 400
+    with _UNREAD_LOCK:
+        _store = _unread_load()
+        _unread_prune(_store)
+        _marks = _store.get(_tenant) or {}
+        if "note" in data and data.get("note") is None:
+            _marks.pop(_agent, None)
+            _action = "clear"
+        else:
+            _marks[_agent] = {"t": time.time(), "note": str(data.get("note") or "").strip()[:200]}
+            _action = "set"
+        _store[_tenant] = _marks
+        _ok = _unread_save(_store)
+    if not _ok:
+        return {"success": False, "error": "未讀儲存失敗（請檢查磁碟空間或權限）"}, 500
+    return {"success": True, "action": _action, "marks": _marks}
+
+
+@app.route("/api/unread/clear", methods=["POST"])
+def unread_clear():
+    data = request.get_json(silent=True) or {}
+    _tenant = resolve_tenant(data)
+    if _tenant is None:
+        return _unread_deny()
+    _agent = str(data.get("agent") or "").strip()
+    if not _agent:
+        return {"success": False, "error": "缺少 agent"}, 400
+    with _UNREAD_LOCK:
+        _store = _unread_load()
+        _marks = _store.get(_tenant) or {}
+        _hit = _marks.pop(_agent, None) is not None
+        if _hit:
+            _store[_tenant] = _marks
+            _ok = _unread_save(_store)
+        else:
+            _ok = True
+    return {"success": bool(_ok), "cleared": bool(_hit), "marks": _marks}
 
 
 # ---------- 啟動 ----------

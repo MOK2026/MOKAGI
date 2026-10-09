@@ -38,6 +38,53 @@ os.environ.setdefault("ADMIN_CHAT_ID", "")   # 網頁版暫不需要管理員校
 _tools = {}       # {模塊名: 模塊對象}
 _cmd_map = {}     # {命令字符串: handler函數}
 
+# ── P0（2026-10-04 稚）：冷門工具「schema 預設不掛載」──────────────────────
+# 問題：build_tool_definitions() 把每個工具的 JSON schema（合計約 35,000 字元）
+#       塞進「每一輪」LLM 請求，不管這一輪用不用得到 → 每輪固定燒 token。
+# 做法：把冷門／純內部工具的 schema 從「送給 LLM 的清單」拿掉；模組仍完整載入，
+#       執行路徑（find_tool_handler 用 .get("tool_schema") 找 handler）照常可用。
+# 原理：build_tool_definitions 用 `"tool_schema" in PLUGIN_INFO` 判斷要不要送出，
+#       find_tool_handler 用 `PLUGIN_INFO.get("tool_schema")` 取真值；
+#       故用 dict 子類讓 `in` 對 schema 鍵回 False、`.get()`／`[]` 回真值。
+# 設定：清單見下方 _DEFAULT_HIDDEN_SCHEMAS；環境變數 MOK_HIDDEN_TOOLS="a,b,c" 可覆寫。
+_HIDDEN_SCHEMA_KEYS = ("tool_schema", "sub_tools")
+
+
+class _HiddenInfo(dict):
+    """PLUGIN_INFO 包裝：對外隱藏 schema 鍵（`in` 回 False），其餘照常。"""
+
+    def __contains__(self, key):
+        if key in _HIDDEN_SCHEMA_KEYS:
+            return False
+        return dict.__contains__(self, key)
+
+
+# 預設隱藏清單（要調整就改這裡；也可用環境變數 MOK_HIDDEN_TOOLS="a,b,c" 覆寫）
+# 原則：只放「LLM 幾乎不直接呼叫」的純內部／冷門工具。
+#   autofix / crash_handler / heart / intent → 系統內部自動流程（由 find_tool_handler 直取）
+#   associate → 由記憶模組內部 import 使用（不經 LLM）
+#   graphify / speech → 冷門（speech 與 stt 功能重疊）
+_DEFAULT_HIDDEN_SCHEMAS = (
+    "autofix", "crash_handler", "heart", "intent",
+    "associate", "graphify", "speech",
+)
+
+
+def _load_hidden_schemas():
+    env = os.environ.get("MOK_HIDDEN_TOOLS", "").strip()
+    if env:
+        return {x.strip() for x in env.replace("，", ",").split(",") if x.strip()}
+    return set(_DEFAULT_HIDDEN_SCHEMAS)
+
+
+def _apply_schema_hide(module_name, module):
+    """冷門工具的 schema 不送 LLM（模組照載，執行不受影響）。"""
+    if module_name not in _load_hidden_schemas():
+        return
+    info = getattr(module, "PLUGIN_INFO", None)
+    if isinstance(info, dict) and not isinstance(info, _HiddenInfo):
+        module.PLUGIN_INFO = _HiddenInfo(info)
+
 def load_tools() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     加載 tools/ 目錄下的所有插件，返回 (tools, cmd_map)
@@ -50,7 +97,7 @@ def load_tools() -> Tuple[Dict[str, Any], Dict[str, Any]]:
         logger.warning(f"工具目錄不存在: {TOOLS_DIR}")
         return _tools, _cmd_map
     
-    for filename in os.listdir(TOOLS_DIR):
+    for filename in sorted(os.listdir(TOOLS_DIR)):  # P0-4(2026-10-01 侍女)：固定載入順序，讓工具 schema 前綴穩定
         if not filename.endswith(".py") or filename == "__init__.py":
             continue
         module_name = filename[:-3]
@@ -60,6 +107,7 @@ def load_tools() -> Tuple[Dict[str, Any], Dict[str, Any]]:
             )
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
+            _apply_schema_hide(module_name, module)
             _tools[module_name] = module
             
             if hasattr(module, "PLUGIN_INFO"):
@@ -137,21 +185,50 @@ async def recognize_intent(
 
 
 
-async def execute_command(cmd: str, args: str, chat_id: str = "web", agent_config: Optional[Dict] = None) -> str:
+# P0 餘額熔斷：餘額過低時暫停的「非必要」高耗工具（可用 MOK_DS_BLOCKED_TOOLS 覆寫）
+_BALANCE_BLOCKED_TOOLS = {
+    t.strip() for t in os.environ.get(
+        "MOK_DS_BLOCKED_TOOLS", "gui_agent,money,money_video,comic").split(",") if t.strip()
+}
+
+
+async def execute_command(cmd: str, args: str, chat_id: str = "web", agent_config: Optional[Dict] = None, platform: Optional[str] = None) -> str:
     """
     執行命令，返回原始結果字符串
+    platform: 來源平台旗標（web/telegram…）；由前端經 process_message 傳入（2026-10-08 indexPage 修法B）
     """
+    if platform:
+        try:
+            from context import set_platform as _set_platform
+            _set_platform(platform)
+        except Exception:
+            pass
     handler = _cmd_map.get(cmd)
     if not handler:
         return json.dumps({"success": False, "error": f"未知命令: {cmd}"}, ensure_ascii=False)
+    # P0 餘額熔斷閘：餘額過低時暫停「非必要」高耗工具（fail-open：任何異常一律放行）
+    try:
+        _norm = cmd.lstrip("/")
+        if _norm in _BALANCE_BLOCKED_TOOLS:
+            from deepseek_guard import is_low_balance
+            if is_low_balance():
+                return json.dumps({
+                    "success": False,
+                    "error": f"DeepSeek 餘額不足，已暫停非必要高耗工具「{_norm}」；請主人補值後再試。",
+                }, ensure_ascii=False)
+    except Exception:
+        pass
     try:
         async def _run():
             import inspect
             sig = inspect.signature(handler)
+            _kwargs = {}
             if 'agent_config' in sig.parameters:
-                r = await handler(args, chat_id, agent_config=agent_config)
-            else:
-                r = await handler(args, chat_id)
+                _kwargs['agent_config'] = agent_config
+            # 平台旗標：只在 handler 有宣告 platform 參數時傳入，其餘工具行為不變
+            if platform and 'platform' in sig.parameters:
+                _kwargs['platform'] = platform
+            r = await handler(args, chat_id, **_kwargs)
             if not isinstance(r, str):
                 r = json.dumps(r, ensure_ascii=False)
             return r
@@ -238,7 +315,8 @@ async def process_message(
     model_name: str,
     cmd_map: Dict[str, Any] = None,
     tools: Dict[str, Any] = None,
-    agent_config: Optional[Dict] = None
+    agent_config: Optional[Dict] = None,
+    platform: Optional[str] = None
 ) -> Optional[str]:
     """
     高層函數：處理一條用戶消息。
@@ -256,7 +334,7 @@ async def process_message(
         cmd = parts[0]
         args = parts[1] if len(parts) > 1 else ""
         if cmd in cmd_map:
-            raw_result = await execute_command(cmd, args, chat_id, agent_config=agent_config)
+            raw_result = await execute_command(cmd, args, chat_id, agent_config=agent_config, platform=platform)
             naturalized = await naturalize_result(
                 user_text, cmd, raw_result, ollama_api, model_name, tools
             )
@@ -277,7 +355,7 @@ async def process_message(
             final_args = args
         # 檢查根命令是否存在
         if root_cmd in cmd_map:
-            raw_result = await execute_command(root_cmd, final_args, chat_id, agent_config=agent_config)
+            raw_result = await execute_command(root_cmd, final_args, chat_id, agent_config=agent_config, platform=platform)
             naturalized = await naturalize_result(
                 user_text, root_cmd, raw_result, ollama_api, model_name, tools
             )

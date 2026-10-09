@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sqlite3
+from db_conn import connect
 import threading
 import time
 from datetime import datetime, timezone
@@ -73,9 +74,9 @@ def _conn():
     d = os.path.dirname(AUDIT_DB)
     if d and not os.path.exists(d):
         os.makedirs(d, exist_ok=True)
-    c = sqlite3.connect(AUDIT_DB, timeout=10.0)
+    c = connect(AUDIT_DB)
     c.execute("PRAGMA journal_mode=WAL")
-    c.execute("PRAGMA busy_timeout=5000")
+    c.execute("PRAGMA busy_timeout=30000")
     return c
 
 

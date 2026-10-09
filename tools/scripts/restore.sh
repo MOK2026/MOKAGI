@@ -24,6 +24,26 @@ ADM_DATE() { date -u -d "+${TZ_OFF} hours" "$@"; }
 mkdir -p "$BK"
 log() { echo "[$(ADM_DATE '+%F %T')] $*" >> "$LOG"; }
 
+# ── 中止保險：任何非正常結束都要把服務啟回（2026-09-28 修正）──
+# 事故：--only 指定項目不存在時 exit 5，直接跳過第 6 步 pm2 resurrect，
+#      造成 pm2 stop all 之後全站離線（2026-09-27 主因，離線約 31 分鐘）。
+SERVICES_STOPPED=0      # 是否已執行過 pm2 stop all
+SERVICES_RESTORED=0     # 是否已在第 6 步正常重啟服務
+resume_services_on_exit() {
+  rc=$?
+  if [ "$SERVICES_STOPPED" = "1" ] && [ "$SERVICES_RESTORED" != "1" ]; then
+    log "♻️ 還原非正常結束（rc=$rc），自動把 pm2 服務啟回…"
+    # 先還原「還原前快照」（第 2 步已存），避免讀到第 3 步 pm2 save 存成的 stopped 清單
+    if [ -s /tmp/pm2_dump_pre_restore.pm2 ]; then cat /tmp/pm2_dump_pre_restore.pm2 > "$PM2D" 2>/dev/null || true; fi
+    pm2 resurrect >>"$LOG" 2>&1 || true
+    pm2 start all >>"$LOG" 2>&1 || true
+    pm2 save >>"$LOG" 2>&1 || true
+    log "♻️ 服務已自動啟回（中止保險）"
+  fi
+}
+trap resume_services_on_exit EXIT
+
+
 TARGET=""
 SAFETY="yes"
 ONLY=""
@@ -82,8 +102,44 @@ crontab -l > "$BK/pre_restore_crontab_$TS.txt" 2>/dev/null || true
 [ -s "$PM2D" ] && cp -f "$PM2D" "$BK/pre_restore_pm2_$TS.pm2" 2>/dev/null || true
 log "🛟 已保存還原前 cron / pm2 快照"
 
+# 2.5) PRE-FLIGHT（2026-09-28 修正）：先驗證 --only 項目是否真的在備份中。
+#      舊版在第 3 步 pm2 stop all 之後才驗證，項目不存在 → exit 5 → 全站離線 31 分鐘。
+ARCH_RAW=$(tar -tzf "$ARCHIVE" 2>/dev/null)
+PREFIX=""
+case "$(printf "%s\n" "$ARCH_RAW" | grep -m1 -E "^\./")" in
+  "") PREFIX="" ;;
+  ./*) PREFIX="./" ;;
+esac
+ARCH_TOP=$(printf "%s\n" "$ARCH_RAW" | sed "s|^\./||" | cut -d/ -f1 | sort -u | tr "\n" " ")
+HAS_PGDATA=0; PG_RESTORE=0
+case " $ARCH_TOP " in *" pgdata "*) HAS_PGDATA=1 ;; esac
+if [ "$HAS_PGDATA" = "1" ]; then
+  if [ -z "$ONLY" ]; then PG_RESTORE=1
+  else case " $ONLY " in *" pgdata "*) PG_RESTORE=1 ;; esac; fi
+fi
+if [ -n "$ONLY" ]; then
+  PICK=""
+  for it in $ONLY; do
+    case " $ARCH_TOP " in
+      *" $it "*) PICK="$PICK $it" ;;
+      *) log "⚠️ 備份中找不到 $it，已略過" ;;
+    esac
+  done
+  PICK=$(echo $PICK)
+  if [ -z "$PICK" ]; then
+    log "❌ 指定還原的項目在備份中都不存在，中止還原（服務尚未停止，全站未中斷）"
+    exit 5
+  fi
+  ONLY="$PICK"
+  log "✅ PRE-FLIGHT 通過：備份中可還原項目 → $ONLY"
+else
+  log "🔎 PRE-FLIGHT：備份頂層項目 → $ARCH_TOP"
+fi
+[ "$PG_RESTORE" = "1" ] && log "🐘 偵測到 PG 資料庫備份（pgdata/），將以停/啟 postgres 容器方式還原"
+
 # 3) 停止所有 pm2 服務（本腳本已由 setsid 脫離，不受影響）
 log "🛑 停止所有 pm2 服務…"
+SERVICES_STOPPED=1
 pm2 stop all >>"$LOG" 2>&1 || true
 pm2 save >>"$LOG" 2>&1 || true
 
@@ -95,7 +151,7 @@ if [ -n "$ONLY" ]; then
   #   新版 backup.sh 逐項列頂層項打包 → 成員形如 core/xxx（不帶 ./）
   #   舊版 backup.sh(tar ... .) 或第三方打包 → 成員形如 ./core/xxx
   # 兩種打包皆需能正確挑選成員（核心修正）
-  ARCH_RAW=$(tar -tzf "$ARCHIVE" 2>/dev/null)
+  [ -n "$ARCH_RAW" ] || ARCH_RAW=$(tar -tzf "$ARCHIVE" 2>/dev/null)
   PREFIX=""
   case "$(printf '%s\n' "$ARCH_RAW" | grep -m1 -E '^\./')" in
     ./*) PREFIX="./" ;;
@@ -125,10 +181,50 @@ else
   MODE_DESC="完整還原"
 fi
 log "🎯 模式：$MODE_DESC"
-tar -C "$MOK" -xzf "$ARCHIVE" --overwrite --no-same-owner "${EXTRACT_ARGS[@]}" >>"$LOG" 2>&1
-RC=$?
-if [ $RC -gt 1 ]; then log "❌ 解壓失敗 rc=$RC，中止（可至備份中心查看）"; exit 4; fi
+# 4.0) PG 資料庫（pgdata/）專用流程：真實位置是 $MOK/gateway/pgdata，
+#      由 Docker 容器 mok-gateway-db（postgres:16-alpine）掛載。
+#      需先停容器、以 root 解壓（保留 postgres 擁有者），再啟回。
+SKIP_MAIN=0
+if [ "$PG_RESTORE" = "1" ]; then
+  if [ -n "$ONLY" ]; then
+    ONLY=$(printf "%s\n" $ONLY | grep -v "^pgdata$" | tr "\n" " "); ONLY=$(echo $ONLY)
+    EXTRACT_ARGS=()
+    for it in $ONLY; do EXTRACT_ARGS+=("${PREFIX}$it"); done
+    [ -z "$ONLY" ] && SKIP_MAIN=1
+  else
+    EXTRACT_ARGS+=(--exclude="pgdata" --exclude="pgdata/*" --exclude="./pgdata" --exclude="./pgdata/*")
+  fi
+  log "🛑 停止 postgres 容器 mok-gateway-db…"
+  docker stop mok-gateway-db >>"$LOG" 2>&1 || true
+fi
+if [ "$SKIP_MAIN" = "1" ]; then
+  log "📦 本次僅還原 pgdata，略過一般檔案解壓"
+else
+  tar -C "$MOK" -xzf "$ARCHIVE" --overwrite --no-same-owner "${EXTRACT_ARGS[@]}" >>"$LOG" 2>&1
+  RC=$?
+  if [ $RC -gt 1 ]; then log "❌ 解壓失敗 rc=$RC，中止（可至備份中心查看）"; exit 4; fi
+fi
 log "📦 檔案還原完成"
+
+# 4.5) PG 資料庫實體還原（sudo 解壓 → 保留 uid 70 postgres 擁有者）＋ 容器回啟
+if [ "$PG_RESTORE" = "1" ]; then
+  log "🐘 還原 PG 資料庫 → $MOK/gateway/pgdata …"
+  if sudo -n tar -C "$MOK/gateway" -xzf "$ARCHIVE" "${PREFIX}pgdata" >>"$LOG" 2>&1; then
+    log "✅ PG 資料庫檔案還原完成"
+  else
+    log "❌ PG 資料庫還原失敗（請確認 gateway/pgdata 權限與備份成員）"
+  fi
+  log "♻️ 啟動 postgres 容器 mok-gateway-db…"
+  docker start mok-gateway-db >>"$LOG" 2>&1 || true
+  PG_READY=0
+  for i in $(seq 1 30); do
+    if docker exec mok-gateway-db pg_isready -U litellm >/dev/null 2>&1; then PG_READY=1; log "✅ postgres 已就緒"; break; fi
+    sleep 2
+  done
+  [ "$PG_READY" = "1" ] || log "⚠️ postgres 60 秒內未就緒（容器已啟動，請稍後檢查）"
+  log "▶️ 啟動 gateway 容器 mok-gateway…"
+  docker start mok-gateway >>"$LOG" 2>&1 || true
+fi
 
 # 5) 還原 crontab
 if [ -s "$MOK/backup_meta/crontab.txt" ]; then
@@ -163,6 +259,7 @@ for p in d:
 PY
 fi
 pm2 save >>"$LOG" 2>&1 || true
+SERVICES_RESTORED=1
 
 # 7) 保險：確認本體 mok_agi 有起來
 if ! pm2 describe mok_agi >/dev/null 2>&1; then

@@ -26,7 +26,7 @@ WATCH_PATH = main.WATCH_PATH
 MAX_TREE_DEPTH = 1                         # 掃描最大深度（1 = 只掃單層）
 
 
-def get_file_tree(path, depth=0):
+def get_file_tree(path, depth=0, one_level=False):  # 2026-10-01 indexPage 修：核心已改成惰性載入，會以 one_level=True 呼叫；補上此參數，避免 TypeError→HTTP500→前端「Unexpected token '<'」
     """只掃單層的檔案樹（不遞迴）"""
     try:
         items = os.listdir(path)
@@ -59,8 +59,7 @@ def get_file_tree(path, depth=0):
         full_path = os.path.join(path, item)
         is_dir = os.path.isdir(full_path)
         node = {'name': item, 'path': os.path.relpath(full_path, WATCH_PATH), 'is_dir': is_dir}
-        # ★ 只掃單層：不再遞迴展開 children
-        node['children'] = []
+        # ★ 只掃單層：不附 children（回 undefined），前端展開時才抓下一層
         tree.append(node)
     return tree
 
@@ -110,7 +109,7 @@ def _list_children(full_path):
         full = os.path.join(full_path, item)
         is_dir = os.path.isdir(full)
         node = {"name": item, "path": os.path.relpath(full, WATCH_PATH), "is_dir": is_dir}
-        node["children"] = []          # 惰性：展開時再掃
+        # 惰性：不附 children（回 undefined），前端展開時才抓下一層
         tree.append(node)
     return tree
 

@@ -6,13 +6,14 @@ import re
 import sqlite3
 import time
 from contextlib import closing
+from db_conn import connect
 from typing import Dict, List, Optional
 
 from shared import MOKAGI_home, EXPERIENCE_DB_PATH
 
 def _init_experience_db():
     """初始化經驗記錄表與 FTS5 虛擬表"""
-    with closing(sqlite3.connect(EXPERIENCE_DB_PATH, timeout=10.0)) as conn:
+    with closing(connect(EXPERIENCE_DB_PATH)) as conn:
         conn.execute('PRAGMA journal_mode=WAL')
         conn.execute('''
             CREATE TABLE IF NOT EXISTS experience_log (
@@ -52,7 +53,7 @@ def log_experience(
     user_key = f"{agent_name}:{user_id}"
     tool_sequence = json.dumps([m for m in messages if isinstance(m, dict) and 'tool' in m], ensure_ascii=False)
     try:
-        with closing(sqlite3.connect(EXPERIENCE_DB_PATH)) as conn:
+        with closing(connect(EXPERIENCE_DB_PATH)) as conn:
             conn.execute('''
                 INSERT INTO experience_log (user_key, agent_name, goal, outcome, tool_sequence, error_message, summary, keywords, timestamp)
                 VALUES (?,?,?,?,?,?,?,?,?)
@@ -81,7 +82,7 @@ def recall_experience(
         return []
     _init_experience_db()
     try:
-        with closing(sqlite3.connect(EXPERIENCE_DB_PATH)) as conn:
+        with closing(connect(EXPERIENCE_DB_PATH)) as conn:
             conn.row_factory = sqlite3.Row
             if agent_name:
                 rows = conn.execute('''

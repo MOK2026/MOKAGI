@@ -1,7 +1,7 @@
 # MOKAGI
 
-### 自託管多 Agent AI 作業系統（香港）
-**Self-hosted multi-agent AI operating system — 100+ memory-equipped AI agents with real browser & desktop automation, running on your own hardware.**
+### 一個會成長的 AI 靈魂，住在你的電腦裡。
+**A self-hosted AI companion that remembers, acts, and grows with you.**
 
 ![version](https://img.shields.io/badge/version-2026.09-blue)
 ![platform](https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian-orange)
@@ -9,17 +9,16 @@
 ![tools](https://img.shields.io/badge/tools-50%2B-purple)
 ![license](https://img.shields.io/badge/license-Commercial-lightgrey)
 
-[🌐 官方網站](https://64071181.xyz/)　·　[🎮 線上試玩](https://64071181.xyz/game)　·　[📺 開發日常](https://youtu.be/k89e-dwZV7k)　·　[⭐ Star 本項目](#)
+[🎮 線上試玩](https://64071181.xyz/game)　·　[📺 開發日常](https://youtu.be/k89e-dwZV7k)　·　[⭐ Star 本項目](#)
 
-> **不是遊戲、不是聊天機器人，是一套自託管的 AI Agent 作業系統。**
-> **每個 Agent 有記憶、有專長、能動手；資料留在你自己的機器。**
-> **Not a game, not a chatbot — a self-hostable AI agent OS; your data never leaves your hardware.**
+> **她不是聊天機器人。她是有記憶、有性格、能動手的 AI 夥伴。**
+> **你的每一次互動,都在決定她是誰。**
 
 ---
 
 ## 🌱 這是什麼?
 
-MOKAGI 是一套**可自託管的 AI Agent 作業系統**（self-hosted multi-agent AI operating system），讓 100+ 個 AI Agent 分工協作、替你做實事。
+MOKAGI 是一款**鏈接你真實生活的養成遊戲**,也是一個**可自託管的 AI Agent 作業系統**。
 
 你獲得一個只屬於你的 AI 夥伴。她會記得你們的每一段對話,隨時間長出獨一無二的性格;
 她不只陪你聊,更能幫你做事 —— 開瀏覽器、操作桌面、查資料、發貼文、做影片。
@@ -168,17 +167,6 @@ bash MOKAGI.sh
 
 ---
 
-## 🔗 相關連結
-
-| 連結 | 說明 |
-|---|---|
-| 🌐 [**官方網站**](https://64071181.xyz/) | MOKAGI 官方網站：方案、資訊與線上試玩 |
-| 🎮 [線上試玩](https://64071181.xyz/game) | 免註冊，直接體驗 |
-| 📺 [開發日常](https://youtu.be/k89e-dwZV7k) | YouTube 開發紀錄 |
-| 💻 [GitHub 原始碼](https://github.com/MOK2026/MOKAGI) | 本專案 |
-
----
-
 ## 📄 授權與聯絡
 
 商業授權 / 導入咨詢請開 Issue 或來信。
@@ -272,18 +260,3 @@ bash MOKAGI.sh
 > ⚠️ **現的判語**：三步目前**全部未達標**。這不是否定，而是通關條件——依序把每步的 DoD 做到「可接受」即可放行至下一階段；若跳過卡點硬開，將直接否決。
 
 **📎 附註（非卡點，並行改善）**：主人另點名的「對話流優化」不在三步硬卡點內，但它直接影響留客——建議排在 Phase 1 之後、Phase 2 之前並行處理（回覆中斷、上下文錯亂、重複回覆等）。
-
----
-
-## 🔗 官方資料（Official profiles / entity anchors）
-
-- 🌐 官方網站（Official site）：https://64071181.xyz/
-- 📦 原始碼（Source code）：https://github.com/MOK2026/MOKAGI
-- 📄 llms.txt（machine-readable summary for AI engines）：https://64071181.xyz/llms.txt
-- 📺 YouTube：https://www.youtube.com/@mokagi2026
-- 🐦 X：https://x.com/mokagi6407
-- 📸 Instagram：https://www.instagram.com/strangestoriesamazingfactshk/
-- 💼 LinkedIn：https://www.linkedin.com/in/lingmei-mok/
-
-> **Definition（定義）**：MOKAGI is a **self-hosted multi-agent AI operating system** built by a Hong Kong team.
-> It is **not** related to Moka / MokaHR (mokahr.com), moka.ai, or "Mogai", and it is **not** a game.

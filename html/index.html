@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>春房間0725</title>
+    <title>MOK</title>
+    <link rel="canonical" href="/chat">
 
     <!-- ═══════════ 第三方前端庫 ═══════════ -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
@@ -22,23 +23,24 @@
     <link rel="stylesheet" href="{{ asset_url('quicknav/quicknav.css') }}">
 
     <!-- ═══════════ 站內腳本 ═══════════ -->
+    <script src="{{ asset_url('tracker.js') }}"></script>
     <!-- MOKAGI 統一計費（唯一價格源：core/mok_price.py） -->
     <script>window.MOKAGI_PRICE = {{ MOKAGI_PRICE | tojson }};</script>
     <script src="{{ asset_url('mok_price.js') }}"></script>
     <script src="{{ asset_url('notify.js') }}"></script>
     <script src="{{ asset_url('main.js') }}"></script>
-<style>[data-admin-only].mok-hidden{display:none!important;}#toolsPanel.mok-hidden,#toolsPanel2.mok-hidden{display:none!important;}.agent-header button.mok-hidden{display:none!important;}.mok-channels{position:relative;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}.mok-channels>.header-btns-dropdown{left:0;right:auto;top:calc(100%
+<style>[data-admin-only].mok-hidden{display:none!important;}[data-login-only].mok-hidden{display:none!important;}#toolsPanel.mok-hidden,#toolsPanel2.mok-hidden{display:none!important;}.agent-header button.mok-hidden{display:none!important;}.mok-channels{position:relative;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}.mok-channels>.header-btns-dropdown{left:0;right:auto;top:calc(100%
 .mok-channels .mok-channels-label{font-size:10px;letter-spacing:1px;opacity:.55;margin-right:2px;white-space:nowrap}
 </style>
 </head>
 <body>
-    <div class="app-container">
+    <!-- ★ 頂端會員 Token 能量條 · idx 2026-10-09 (HK)｜寬 100% 置頂；顏色/高度/閃爍依 Token 剩餘額度分級 --><div id="tokenEnergyBar" class="token-energy-bar"><div class="token-energy-fill" id="tokenEnergyFill"></div></div><div class="app-container">
 
         <!-- ════════════════ 左側：Agent 列表 ════════════════ -->
         <div class="agent-sidebar" id="agentSidebar">
             <div class="agent-header">
                 <span class="agent-header-actions">
-                    <button id="createQiBtn" class="mok-pill" style="--tone:#4ec9b0;">➕</button>
+                    <button id="createQiBtn" data-login-only class="mok-pill mok-hidden" style="--tone:#4ec9b0;">➕</button>
                     <span class="mok-channels" id="mokChannelGroup"><button id="channelBtn" class="mok-pill" style="--tone:#4ec9b0;" title="頻道" aria-haspopup="true" aria-expanded="false">📡 頻道 ▾</button><div class="header-btns-dropdown" id="channelDropdown"><button id="meetingBtn" class="header-dropdown-item" style="--tone:#4ec9b0;" onclick="location.href='會議模式'">📋 會議</button><button id="gameBtn" class="header-dropdown-item" style="--tone:#ffb84d;" onclick="location.href='game'">🎮 game</button><button id="live3Btn" class="header-dropdown-item" style="--tone:#e06c9f;" onclick="location.href='report/病毒引擎/直播房3/index.html'">🎬 直播房3</button><button id="social2Btn" class="header-dropdown-item" style="--tone:#4ea3ff;" onclick="location.href='report/春/mokagi社交平台2/index.html'">🌐 mokagi社交平台2</button></div></span>
                     <button id="clearAllJobsBtn" class="mok-pill mok-pill--danger" style="--tone:#e05561; display:none;" title="一鍵清空所有 Agent 的 _job.json">🧹 清空Jobs</button>
                 </span>
@@ -59,16 +61,16 @@
                         <button id="showPendingBtn" class="header-tool-btn mok-pill" data-foldable="1" style="--tone:#4ec9b0; display:none;">📋 未完成工作</button>
                     </div>
                 </div>
-                <!-- ★ 更多 = 會員面板（by idx 2026-09-20；2026-09-21 改版）：下方依序 = 會籍鍵（src="/member"）/ Token 餘額 / 完成提示鍵 / 空行 / 緊急重啟鍵 -->
-                <button id="headerMoreBtn" class="header-more-btn mok-pill mok-pill--ghost" style="--tone:#8a8a95; display:inline-flex;" title="更多功能（會員）"><span id="headerMemberName">會員名稱</span></button>
+                <!-- ★ 更多 = 會員面板（by idx 2026-09-20；2026-09-21 改版）：下方依序 = Token 餘額鍵（兼任會員面板入口，src="/member"）/ 完成提示鍵 / 空行 / 軟重啟鍵 -->
+                <button id="headerMoreBtn" class="header-more-btn mok-pill mok-pill--ghost" style="--tone:#8a8a95; display:inline-flex;" title="更多功能（會員）"><span id="headerMemberName">載入中…</span></button>
                 <div class="header-btns-dropdown" id="headerBtnsDropdown">
                     <div class="header-more-static" id="headerMoreStatic">
                         <!-- src="/member" 鍵：點它開會員浮動面板（iframe src=/member） -->
-                        <button id="headerMemberBtn" class="header-dropdown-item" data-src="/member" title="會籍（/member）">🎫 會籍</button>
-                        <div class="header-token-balance" id="headerTokenBalance" title="Token 餘額">💰 Token 餘額：—</div>
+                        <!-- ★ 2026-09-27：會籍鍵已移除，改由下方 Token 餘額鍵開啟會員面板 -->
+                        <div class="header-token-balance header-dropdown-item" id="headerTokenBalance" data-src="/member" title="每月 Token 額度 - 已用 = 剩餘（點擊開會員面板）">🧮 —</div>
                         <button id="notifyToggleBtn" class="header-dropdown-item notify-toggle-btn" title="完成提示">🔔 通知</button>
                         <div class="header-dropdown-gap" aria-hidden="true"></div>
-                        <button id="stopBtn" data-admin-only class="mok-pill mok-pill--danger header-stop-btn header-dropdown-item mok-hidden" style="--tone:#e05561;" title="緊急重啟">🚫 <span class="btn-label">緊急重啟</span></button>
+                        <button id="stopBtn" data-admin-only class="mok-pill mok-pill--danger header-stop-btn header-dropdown-item mok-hidden" style="--tone:#e05561;" title="主人重啟（完整重啟 mokagi：重載所有程式碼與補丁；admin 專用）">🔒 <span class="btn-label">主人重啟</span></button>
                     </div>
                     <div class="header-fold-items" id="headerFoldItems"></div>
                 </div>
@@ -102,6 +104,8 @@
                     <span class="working-text" id="workingText">工作中...</span>
                 </div>
 
+                <!-- 快捷問題列（每 agent 3 條，點擊即插入輸入框）by 病毒引擎 20261001 -->
+                <div id="quickQuestionsBar" class="quick-questions-bar" style="display:none;" role="group" aria-label="快捷問題"></div>
                 <!-- 輸入區域 wrapper -->
                 <div id="chatInputWrapper">
                     <div class="drag-hint">📁 放開以加入檔案</div>
@@ -127,6 +131,7 @@
                     </div>
                     <button id="recordBtn" title="錄音">🎤 <span class="btn-label">錄音</span></button>
                     <button id="sendBtn" title="送出">📨 <span class="btn-label">送出</span></button>
+                    <button id="pauseBtn" title="暫停生成（不會重新發送）" style="display:none;">⏸ <span class="btn-label">暫停</span></button>
                     <button id="scrollToBottomBtn" title="回到最新">↓</button>
                 </div>
             </div>
@@ -140,20 +145,27 @@
                     <button data-tool="room">🏠 房間</button>
                     <button data-tool="bookmark">📑 書籤</button>
                     <button data-tool="search">🔍 搜尋</button>
+                    <button id="notebookBtn" data-tool="notebook" title="筆記">📝 筆記</button>
+                    <button id="toolsTokenBalance" class="tools-token-balance" data-tool="billing" data-member-only title="查看 MOKAGI 用量帳單（token）">📊 token</button>
+                    <button data-tool="會員系統說明" title="會員系統說明">💠 會員系統說明</button>
+                    <button data-tool="快取日報" data-admin-only class="mok-hidden" title="快取日報">📰 快取日報</button>
+                    <button data-tool="金流後台" data-admin-only class="mok-hidden" title="充值金流後台（訂單／入帳／收款設定）">💳 金流後台</button>
+                    <button data-tool="admin" data-admin-only class="mok-hidden">🧑💼 admin</button>
+                    <button data-tool="backup" data-admin-only class="mok-hidden">💾 備份</button>
+                    <button data-tool="進化" data-admin-only class="mok-hidden">🧬 進化</button>
+                    <button data-tool="logs" data-admin-only class="mok-hidden">📋 日誌</button>
+                    <button data-tool="monitor" data-admin-only class="mok-hidden">📊 監控</button>
+                    <button data-tool="pm2面板" data-admin-only class="mok-hidden" title="PM2 一鍵開關面板（啟動／停止／重啟 pm2 進程）">🎛️ PM2</button>
                     <button data-tool="files">📁 文件</button>
                     <button data-tool="tools">🔧 工具</button>
-                    <button data-tool="tokenstats">📈 Token 統計</button>
-                    <button data-tool="gpu">💻 GPU</button>
-                    <button data-tool="進化" data-admin-only class="mok-hidden">🧬 進化</button>
-                    <button data-tool="admin" data-admin-only class="mok-hidden">🧑💼 admin</button>
-                    <button data-tool="game">🎮 game</button>
-                    <button data-tool="logs">📋 日誌</button>
-                    <button data-tool="monitor">📊 監控</button>
-                    <button data-tool="ascii">🎨 ASCII</button>
                     <button data-tool="novnc" data-admin-only class="mok-hidden">🖥️ 桌面</button>
-                    <button data-tool="backup" data-admin-only class="mok-hidden">💾 備份</button>
+                    <button data-tool="gpu">💻 GPU</button>
+                    <button data-tool="coldcall" title="冷呼控制台">📞 冷呼控制台</button>
+                    <button data-tool="傳單王" title="網上傳單系統">📨 傳單王</button>
+                    <button data-tool="短劇王" title="短劇王操作台（漫劇／短劇出片）">🎬 短劇王</button>
+                    <button data-tool="game">🎮 game</button>
+                    <button data-tool="ascii">🎨 ASCII</button>
                     <button id="openToolsPanel2" title="再開一組工具面板">🧰 面板2</button>
-                    <button id="notebookBtn" title="筆記">📝 筆記</button>
                 </div>
                 <button id="toolsMoreBtn" class="tools-more-btn" title="更多工具" style="display:none;">⋯</button>
                 <div class="header-btns-dropdown" id="toolsMoreDropdown"></div>
@@ -172,7 +184,6 @@
                 <button data-tool="files" data-panel="2">📁 文件</button>
                 <button data-tool="logs" data-panel="2">📋 日誌</button>
                 <button data-tool="monitor" data-panel="2">📊 監控</button>
-                <button data-tool="tokenstats" data-panel="2">📈 Token 統計</button>
                 <button data-tool="tools" data-panel="2">🔧 工具</button>
                 <button data-tool="ascii" data-panel="2">🎨 ASCII</button>
                 <button data-tool="search" data-panel="2">🔍 搜尋</button>
@@ -245,21 +256,65 @@
     </div>
 
     <!-- ════════════════ QuickNav 快捷提示套件 by indexPage ════════════════ -->
+    <style>.mok-mh{display:none!important;}</style>
     <script src="{{ asset_url('quicknav/quicknav.js') }}"></script>
     <script>QuickNav.init({ input: '#chatInput' });</script>
 <script>
-/* admin-only 管制 by 凜 2026-09-23：進化 / admin / 桌面(VNC) / 備份 / 緊急重啟 僅 admin 可見可操作 */
+/* admin-only 管制 by 凜 2026-09-23：進化 / admin / 桌面(VNC) / 備份 / 軟重啟 僅 admin 可見可操作 */
 (function(){
   function reveal(on, data){
     window.MOK_IS_ADMIN = !!on;
     window.MOK_LOGGED_IN = !!(data && data.logged_in);
     var els=document.querySelectorAll('[data-admin-only]');
     for(var i=0;i<els.length;i++){ els[i].classList.toggle('mok-hidden', !on); }
+
+    /* === 機密閘 v2 by 凜 2026-09-28：非 admin 會員右側工具只留白名單 === */
+    /* 2026-09-30 indexPage：會員恢復「房間」、新增「MOKAGI 用量帳單」入口(billing)；[data-member-only] 僅會員可見 */ /* 2026-09-30 API平台工程師：移除重複統計鍵；用量帳單入口鍵改名為 token */
+    (function(){
+      var _all=document.querySelectorAll('#toolsPanel .tools-header-buttons button, #toolsPanel2 .tools-header-buttons button');
+      var _k;
+      for(_k=0;_k<_all.length;_k++){ _all[_k].classList.remove('mok-mh'); }
+      var _entry=['openToolsPanel2','notebookBtn','toolsMoreBtn'];
+      for(_k=0;_k<_entry.length;_k++){ var _e=document.getElementById(_entry[_k]); if(_e) _e.classList.remove('mok-mh'); }
+      var _p2=document.getElementById('toolsPanel2'); if(_p2) _p2.classList.remove('mok-mh');
+      var _mem=document.querySelectorAll('#toolsPanel [data-member-only], #toolsPanel2 [data-member-only]');
+      for(_k=0;_k<_mem.length;_k++){ _mem[_k].classList.add('mok-mh'); }
+      if(window.MOK_LOGGED_IN){ for(_k=0;_k<_mem.length;_k++){ _mem[_k].classList.remove('mok-mh'); } }
+      if(!on){
+        var _allow={room:1,billing:1,bookmark:1,search:1,'頻道清單':1,mokagiWIKI:1,'會員系統說明':1};
+        for(_k=0;_k<_all.length;_k++){
+          var _b=_all[_k];
+          if(_b.id==='agentInfoBtn'||_b.id==='notebookBtn'){ _b.classList.remove('mok-mh'); continue; }
+          var _t=_b.getAttribute('data-tool');
+          if(_t && _allow[_t]){ _b.classList.remove('mok-mh'); continue; }
+          _b.classList.add('mok-mh');
+        }
+        for(_k=0;_k<_entry.length;_k++){ if(_entry[_k]==='notebookBtn'||_entry[_k]==='toolsMoreBtn') continue; /* indexPage 2026-10-01：非 admin 會員也保留 ⋯ 更多鈕，否則窄版面被折疊的尾端鍵(會員系統說明/筆記)永遠打不開 */ var _e2=document.getElementById(_entry[_k]); if(_e2) _e2.classList.add('mok-mh'); }
+        var _p22=document.getElementById('toolsPanel2'); if(_p22) _p22.classList.add('mok-mh');
+      }
+    })();
+    /* indexPage|公開層(免登入) 顯示頻道鍵、createQiBtn 訪客隱藏|20260927_032000 */ /* 免登入公開層：僅登入成員可見（createQiBtn ➕） */
+    var _lo=document.querySelectorAll('[data-login-only]');
+    for(var k=0;k<_lo.length;k++){ _lo[k].classList.toggle('mok-hidden', !window.MOK_LOGGED_IN); }
+    /* 公開層（免登入）顯示：頻道鍵 📡 頻道 */
+    var _chg=document.getElementById('mokChannelGroup')||document.getElementById('channelBtn');
+    if(_chg){ _chg.classList.remove('mok-hidden'); }
     // 未登入訪客：整個工作區隱藏＋禁用（#toolsPanel / #toolsPanel2）
     var _tp=document.getElementById('toolsPanel');
     if(_tp) _tp.classList.toggle('mok-hidden', !window.MOK_LOGGED_IN);
     var _tp2=document.getElementById('toolsPanel2');
-    if(_tp2 && !window.MOK_LOGGED_IN){ _tp2.classList.add('mok-hidden'); _tp2.style.display='none'; } var _ah=document.querySelector('.agent-header'); if(_ah){ var _ahb=_ah.querySelectorAll('button'); for(var k=0;k<_ahb.length;k++){ var _b=_ahb[k]; _b.classList.toggle('mok-hidden', !window.MOK_LOGGED_IN); _b.disabled=!window.MOK_LOGGED_IN; _b.style.pointerEvents=window.MOK_LOGGED_IN?'':'none'; } }
+    if(_tp2 && !window.MOK_LOGGED_IN){ _tp2.classList.add('mok-hidden'); _tp2.style.display='none'; } var _ah=document.querySelector('.agent-header');
+    if(_ah){
+      var _ahb=_ah.querySelectorAll('button');
+      for(var n=0;n<_ahb.length;n++){
+        var _b=_ahb[n];
+        /* 公開層（免登入）：頻道鍵組保留顯示、可點；[data-login-only] 交由登入狀態決定 */
+        if(_b.closest('#mokChannelGroup')||_b.hasAttribute('data-login-only')) continue;
+        _b.classList.toggle('mok-hidden', !window.MOK_LOGGED_IN);
+        _b.disabled=!window.MOK_LOGGED_IN;
+        _b.style.pointerEvents=window.MOK_LOGGED_IN?'':'none';
+      }
+    }
   }
   window.MOK_LOGGED_IN = false;
   reveal(false, null);
@@ -295,6 +350,44 @@
         .catch(function(){});
     }catch(e){}
   }
+  if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}
+})();</script>
+<!-- 訪客產物入口（產物三層落點 第1層）by 凜 20260928 -->
+<script>(function(){
+  function isGuest(){
+    try{
+      var u = localStorage.getItem('mokagi_user_id') || localStorage.getItem('web_user_id') || '';
+      if(!u) return true;
+      return u.indexOf('web_guest_')===0 || u.indexOf('guest:')===0;
+    }catch(e){ return true; }
+  }
+  function tick(){
+    try{
+      if(!isGuest()) return;
+      fetch('/api/anon/state', {credentials:'same-origin'})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){
+          if(!d || !d.sid) return;
+          var el = document.getElementById('anonArtifactEntry');
+          if(!d.files){ if(el) el.style.display = 'none'; return; }
+          if(!el){
+            el = document.createElement('a');
+            el.id = 'anonArtifactEntry';
+            el.target = '_blank';
+            el.rel = 'noopener';
+            el.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9998;background:#2563eb;color:#fff;'
+              + 'padding:9px 15px;border-radius:22px;font-size:13px;line-height:1;text-decoration:none;'
+              + 'box-shadow:0 4px 14px rgba(0,0,0,.28);font-family:inherit';
+            document.body.appendChild(el);
+          }
+          el.href = d.page || ('/anon/' + d.sid);
+          el.textContent = '\u{1F4C1} 我的產物 ' + d.files;
+          el.style.display = '';
+        })
+        .catch(function(){});
+    }catch(e){}
+  }
+  function boot(){ tick(); setInterval(tick, 20000); }
   if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}
 })();</script>
 </body>

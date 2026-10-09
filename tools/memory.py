@@ -92,20 +92,10 @@ PLUGIN_INFO = {
     "tool_schema": {
         "name": "memory",
         "description": (
-            "管理長期記憶、知識庫以及對話歷史語義搜索。"
-            "當用戶要求「記住」、「回憶」、「刪除記憶」、「重建知識庫」、「搜索歷史對話」時使用。\n\n"
-            "【重要】哪些 action 必須提供 content？\n"
-            "- remember, recall, delete, update, semantic_search, get_conversation → 必須提供 content\n"
-            "- list, forgetall, rebuild_kb, list_kb, get_full_history → 禁止提供 content（提供會被忽略）\n\n"
-            "【返回格式】\n"
-            "- 成功：人類可讀字符串（例如「✅ 已記住 […]」或找到的對話列表）。\n"
-            "- semantic_search 返回格式：「【ID】角色: 內容摘要」，其中 ID 是數字，可用於 get_conversation。\n"
-            "- 錯誤時返回 JSON：{\"success\": false, \"error_type\": \"...\", \"error_message\": \"...\"}。\n\n"
-            "【常見錯誤避免】\n"
-            "1. get_conversation 的 ID 必須從 semantic_search 返回的【ID】中獲得，不可隨意填寫。\n"
-            "2. 若 semantic_search 返回結果少於 2 條，可提高 assoc_count（例如設為 10）後再試一次。\n"
-            "3. 不要在 update 或 delete 的 content 中加入多餘文字，嚴格按格式給出。\n"
-            "4. 不要為 list, forgetall, rebuild_kb, list_kb, get_full_history 提供 content 參數。"
+            "管理長期記憶、知識庫與對話歷史搜索。用戶說「記住/回憶/刪除記憶/重建知識庫/搜索對話」時使用。\n\n"
+            "【content 規則】remember/recall/delete/update/semantic_search/get_conversation 必須給 content；list/forgetall/rebuild_kb/list_kb/get_full_history 不要給（會被忽略）。\n"
+            "【返回】成功＝可讀字串；semantic_search 回「【ID】角色: 摘要」，ID 可給 get_conversation；失敗＝JSON 含 error_message。\n"
+            "【注意】get_conversation 的 ID 只能取自 semantic_search 結果；update/delete 的 content 不得夾雜多餘文字。"
         ),
         "parameters": {
             "type": "object",
@@ -121,54 +111,28 @@ PLUGIN_INFO = {
                         "autoextract", "maintain", "profile"
                     ],
                     "description": (
-                        "要執行的操作。各 action 的詳細說明（含是否需要 content）：\n\n"
-                        "**remember** (需要 content)：記住用戶說的重要信息。\n"
-                        "  示例：用戶說「記住我喜歡喝冰美式」 → action=remember, content=\"用戶喜歡喝冰美式\"\n\n"
-                        "**recall** (需要 content)：根據關鍵詞回憶相關記憶。\n"
-                        "  示例：用戶問「我之前喜歡喝什麼？」 → action=recall, content=\"喜歡喝\"\n\n"
-                        "**list** (不需要 content)：列出最近 10 條記憶。\n\n"
-                        "**delete** (需要 content，僅數字)：刪除指定序號的記憶。\n"
-                        "  示例：用戶說「刪除第3條記憶」 → action=delete, content=\"3\"\n\n"
-                        "**update** (需要 content，格式「序號 新內容」)：更新指定序號的記憶。\n"
-                        "  示例：用戶說「把第3條改成我現在喜歡拿鐵」 → action=update, content=\"3 我現在喜歡拿鐵\"\n\n"
-                        "**forgetall** (不需要 content)：清空所有記憶（危險操作，僅在用戶明確要求時使用）。\n\n"
-                        "**rebuild_kb** (不需要 content)：重建知識庫（掃描 Agent 目錄下的 .md 文件）。\n\n"
-                        "**list_kb** (不需要 content)：列出知識庫中的區塊。\n\n"
-                        "**get_full_history** (不需要 content)：返回全部對話的摘要列表（格式：「輪次X (ID:Y): 用戶: ... Agent: ...」）。\n\n"
-                        "**semantic_search** (需要 content)：搜索對話歷史中的相關對話。支持多個關鍵詞（空格分隔），系統會自動生成聯想詞擴充搜索。\n"
-                        "  示例：用戶問「我們之前討論過車和飛機嗎？」 → action=semantic_search, content=\"車 飛機\"\n\n"
-                        "**get_conversation** (需要 content，數字 ID)：根據會話 ID 獲取完整對話。\n"
-                        "  ID 必須從 semantic_search 返回的【ID】中獲得。\n"
-                        "  示例：用戶說「把ID為123的對話完整內容給我」 → action=get_conversation, content=\"123\""
+                        "要執行的操作（(需content)=必須給 content）：\n"
+                        "remember(需)：記住重要信息，如 content=\"用戶喜歡冰美式\"。recall(需)：按關鍵詞回憶，如 content=\"喜歡喝\"。\n"
+                        "list：列最近10條。delete(需,純數字)：刪序號。update(需,\"序號 新內容\")：改某條。\n"
+                        "forgetall：清空（危險）。rebuild_kb：掃 agent 目錄 .md 重建知識庫。list_kb：列知識庫區塊。get_full_history：全部對話摘要。\n"
+                        "semantic_search(需)：搜索對話歷史，可多關鍵詞（空格分隔）自動聯想擴充，如 content=\"車 飛機\"。\n"
+                        "get_conversation(需,數字ID)：取完整對話，ID 取自 semantic_search，如 content=\"123\"。"
                         
-                        "**get_recent_summary** \n取得最近 N 輪對話的摘要列表（內容為 LLM 生成的關鍵詞與摘要）。參數 content 為可選數字（輪數），預設使用配置的 MAX_HISTORY_ROUNDS \n"
+                        "**get_recent_summary**：最近 N 輪摘要（content=可選輪數，預設 MAX_HISTORY_ROUNDS）。\n"
 
-                        "**patch_conv_id** (不需要 content)：補全 chat_history 表中舊消息的 conv_id 字段。\n"
-                        "  該操作會掃描 conversation_history.db 與 chat_history.db，按內容與時間戳匹配，\n"
-                        "  將缺失的 conv_id 補齊，使所有歷史消息都能正確顯示對話 ID。\n"
-                        "  執行完畢後會返回更新的消息總數。"
+                        "**patch_conv_id**：補全舊訊息 conv_id（掃描 db 比對內容與時間戳，完畢回報更新數）。"
                     )
                 },
                 "content": {
                     "type": "string",
                     "description": (
-                        "操作的具體內容，格式取決於 action。\n\n"
-                        "特別注意：\n"
-                        "- 對於 remember：系統會自動將「我」轉為用戶名，「你/妳/您」轉為 Agent 名。\n"
-                        "- 對於 semantic_search：可輸入單個關鍵詞或多個詞（空格分隔）。例如「部署 錯誤」。\n"
-                        "- 對於 update：必須嚴格遵循「序號 新內容」格式，中間有一個空格。\n"
-                        "- 對於 delete 和 get_conversation：僅接受純數字，不要加任何其他字符。\n"
-                        "- 對於 list, forgetall, rebuild_kb, list_kb, get_full_history：不要提供 content，提供會被忽略。"
+                        "操作的具體內容，格式依 action：remember 會自動把「我」轉用戶名、「你/妳/您」轉 Agent 名；semantic_search 可多詞（空格分隔）；update 需「序號 新內容」；delete/get_conversation 僅純數字。"
                     )
                 },
                 "n_results": {
                     "type": "integer",
                     "description": (
-                        "僅對 semantic_search 有效。指定返回的對話記錄最大條數。\n"
-                        "- 默認 10，最小 1，無上限（但過大會消耗 token）。\n"
-                        "- 若用戶要求「找幾條」、「最近相關」、「多一些」，建議設為 5~15。\n"
-                        "- 若用戶要求「全部」、「所有相關」，建議設為 30 或更高（注意 token 消耗）。\n"
-                        "- 範例：用戶說「幫我找5條關於車的對話」 → n_results=5"
+                        "僅 semantic_search 用。返回條數上限，預設10、最小1；「找幾條」建議 5~15，「全部」可 30+（耗 token）。"
                     ),
                     "default": 10,
                     "minimum": 1
@@ -176,16 +140,7 @@ PLUGIN_INFO = {
                 "assoc_count": {
                     "type": "integer",
                     "description": (
-                        "僅對 semantic_search 有效。每個原始關鍵詞生成多少個聯想詞（用於擴充搜索範圍）。\n\n"
-                        "默認 5，最小 1，無上限。數值越大搜索越全面，但會增加 LLM 調用和 token 消耗。\n\n"
-                        "**何時提高此值（例如設為 10~15）：**\n"
-                        "- 用戶的關鍵詞很抽象或歧義（例如「蘋果」指水果還是手機）。\n"
-                        "- 第一次搜索結果很少（少於 3 條）且用戶要求「多找找」。\n"
-                        "- 用戶明確要求「搜索所有可能的相關內容」。\n\n"
-                        "**何時降低此值（例如設為 3）：**\n"
-                        "- 搜索結果太多幹擾，且用戶要求「只找最相關的」。\n"
-                        "- 快速測試時希望節省 token。\n\n"
-                        "**範例**：用戶說「搜一下關於『車』的對話，多擴充一點聯想」 → assoc_count=10"
+                        "僅 semantic_search 用。每個關鍵詞生成幾個聯想詞擴充搜索，預設5、最小1。關鍵詞抽象或結果太少→調高（10~15）；想收斂或省 token→調低（3）。"
                     ),
                     "default": 5,
                     "minimum": 1
@@ -930,6 +885,7 @@ async def auto_extract_facts(user_key, user_msg, assistant_reply, agent_config=N
         result = await mokagi.call_llm(
             prompt=prompt, user_id="system", stream=False, temperature=0.2,
             agent_config=agent_config, include_soul=False, num_predict=4096,
+            disable_thinking=True,
         )
         text = result if isinstance(result, str) else (result or {}).get("content", "")
     except Exception as e:
@@ -948,29 +904,66 @@ async def auto_extract_facts(user_key, user_msg, assistant_reply, agent_config=N
             n_upd += 1
     # ===== profile 自動維護：有新 facts 時，節流刷新 user.md 的動態段 =====
     if n_ins or n_upd:
-        _maybe_refresh_profile(agent_name, agent_config)
+        _maybe_refresh_profile(agent_name, agent_config, user_key)
     return f"facts={len(facts)} insert={n_ins} update={n_upd}"
 
-def _maybe_refresh_profile(agent_name, agent_config=None):
-    """節流刷新 agent 的 soul/user.md 動態段。
+# ===== 記憶分庫（2026-10-03 by 凜）：profile 按「當前對話者(uid)」分庫 =====
+def _safe_profile_key(s):
+    """把 uid / agent 名轉成檔名安全字串（保留 CJK 與常見字元）。"""
+    out = []
+    for ch in str(s or ""):
+        out.append(ch if (ch.isalnum() or ch in "._-") else "_")
+    return ("".join(out).strip("._") or "_")
 
-    只在「已 profile 化」（user.md 內含動態標記）或 MOK_MEM_PROFILE_AUTO=1 時才動手，
-    避免誤改尚未啟用此功能的 agent。預設每小時最多刷新一次。
+def _profile_uid(user_key, agent_name):
+    """從 memory 的 user_key（= user_id + "_" + agent）反推對話者 uid。"""
+    if not user_key:
+        return None
+    uk = str(user_key)
+    suf = "_" + str(agent_name)
+    if uk.endswith(suf):
+        uk = uk[:-len(suf)]
+    return uk.strip() or None
+
+def _is_guest_uid(uid):
+    u = str(uid or "")
+    return u.startswith("web_guest") or u.startswith("guest")
+
+def _user_profile_path(agent_name, uid):
+    """當前對話者的 profile 落點：~/.mok/user/<uid>/profile/<agent>.md（分庫）。"""
+    return os.path.expanduser(
+        "~/.mok/user/{}/profile/{}.md".format(
+            _safe_profile_key(uid), _safe_profile_key(agent_name)))
+
+def _maybe_refresh_profile(agent_name, agent_config=None, user_key=None):
+    """節流刷新 profile（分庫版）。
+
+    - 有 user_key（=當前對話者）時：只刷新該對話者的 profile，
+      寫入 ~/.mok/user/<uid>/profile/<agent>.md；soul/user.md 只保留靜態段。
+    - 沒帶 user_key 時：退回舊行為（整包寫 soul/user.md），僅供相容。
+    只在 MOK_MEM_PROFILE_AUTO=1 或「已 profile 化」時才動手。
     """
     try:
+        uid = _profile_uid(user_key, agent_name)
+        if user_key is not None and _is_guest_uid(uid):
+            return
         path = os.path.join(os.path.expanduser("~/.mok/agent"), agent_name, "soul", "user.md")
         if not os.path.exists(path):
             return
+        _user_path = _user_profile_path(agent_name, uid) if uid else None
+        _per_user_exists = bool(_user_path and os.path.exists(_user_path))
         if not _mem_bool(agent_config, "MOK_MEM_PROFILE_AUTO", False):
             with open(path, "r", encoding="utf-8") as f:
-                if _PROFILE_BEGIN not in f.read():
-                    return
+                _has_marker = _PROFILE_BEGIN in f.read()
+            if not (_has_marker or _per_user_exists):
+                return
         gap = _mem_f(agent_config, "MOK_MEM_PROFILE_REFRESH_SEC", 3600)
         now = time.time()
-        if now - float(_profile_refresh_ts.get(agent_name) or 0) < gap:
+        _tkey = agent_name + ":" + (uid or "")
+        if now - float(_profile_refresh_ts.get(_tkey) or 0) < gap:
             return
-        _profile_refresh_ts[agent_name] = now
-        update_user_profile(agent_name, agent_config, dry_run=False)
+        _profile_refresh_ts[_tkey] = now
+        update_user_profile(agent_name, uid=uid, agent_config=agent_config, dry_run=False)
     except Exception as e:
         logging.warning(f"[profile] 自動刷新失敗: {e}")
 
@@ -1002,8 +995,13 @@ _STATIC_END = "<!-- MOK_PROFILE_STATIC_END -->"
 def _sanitize_md_line(s):
     return (s or "").replace("=", "\uff1d").replace("\n", " ").strip()
 
-def update_user_profile(agent_name, agent_config=None, dry_run=False, max_items=20):
-    """user.md 雙段化：靜態長期事實（原內容，永不改）＋ 動態近況（自動維護）。"""
+def update_user_profile(agent_name, uid=None, agent_config=None, dry_run=False, max_items=20):
+    """user.md 雙段化 ＋ profile 記憶分庫（2026-10-03 by 凜）。
+
+    - soul/user.md：只保留「靜態段」（agent 級，與對話者無關）。
+    - ~/.mok/user/<uid>/profile/<agent>.md：當前對話者的「動態近況」（分庫）。
+    - uid 為 None 時退回舊行為（整包寫 soul/user.md），僅供相容。
+    """
     path = os.path.join(os.path.expanduser("~/.mok/agent"), agent_name, "soul", "user.md")
     if not os.path.exists(path):
         return {"ok": False, "msg": f"找不到 {path}"}
@@ -1029,9 +1027,14 @@ def update_user_profile(agent_name, agent_config=None, dry_run=False, max_items=
             metas = got.get("metadatas") or []
             now = time.time()
             items = []
+            _want_keys = None
+            if uid is not None:
+                _want_keys = {f"{uid}_{agent_name}", str(uid)}
             for i in range(len(gids)):
                 mm = metas[i] if i < len(metas) and metas[i] else {}
                 if mm.get("source") not in ("auto",):
+                    continue
+                if _want_keys is not None and str(mm.get("chat_id") or "") not in _want_keys:
                     continue
                 ts = mm.get("updated_at") or mm.get("created_at") or 0
                 items.append((_decay_score(mm, now), docs[i] if i < len(docs) else "", ts))
@@ -1058,13 +1061,29 @@ def update_user_profile(agent_name, agent_config=None, dry_run=False, max_items=
         + ("\n".join(lines) if lines else "（暫無）")
         + "\n" + _PROFILE_END + "\n"
     )
-    new_raw = _STATIC_BEGIN + "\n" + static.strip("\n") + "\n" + _STATIC_END + "\n" + dynamic_block
+    if uid is None:
+        new_raw = _STATIC_BEGIN + "\n" + static.strip("\n") + "\n" + _STATIC_END + "\n" + dynamic_block
+        user_out = None
+    else:
+        new_raw = _STATIC_BEGIN + "\n" + static.strip("\n") + "\n" + _STATIC_END + "\n"
+        user_out = _user_profile_path(agent_name, uid)
     if dry_run:
-        return {"ok": True, "dry_run": True, "path": path,
+        return {"ok": True, "dry_run": True, "path": path, "user_path": user_out,
                 "static_len": len(static), "dynamic_items": len(lines)}
     with open(path, "w", encoding="utf-8") as f:
         f.write(new_raw)
-    return {"ok": True, "path": path, "dynamic_items": len(lines)}
+    if user_out is not None:
+        try:
+            _d = os.path.dirname(user_out)
+            if _d and not os.path.exists(_d):
+                os.makedirs(_d, exist_ok=True)
+            _body = "# 對話者近況（自動維護／僅限本人對話載入）\n\n" + dynamic_block.lstrip("\n")
+            with open(user_out, "w", encoding="utf-8") as f:
+                f.write(_body)
+        except Exception as e:
+            logging.error(f"[profile] 寫入分庫檔失敗: {e}")
+            return {"ok": False, "msg": str(e), "path": path, "user_path": user_out}
+    return {"ok": True, "path": path, "user_path": user_out, "dynamic_items": len(lines)}
 
 # ============================================================================ #
 # 舊對話加入 語義搜索
@@ -2028,7 +2047,8 @@ async def handle_memory(args, chat_id: str = None, agent_config: Optional[Dict] 
         # profile：維護 user.md 雙段
         elif subcmd == "profile":
             apply_now = "apply" in content.split()
-            res = update_user_profile(agent_name, agent_config, dry_run=not apply_now)
+            _uid = _profile_uid(chat_id, agent_name) if chat_id else None
+            res = update_user_profile(agent_name, uid=_uid, agent_config=agent_config, dry_run=not apply_now)
             tag = "已套用" if apply_now else "dry-run（加 apply 才真的寫）"
             return f"📇 profile（{tag}）：{res}"
 

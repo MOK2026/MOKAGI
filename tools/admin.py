@@ -40,14 +40,10 @@ PLUGIN_INFO = {
     "tool_schema": {
         "name": "admin",
         "description": (
-            "執行系統管理操作。支援以下動作：htop, cpu, mode, logs, read_file, set_model, ollama_rm, pip, exec。\n\n"
-            "【重要】高風險操作（ollama_rm, pip install, exec）需要二次確認。呼叫這類工具前，請先在回覆中把要對主人說的話「完整說完」（用句號收尾），不要在「：」後面就丟出工具呼叫。系統會自動把確認訊息轉成一則正常的助手訊息發給主人，你不需要（也不要）自行複製或改寫 CONFIRM_SPLIT 內容。\n\n"
-            "確認訊息會附上一行 `/admin confirm <token>`：請提醒主人回覆該確認碼即可執行。\n\n"
-            "【返回格式】\n"
-            "- 成功：返回人類可讀的字符串（或 JSON 包含 action 等字段）。\n"
-            "- 需要確認時：工具結果是「CONFIRM_SPLIT:...」字串（由系統處理並自動顯示給主人，你不必原樣輸出）。\n"
-            "- 錯誤時返回 JSON：{\"success\": false, \"error_type\": \"...\", \"error_message\": \"...\"}。\n\n"
-            "【權限】部分操作僅限管理員（`ADMIN_CHAT_ID` 配置的用戶），非管理員會返回權限錯誤。"
+            "執行系統管理操作。動作：htop/cpu/mode/logs/read_file/set_model/ollama_rm/pip/exec。\n\n"
+            "【重要】ollama_rm、pip、exec 為高風險，需二次確認：呼叫前先把要對主人說的話完整說完（句號收尾），不要把工具呼叫接在半句後；系統會回傳 CONFIRM_SPLIT 確認碼，請原樣轉述 `/admin confirm <token>` 給主人回覆即可。\n\n"
+            "【返回格式】成功＝可讀字串；需確認＝CONFIRM_SPLIT:...（系統自處理，不必原樣輸出）；失敗＝JSON 含 {\"success\": false, \"error_message\": ...}。\n"
+            "【權限】部分操作僅限管理員（ADMIN_CHAT_ID）。"
         ),
         "parameters": {
             "type": "object",
@@ -59,28 +55,16 @@ PLUGIN_INFO = {
                         "set_model", "ollama_rm", "pip", "exec"
                     ],
                     "description": (
-                        "要執行的操作類型。詳細說明：\n\n"
-                        "**htop**：查看系統負載（top 前5行）。不需要 args。\n\n"
-                        "**cpu**：查看 CPU 使用率。不需要 args。\n\n"
-                        "**mode**：顯示當前使用的模型以及 Ollama 中已安裝的所有模型列表。不需要 args。\n\n"
-                        "**logs**：查看 pm2 日誌。可選 args 為行數（數字），默認 15。例如「50」表示查看最近 50 行。\n\n"
-                        "**read_file**：讀取檔案內容。args 格式：「檔案路徑 [行數]」。例如「admin.py」讀取全文，「admin.py 20」讀取前20行。\n\n"
-                        "**set_model**：切換當前 Agent 使用的模型。args 為模型名稱（必須已在配置文件中定義）。例如「llama3.2:3b」。\n\n"
-                        "**ollama_rm**：刪除 Ollama 模型（高風險，需二次確認）。args 為模型名稱。例如「llama3.2:3b」。\n\n"
-                        "**pip**：安裝 Python 套件（高風險，需二次確認）。args 格式：「install 套件名」。例如「install requests」。\n\n"
-                        "**exec**：執行任意 Shell 命令（高風險，需二次確認）。args 為完整的 Shell 命令。例如「ls -la」或「curl https://api.example.com」。"
+                        "要執行的操作類型。\n"
+                        "htop/cpu/mode：不需 args。logs：args=行數（預設15）。read_file：args=「檔案路徑 [行數]」。\n"
+                        "set_model：args=模型名（須已在配置定義）。ollama_rm：args=模型名（高風險）。\n"
+                        "pip：args=「install 套件名」（高風險）。exec：args=完整 Shell 命令（高風險）。"
                     )
                 },
                 "args": {
                     "type": "string",
                     "description": (
-                        "操作的參數，格式取決於 action（見 action 描述）。\n"
-                        "特別注意：\n"
-                        "- 對於 read_file：若只給路徑則讀全文；若空格後跟數字則讀前 N 行。\n"
-                        "- 對於 set_model：只給模型名稱，不要加其他字符。\n"
-                        "- 對於 pip：必須以「install」開頭，後接套件名。\n"
-                        "- 對於 exec：直接寫命令，不需要前綴。\n"
-                        "- 其他 action 可省略 args。"
+                        "格式取決於 action：read_file＝路徑[ 行數]；set_model＝模型名（不加其他字）；pip＝以 install 開頭；exec＝直接寫命令；其他可省略。"
                     )
                 }
             },
@@ -150,7 +134,7 @@ PLUGIN_INFO = {
                 "- `df -h`\n\n"
                 "返回：系統會先產生確認碼（工具結果為 `CONFIRM_SPLIT:...`，由系統自動轉成一則助手訊息顯示給主人），"
                 "等待用戶發送 `/admin confirm <token>` 後才會真正執行。\n\n"
-                "成功執行後返回命令的 stdout（前3000字符），失敗返回 stderr。\n"
+                "成功執行後返回命令的 stdout（後3000字符），失敗返回 stderr。\n"
                 "若命令風險等級為 `safe` 或 `low` 且環境變量 `MOK_AUTO_APPROVE_ADMIN=1`，則可能直接執行無需確認。"
             ),
             "parameters": {
@@ -844,13 +828,19 @@ async def confirm_command(chat_id: str, token: str, agent_config: dict = None) -
     return success, result
 
 def is_admin(chat_id: str, agent_config: dict = None) -> bool:
-    """判斷當前用戶是否為管理員 網頁版自動放行"""
+    """owner/admin 判定唯一真相（2026-10-03 by 凜）。
+
+    以 member.db users.is_admin 為準，不再比名稱字串、也不再對非數字 chat_id 全放行。
+    Telegram 數值 chat_id 只認該 agent 明確設定的 ADMIN_CHAT_ID。
+    任何例外 -> False（fail-closed）。
+    """
     if agent_config is None:
         agent_config = mokagi._agent_config
-    admin_chat_id = agent_config.get("ADMIN_CHAT_ID", "")
-    if chat_id and not chat_id.isdigit():
-        return True
-    return str(chat_id) == admin_chat_id
+    try:
+        from owner_auth import is_admin_identity
+        return bool(is_admin_identity(chat_id, agent_config))
+    except Exception:
+        return False
 def request_confirmation(chat_id: str, cmd_type: str, args: str, description: str = "") -> str:
     token = generate_token(chat_id, cmd_type, args)
     _store_pending(token, cmd_type, args, chat_id, description)
@@ -924,9 +914,49 @@ def _extract_path_candidates(command):
     for m in re.finditer(r"(~/[^\s|;&<>()]+)", text):
         cands.add(os.path.expanduser(m.group(1)))
     return cands
+
+# [封後門 2026-10-04 mokagi說明] 後門路徑專屬寫入保護（只比對路徑，不誤傷通用檔名）
+_BACKDOOR_PATHS_REL = ("run/master_restart.flag", "run/soft_restart.flag", "core/warden/requests")
+_BACKDOOR_WRITE_RE = re.compile(
+    r"(>>?|\btee\b|\bsed\s+-i|\bperl\s+-i|\bcp\s|\bmv\s|\brm\s|\btruncate\s"
+    r"|\bdd\s|\bchmod\s|\bchown\s|\bchattr\s|\bln\s|\bmkfifo\s|\btouch\s|\binstall\s|\bmkdir\s"
+    r"|\bopen\s*\(|\bwrite_text\b|\bwritelines\b|\bto_json\b|\bshred\s"
+    r"|\bremove\s*\(|\bunlink\s*\(|\brmtree\s*\(|\brename\s*\(|\breplace\s*\(|\bwrite\s*\()")
+
+
+def _backdoor_path_set():
+    base = os.path.expanduser("~/.%s" % mokagi_name)
+    return set(os.path.realpath(os.path.join(base, rel)) for rel in _BACKDOOR_PATHS_REL)
+
+
+def _backdoor_write_guard(command):
+    if not command:
+        return None
+    if not _BACKDOOR_WRITE_RE.search(_norm_cmd_text(str(command))):
+        return None
+    paths = _backdoor_path_set()
+    for cand in _extract_path_candidates(command):
+        try:
+            real = os.path.realpath(cand)
+        except Exception:
+            continue
+        if real in paths:
+            return "命令試圖寫入受封鎖的重啟後門路徑：%s" % real
+        try:
+            rdir = os.path.realpath(os.path.dirname(cand))
+            if os.path.isdir(rdir) and rdir in paths:
+                return "命令試圖寫入受封鎖的重啟後門目錄：%s" % rdir
+        except Exception:
+            pass
+    return None
+
+
 def _protected_write_guard(command):
     """若命令對受保護核心檔構成任何寫入/刪除/連結，回傳描述字串；否則 None。
     以「實際路徑(realpath)」比對，並額外攔 shell 變數字串(如 $X/admin.py)。"""
+    _bd = _backdoor_write_guard(command)
+    if _bd:
+        return _bd
     prot = _protected_path_set()
     names = [os.path.basename(x) for x in prot]
     text = _norm_cmd_text(command)
@@ -952,6 +982,39 @@ def _protected_write_guard(command):
     return None
 def _core_blocked(command):
     return _protected_write_guard(command) is not None
+# ==== L1 硬閘門：重啟 mokagi 一律攔下（2026-09-29 衍）====
+# 政策：任何重啟 mokagi 的動作，必須由主人手動執行，agent 嚴禁自行重啟。
+# 涵蓋：pm2 生命週期、systemctl、pkill/kill、restart mok_ 等；exec 與確認後執行皆攔。
+_MOKAGI_RESTART_RE = re.compile(
+    r"(pm2\s+(restart|reload|stop|delete|kill|start|resurrect|save|dump)\b)"
+    r"|(\brestart\b.{0,20}mok_)"
+    r"|(mok_.{0,20}\brestart\b)"
+    r"|(systemctl\s+(restart|stop|start)\b.{0,30}(mok|ollama))"
+    r"|((pkill|killall)\b.{0,30}(mok_|mokagi|launcher|python))"
+    r"|(\bkill\b.{0,30}(mok_|mokagi|launcher))",
+    re.I,
+)
+MOKAGI_RESTART_REFUSAL = (
+    "⛔ 已攔下：本系統嚴禁任何自行重啟 mokagi 的動作"
+    "（pm2 restart/reload/stop/start、systemctl、pkill、kill 等一律同罪）。\n"
+    "請主人自行手動重啟，衍不得代勞。此閘門寫死於核心 admin 工具，無法以其他指令繞過。"
+)
+# ==== 封後門 2026-10-04（mokagi說明）：revive / warden / 代客重啟 等繞道路徑 ====
+_BACKDOOR_RE = re.compile(
+    r"(api/(restart(?![\w-])|panic|resume))"
+    r"|(\bdlyrestart\b)"
+    r"|(_restart_mokagi)"
+    r"|(warden/requests)"
+    r"|(\b[\w.-]+\.req\b)",
+    re.I,
+)
+
+
+def _is_mokagi_restart_command(command: str) -> bool:
+    if not command:
+        return False
+    _t = _norm_cmd_text(str(command))
+    return bool(_MOKAGI_RESTART_RE.search(_t) or _BACKDOOR_RE.search(_t))
 # ==== L1 核心保護結束 ====
 
 # ==== L1 刪除改寫：rm 一律改走回收站 trash.sh ====
@@ -961,26 +1024,61 @@ def _mok_trash_script():
 
 def rewrite_delete_to_trash(command):
     """把單純 rm 命令改寫成呼叫 trash.sh，讓刪除一律進回收站。
-    回傳 (改寫後命令或原命令, 是否已改寫)。不安全目標不改寫，保留原命令由風險評估攔截。"""
+    回傳 (改寫後命令或原命令, 是否已改寫)。不安全目標不改寫，保留原命令由風險評估攔截。
+    2026-09-28 嚴格化：只改寫「單一、純淨、且全部目標都存在」的 rm，避免鏈式命令 token 被誤搬。"""
     try:
         import shlex as _shlex
-        m = re.match(r'^rm\s+(.+)$', command.strip())
+        import glob as _glob
+        # ---- 嚴格化（2026-09-28 衍）：修「逐 token 誤搬 + 繞過確認」----
+        # (1) 只接受單一、純淨的 rm。命令含任何 shell 串接／重導向／展開／命令替換字元，
+        #     一律不改寫，交回風險評估攔截。舊版會把 rm a 串接 chmod 000 f 整串吞掉並改寫成
+        #     trash.sh 參數，後半段 token 被當路徑逐個搬進回收站，還因為改寫成功而跳過確認。
+        #     （美元符號、反引號、反斜線用 chr() 表示，避免解析歧義）
+        raw = command.strip()
+        _META = ';&|<>(){}' + chr(36) + chr(96) + chr(92)
+        if any(ch in raw for ch in _META):
+            return command, False
+        m = re.match(r'^rm\s+(.+)$', raw)
         if not m:
             return command, False
         toks = _shlex.split(m.group(1))
+        flags = [t for t in toks if t.startswith('-')]
         paths = [t for t in toks if not t.startswith('-')]
         if not paths:
+            return command, False
+        # (2) 選項只允許單純英文字旗標（-f / -r / -rf / -v ...）
+        if any(not re.match(r'^-[A-Za-z]+$', f) for f in flags):
+            return command, False
+        # (3) glob 先在 Python 展開成實體路徑；展開不到任何東西就放棄改寫
+        _expanded = []
+        for _p in paths:
+            if _p.startswith('~'):
+                _p = os.path.expanduser(_p)
+            if any(_c in _p for _c in '*?['):
+                _hits = sorted(_glob.glob(_p))
+                if not _hits:
+                    return command, False
+                _expanded.extend(_hits)
+            else:
+                _expanded.append(_p)
+        paths = [os.path.abspath(_x) for _x in _expanded]
+        # (4) 所有目標都必須存在（含 symlink），有任何一個不存在就不改寫
+        if any(not os.path.lexists(_x) for _x in paths):
             return command, False
         home = os.path.expanduser("~")
         mok_root = os.path.expanduser("~/.%s" % mokagi_name)
         for p in paths:
-            rp = os.path.realpath(os.path.expanduser(p))
-            if rp in ('/', home, mok_root):
+            rp = os.path.realpath(p)
+            _CRIT = ('/etc', '/usr', '/bin', '/sbin', '/boot', '/var', '/dev',
+                     '/proc', '/sys', '/lib', '/lib64', '/opt', '/root', '/srv', '/run')
+            if (rp in ('/', home, mok_root)
+                    or any(rp == c or rp.startswith(c + os.sep) for c in _CRIT)
+                    or rp.startswith(mok_root + os.sep + 'core')
+                    or rp.startswith(mok_root + os.sep + 'tools')):
                 return command, False
         trash = _mok_trash_script()
         def _q(x):
-            if ('*' in x or '?' in x) and ' ' not in x:
-                return x
+            # glob 已展開成實體路徑，這裡一律加安全引號，不讓 bash 二次展開
             return _shlex.quote(x)
         safe = ' '.join(_q(x) for x in paths)
         return 'bash %s %s' % (_shlex.quote(trash), safe), True
@@ -989,11 +1087,79 @@ def rewrite_delete_to_trash(command):
 # ==== L1 刪除改寫結束 ====
 
 
+# ==== L1.5 全樹掃描攔阻（2026-10-04 靜）====
+# 背景：對整個家目錄 / 根目錄做遞迴 grep/find，會把磁碟 I/O 榨乾
+# （實測 iowait 52%、sda %util 80%、load 5+；多侍女同時工作時全體一起變慢）。
+# 原則：找檔走 code_index（技能「找檔規範」）；非用 shell 不可時，限定目錄 + 排除重目錄。
+_BLOCK_REASON = ""      # 最近一次阻擋的詳細原因（供 exec 分支附在訊息後）
+_FULLTREE_ROOTS = {
+    "/", "/home", "/home/ubuntu", "/home/ubuntu/.mok",
+    "~", "~/", "$HOME", "${HOME}",
+    os.path.expanduser("~"), os.path.join(os.path.expanduser("~"), ".mok"),
+}
+_FT_SCAN_CMD = re.compile(r"(^|[\s;&|(])(grep|rg|egrep|fgrep|ack|ag|find)\b")
+_FT_RECUR = re.compile(r"(?:^|\s)(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive|--dereference-recursive)(?=\s|$)")
+_FT_MAXDEPTH = re.compile(r"(?:^|\s)-maxdepth\s+([0-9]+)")
+_FT_ESCAPE = re.compile(r"--exclude-dir|--exclude(?![-a-z])|--glob|(?:^|\s)-path\b|(?:^|\s)-prune\b")
+_FT_RG = re.compile(r"(^|[\s;&|(])(rg|ack|ag)\b")
+_FT_SPLIT = re.compile(r"&&|\|\||;|\||\n")
+
+
+def _fulltree_scan_guard(command):
+    """偵測「掃整個家目錄/根目錄」的遞迴 grep/find。命中回傳原因字串，否則 None。"""
+    global _BLOCK_REASON
+    _BLOCK_REASON = ""
+    if not command:
+        return None
+    if os.environ.get("MOK_ALLOW_FULLTREE") == "1":
+        return None
+    _m = _FT_MAXDEPTH.search(command)
+    if _FT_ESCAPE.search(command) or (_m and int(_m.group(1)) <= 3):   # 已自行限定範圍 → 放行
+        return None
+    hits = []
+    for seg in _FT_SPLIT.split(command):
+        seg = seg.strip()
+        if not seg or not _FT_SCAN_CMD.search(seg):
+            continue
+        if "find" not in seg and not _FT_RECUR.search(seg) and not _FT_RG.search(seg):
+            continue
+        for tok in re.findall(r"[^\s;&|()<>'\"]+", seg)[1:]:
+            if tok.startswith("-"):
+                continue
+            t = tok.strip("'\"").replace("${HOME}", os.path.expanduser("~")).replace("$HOME", os.path.expanduser("~"))
+            t = os.path.expanduser(t)
+            try:
+                t = os.path.normpath(t)
+            except Exception:
+                pass
+            if t in _FULLTREE_ROOTS:
+                hits.append(tok)
+                break
+    if not hits:
+        return None
+    _BLOCK_REASON = (
+        "🚫 全樹掃描攔阻：偵測到對 `%s` 的遞迴 grep/find。\n"
+        "   全樹掃描會打爆磁碟 I/O（曾把 iowait 拉到 52%%、整台機器一起卡）。\n"
+        "   ✅ 找檔請走 code_index（技能「找檔規範」）。\n"
+        "   ✅ 真的要用 shell，請限定目錄並排除重目錄，例如：\n"
+        "      grep -rn 關鍵字 /home/ubuntu/.mok/agent/<自己> --exclude-dir=browser_profiles --exclude-dir=node_modules --exclude-dir=backups --exclude-dir=.chroma_data --exclude-dir=.git\n"
+        "      find /home/ubuntu/.mok/agent/<自己> -maxdepth 3 -name '*.md'"
+        % ", ".join(sorted(set(hits)))
+    )
+    return _BLOCK_REASON
+
+
 def assess_command_risk(command: str, agent_config: dict = None) -> str:
     # L1：受保護核心檔一律先擋（不可寫、刪、連結），位置先於任何白名單。
     if _protected_write_guard(command):
         return 'blocked'
     if _guard_self_kill(command):
+        return 'blocked'
+    # L1.5：全樹掃描攔阻（2026-10-04 靜）
+    if _fulltree_scan_guard(command):
+        return 'blocked'
+    # 硬閘門：重啟 mokagi 一律 blocked（2026-09-29 衍）
+    if _is_mokagi_restart_command(command):
         return 'blocked'
     if agent_config is None:
         agent_config = mokagi._agent_config
@@ -1346,14 +1512,12 @@ def set_model_in_config(new_model: str, agent_config: dict = None) -> str:
         import mokagi
         if agent_name in mokagi._agent_config_cache:
             del mokagi._agent_config_cache[agent_name]
-        # 重啟進程
-        subprocess.Popen(
-            "(sleep 2 && pm2 restart mok_agi) > /dev/null 2>&1 &",
-            shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+        # 硬閘門（2026-09-29 衍）：嚴禁自行重啟 mokagi，改為提示主人手動重啟
+        return (
+            f"✅ 已將當前激活模型設置為 `{new_model}`（配置已保存）。\n"
+            "⛔ 依核心硬閘門政策，衍不得自行重啟 mokagi；"
+            "請主人手動執行 `pm2 restart mok_agi` 使新模型生效。"
         )
-        return f"✅ 已將當前激活模型設置為 `{new_model}`（配置已保存，2秒後自動重啟生效）。"
     except Exception as e:
         return f"❌ 寫入配置文件失敗: {e}"
 
@@ -1422,6 +1586,9 @@ def execute_pip_install(rest: str) -> tuple:
 #   tuple (成功標誌, 結果訊息)
 # ------------------------------------------------------------------------------------ #
 def execute_shell_command(command: str) -> tuple:
+    # 硬閘門：重啟 mokagi 一律攔下（2026-09-29 衍）
+    if _is_mokagi_restart_command(command):
+        return False, MOKAGI_RESTART_REFUSAL
 	# 強制禁用 Docker 沙箱，直接使用宿主機 shell
     os.environ.pop('MOK_USE_DOCKER_SANDBOX', None)
     try:
@@ -1500,15 +1667,8 @@ async def naturalize_admin_result(user_text: str, raw_result: str, ollama_api: s
         else:
             structured = f"系統信息：{output[:500]}"
     elif action == "read_file":
-        path = data.get("path", "")
-        lines = data.get("lines", "")
-        content = data.get("content", "")
-        if lines == "all":
-            line_desc = "全文"
-        else:
-            line_desc = f"前 {lines} 行"
-        preview = content[:500] + ("..." if len(content) > 500 else "")
-        structured = f"已讀取文件 {path} 的 {line_desc}，內容如下：\n{preview}"
+        # 檔案內容需逐字可見，直接回原文（工具端已自帶 3500 字上限），不截 500、不摘要
+        return raw_result
     else:
         return raw_result
     owner = agent_config.get("MOK_ADMIN_NAME", "用戶")
@@ -1521,6 +1681,7 @@ async def naturalize_admin_result(user_text: str, raw_result: str, ollama_api: s
             "model": model_name,
             "prompt": prompt,
             "stream": False,
+            "think": False,
             "options": {
                 "num_predict": 2000,
                 "temperature": 0.5,
@@ -1734,6 +1895,79 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
             return "沒有日誌。"
         except Exception as e:
             return f"❌ 執行失敗: <pre>{e}</pre>"
+    # ---- L2/L3 身分隔離（2026-10-03 by 凜）----
+    def _session_identity():
+        """當前對話 session 的身分（唯一真相：前端登入 session）。無 session 回 {}。"""
+        try:
+            import sys as _sys
+            _main = _sys.modules.get("__main__")
+            _fn = getattr(_main, "resolve_identity", None)
+            if callable(_fn):
+                return _fn() or {}
+        except Exception:
+            pass
+        return {}
+
+    def _session_is_non_admin():
+        """有明確登入 session 且非 admin -> True；無 session（tg/內部流程）或 admin -> False。"""
+        _ident = _session_identity()
+        if _ident.get("username"):
+            return not bool(_ident.get("is_admin"))
+        return False
+
+    # 非 admin session 禁讀的敏感房間（管理員私人命盤區）
+    _SENSITIVE_ROOM_DIRS = (
+        os.path.realpath(os.path.expanduser("~/.mok/agent/命")),
+        os.path.realpath(os.path.expanduser("~/.mok/user/admin")),
+    )
+
+    def _own_user_dir():
+        """當前登入 session 自己的 ~/.mok/user/<uid>/（無則回 None）。"""
+        try:
+            _ident = _session_identity() or {}
+            _u = _ident.get("username")
+            if not _u:
+                return None
+            _safe = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in str(_u)).strip("._")
+            if not _safe:
+                return None
+            return os.path.realpath(os.path.expanduser("~/.mok/user/" + _safe))
+        except Exception:
+            return None
+
+    def _audit_file_read(real_path, decision, detail=""):
+        """讀取稽核：記錄誰讀了誰的檔與結果（僅在有登入 session 時寫入）。"""
+        try:
+            _ident = _session_identity() or {}
+            _reader = _ident.get("username")
+            if not _reader:
+                return
+            import audit_layer as _al
+            _al.init_db()
+            _agent = (agent_config.get("MOK_AGENT_NAME") if agent_config else "") or "?"
+            _aargs = {"path": real_path, "reader": _reader, "is_admin": bool(_ident.get("is_admin")), "agent": _agent}
+            _row = _al.log_start("file_read", _aargs, _reader, _agent, {"kind": "person", "detail": str(_reader)}, decision, "own-user" if decision == "allow" else "sensitive", detail)
+            _al.log_end(_row, decision == "allow", result=(detail if decision == "allow" else None), error=(None if decision == "allow" else detail), elapsed_ms=0.0)
+        except Exception:
+            pass
+
+    def _sensitive_deny(real_path):
+        """命中禁讀回錯誤訊息字串；否則回 None。"""
+        if not _session_is_non_admin():
+            return None
+        for _d in _SENSITIVE_ROOM_DIRS:
+            if real_path == _d or real_path.startswith(_d + os.sep):
+                return ("⛔ 凜の權限管制：此為管理員私人命盤區，"
+                        "非 admin 的對話 session 不得讀取（agent/命/** 與 user/admin/**）。")
+        _users_root = os.path.realpath(os.path.expanduser("~/.mok/user"))
+        if real_path == _users_root or real_path.startswith(_users_root + os.sep):
+            _own = _own_user_dir()
+            if _own and (real_path == _own or real_path.startswith(_own + os.sep)):
+                return None
+            return ("⛔ 凜の權限管制：只能讀取自己的會員目錄（~/.mok/user/<你的帳號>/），"
+                    "不得讀取其他會員的私人區。")
+        return None
+
     def _cmd_read_room(rest: str) -> str:
         """凜の房間閱讀：只能讀取自己房間內的文件"""
         parts = rest.split()
@@ -1762,6 +1996,11 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
                 "tool": "admin", 
                 "original_args": args
             }, ensure_ascii=False)
+        # L2/L3：非 admin session 禁讀敏感房間（連自己房間也不例外）
+        _deny_msg = _sensitive_deny(full_path)
+        if _deny_msg:
+            _audit_file_read(full_path, "deny", _deny_msg)
+            return json.dumps({"success": False, "error_type": "permission_denied", "error_message": _deny_msg, "tool": "admin", "original_args": args}, ensure_ascii=False)
         # 凜の機密管制：僅封鎖特定機密檔案 .客戶（其他房間內文件可讀）
         # 凜の機密管制：禁止讀取 .客戶（無論是檔案還是目錄路徑）
         # 拆解路徑各層，檢查是否有任一部分等於 .客戶
@@ -1825,6 +2064,12 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
             return json.dumps({"success": False, "error_type": "missing_parameter", "error_message": "缺少檔案路徑參數", "tool": "admin", "original_args": args, "suggested_fix": "請提供檔案路徑，例如 '/admin read_file admin.py 20' 或 '/admin read_file admin.py 300 30'"}, ensure_ascii=False)
         filepath = parts[0]
         real_path = os.path.realpath(filepath)
+
+        # L2/L3：非 admin session 禁讀敏感房間（管理員命盤/私人區）
+        _deny_msg = _sensitive_deny(real_path)
+        if _deny_msg:
+            _audit_file_read(real_path, "deny", _deny_msg)
+            return json.dumps({"success": False, "error_type": "permission_denied", "error_message": _deny_msg, "tool": "admin", "original_args": args}, ensure_ascii=False)
         
         # 凜の機密管制：禁止讀取以 . 開頭的配置檔（如 .客服、.客戶 等）
         basename = os.path.basename(real_path)
@@ -1851,12 +2096,17 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
             allowed_dirs = [agent_dir]
             # 凜の可讀擴充：允許讀取 _tmp 臨時目錄
             allowed_dirs.append(os.path.realpath(os.path.expanduser(f"~/{mok_home}/_tmp")))
+            # L2 補強（2026-10-03 by 凜）：放行「自己的」會員目錄 ~/.mok/user/<uid>/
+            _own_ud = _own_user_dir()
+            if _own_ud:
+                allowed_dirs.append(_own_ud)
             is_allowed = False
             for d in allowed_dirs:
                 if real_path.startswith(d + "/") or real_path == d:
                     is_allowed = True
                     break
             if not is_allowed:
+                _audit_file_read(real_path, "deny", "outside-allowed-rooms")
                 return json.dumps({
                     "success": False, 
                     "error_type": "permission_denied", 
@@ -1865,6 +2115,8 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
                     "original_args": args
                 }, ensure_ascii=False)
         
+        # 讀取稽核（2026-10-03 by 凜）：通過所有關卡 → 記一筆 allow
+        _audit_file_read(real_path, "allow", "granted")
         # ===== 輔助函數：安全執行 shell 命令 =====
         def _run_cmd(cmd: str) -> tuple:
             try:
@@ -2118,14 +2370,20 @@ async def handle_admin(args, chat_id: str = None, agent_config: Optional[Dict] =
         if not rest:
             return "用法: /admin exec Shell命令"
         rest, _did_trash = rewrite_delete_to_trash(rest)
+        # 硬閘門：重啟 mokagi 一律攔下，改叫主人重啟（2026-09-29 衍）
+        if _is_mokagi_restart_command(rest):
+            return MOKAGI_RESTART_REFUSAL
         if _did_trash:
             _ok, _res = execute_shell_command(rest)
             return _res if _ok else f"❌ 執行失敗: {_res}"
         risk = assess_command_risk(rest, agent_config)
         # 如果風險為 high，且自動批准未啟用，則直接拒絕（或要求確認）
         if risk in ('high', 'blocked'):
-            # 高風險或自殺防護命中：一律拒絕
-            return "❌ 此命令風險過高（涉及刪除/修改系統檔案或自我保護），已拒絕執行。"
+            # 高風險或自殺防護命中：一律拒絕（全樹掃描攔阻會附上具體原因）
+            _blocked_msg = "❌ 此命令風險過高（涉及刪除/修改系統檔案或自我保護），已拒絕執行。"
+            if _BLOCK_REASON:
+                _blocked_msg += "\n\n" + _BLOCK_REASON
+            return _blocked_msg
             # 或者保持原有確認邏輯（但這不符合「不可刪檔」的精神）
         # 其餘邏輯保持不變...
         

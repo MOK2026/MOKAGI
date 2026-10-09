@@ -509,12 +509,12 @@ function _doSendChatMessage(msg){
     socket.emit('chat_message',{
       message:msg,
       agent:state.currentInteractAgent||'客服',
-      user_id:localStorage.getItem('mokagi_user_id')||('guest_'+Date.now()),
+      user_id:((window.mokIdentity&&window.mokIdentity())||localStorage.getItem('mokagi_user_id')||('guest:'+Date.now().toString(16))),
       url:window.location.href
     });
   }else{
     // 🔥 HTTP API 備援：直接呼叫 LLM（不依賴 SocketIO）
-    const userId = localStorage.getItem('mokagi_user_id')||('guest_'+Date.now());
+    const userId = ((window.mokIdentity&&window.mokIdentity())||localStorage.getItem('mokagi_user_id')||('guest:'+Date.now().toString(16)));
     const agentName = state.currentInteractAgent||'客服';
     // 🔥 雙通道備援：先試同源 API，再試獨立埠口 5001
     const tryFetch = (url) => fetch(url,{

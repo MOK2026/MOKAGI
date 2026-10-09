@@ -676,29 +676,7 @@
   <script src="{{ asset_url('mok_price.js') }}"></script>
 </head>
 <body>
-    <!-- ===== 自建語言切換器 ===== -->
-<div class="lang-switcher">
-  <button class="lang-btn" onclick="toggleLangDropdown()" aria-label="切換語言">
-    <i class="fas fa-globe"></i> 語言 / Lang
-    <i class="fas fa-chevron-down" style="font-size:11px;"></i>
-  </button>
-  <div class="lang-dropdown" id="langDropdown">
-    <div class="lang-option" onclick="switchLanguage(&apos;zh-HK&apos;)"><span class="flag">🇭🇰</span><span class="lang-name">繁體中文</span><span class="lang-native">原頁面</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;en&apos;)"><span class="flag">🇬🇧</span><span class="lang-name">English</span><span class="lang-native">English</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;zh-CN&apos;)"><span class="flag">🇨🇳</span><span class="lang-name">简体中文</span><span class="lang-native">简体中文</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;ja&apos;)"><span class="flag">🇯🇵</span><span class="lang-name">日本語</span><span class="lang-native">日本語</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;ko&apos;)"><span class="flag">🇰🇷</span><span class="lang-name">한국어</span><span class="lang-native">한국어</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;th&apos;)"><span class="flag">🇹🇭</span><span class="lang-name">ภาษาไทย</span><span class="lang-native">ไทย</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;vi&apos;)"><span class="flag">🇻🇳</span><span class="lang-name">Tiếng Việt</span><span class="lang-native">Việt</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;id&apos;)"><span class="flag">🇮🇩</span><span class="lang-name">Bahasa Indonesia</span><span class="lang-native">Indonesia</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;fr&apos;)"><span class="flag">🇫🇷</span><span class="lang-name">Français</span><span class="lang-native">Français</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;es&apos;)"><span class="flag">🇪🇸</span><span class="lang-name">Español</span><span class="lang-native">Español</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;de&apos;)"><span class="flag">🇩🇪</span><span class="lang-name">Deutsch</span><span class="lang-native">Deutsch</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;pt&apos;)"><span class="flag">🇵🇹</span><span class="lang-name">Português</span><span class="lang-native">Português</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;ru&apos;)"><span class="flag">🇷🇺</span><span class="lang-name">Русский</span><span class="lang-native">Русский</span></div>
-    <div class="lang-option" onclick="switchLanguage(&apos;ar&apos;)"><span class="flag">🇸🇦</span><span class="lang-name">العربية</span><span class="lang-native">عربي</span></div>
-  </div>
-</div>
+    <script src="https://64071181.xyz/static/Mok6407Nav/mok6407nav.js" data-placeholder="莫生我要查詢AI 應用落地"></script>
 
 
 
@@ -973,33 +951,6 @@
 
 
 
-      // 85264071181 // qqq 冇 a.js 錯誤版
-      // 顯示聯莫
-      const 聯莫 = ['moksurky@gmail.com','https://wa.me/85264071181/','https://i.meee.com.tw/atcX6QM.png','https://www.instagram.com/moksurky/','https://line.me/ti/p/UlSPd7p9zh/','https://www.facebook.com/aki.mok.10/','http://t.me/mokaki/'
-      ];
-      function Start() {
-
-        _顯示聯莫(聯莫);
-      }
-      Start()
-
-      window.MOKAGI_AGENT = '客服';
-      window.contact = 'https://wa.me/85264071181/?text=莫生我要查詢AI 應用落地/' // ai無法回答的緊急聯絡
-
-      window.MOKAGI_USER_ID = localStorage.getItem('mokagi_user_id') || undefined;
-      window.MOKAGI_SERVER = 'https://64071181.xyz';
-      window.position = 'bottom-left';
-
-
-      // 其他配置可選
-      //window.agent_soul = '我是一個智能客服小美，專注於協助用戶解決問題，提供即時幫助和資訊。我的目標是確保每位用戶都能獲得最佳的使用體驗。';
-      
-      // 前端 UI 配置
-      //window.title = '在線客服';
-      //window.sayHi = '✅ 已連接，歡迎使用6！';
-      //window.saySorry = '⚠️ 連接已斷開，嘗試重連...';
-      //window.MOKAGI_AGENT_ICON = '🤖';  // 任意 Emoji 或純文本
-      // window.MOKAGI_THEME = '#4A90D9'
       
 
 // ── Q&A 手風琴（商家常見迷思）──
@@ -1018,81 +969,7 @@
 
 
 
-// ===== 語言切換功能 =====
-function toggleLangDropdown() {
-  document.getElementById("langDropdown").classList.toggle("open");
-}
-
-// 點擊其他地方關閉下拉
-document.addEventListener("click", function(e) {
-  var dropdown = document.getElementById("langDropdown");
-  var btn = document.querySelector(".lang-btn");
-  if (!dropdown || !btn) return;
-  if (!dropdown.contains(e.target) && !btn.contains(e.target)) {
-    dropdown.classList.remove("open");
-  }
-});
-
-function switchLanguage(lang) {
-  document.getElementById("langDropdown").classList.remove("open");
-  localStorage.setItem("mok_lang", lang);
-  
-  if (lang === "zh-HK") {
-    document.cookie = "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-    location.reload();
-    return;
-  }
-  
-  document.cookie = "googtrans=/zh-HK/" + lang + "; path=/";
-  
-  var select = document.querySelector("#google_translate_element select");
-  if (select) {
-    select.value = lang;
-    select.dispatchEvent(new Event("change"));
-    return;
-  }
-  
-  if (!document.getElementById("google-translate-script")) {
-    var script = document.createElement("script");
-    script.id = "google-translate-script";
-    script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
-    document.head.appendChild(script);
-  } else {
-    location.reload();
-  }
-}
-
-function googleTranslateElementInit() {
-  new google.translate.TranslateElement({
-    pageLanguage: "zh-HK",
-    includedLanguages: "zh-CN,en,ja,ko",
-    layout: google.translate.TranslateElement.InlineLayout.HORIZONTAL,
-    autoDisplay: false
-  }, "google_translate_element");
-}
-
-// 頁面載入時恢復語言偏好
-(function() {
-  var savedLang = localStorage.getItem("mok_lang");
-  if (savedLang && savedLang !== "zh-HK") {
-    document.cookie = "googtrans=/zh-HK/" + savedLang + "; path=/";
-  }
-})();
-
 </script>
-<div id="google_translate_element" style="display:none;"></div>
 
-<!-- 🔮 MOKAGI AI 客服氣泡 -->
-<script>
-    window.MOKAGI_AGENT      = "客服";
-    window.MOKAGI_SERVER     = "https://64071181.xyz";
-    window.quickLinks = [
-        { text: "📋 服務項目", query: "你們提供哪些AI顧問服務？" },
-        { text: "💰 詢價",      query: "我想了解收費方案" },
-        { text: "📅 預約諮詢", query: "我想預約免費諮詢" },
-        { text: "📞 聯絡我們", query: "如何聯絡你們？" }
-    ];
-</script>
-<script src="https://64071181.xyz/static/api.js"></script><script src="https://64071181.xyz/static/scroll-reveal.js"></script><script>document.addEventListener("DOMContentLoaded", function () { if (window.ScrollReveal) ScrollReveal.revealAll("section, .section, .hero, .card, .step, .ai-item, .news-item, .stat-card, .footer, h1, h2, h3, .section-title, .section-sub, .n-title, .news-title", { effect: "fade-up" }); });</script>
 </body>
 </html>

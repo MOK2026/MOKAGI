@@ -1,0 +1,520 @@
+{
+  "_comment": "右側工具面板（.tools-header／#toolsMoreDropdown）按鍵的等級權限矩陣。by 凜 2026-10-01。全權限與否只影響前端顯示與可操作；admin 一律全開。",
+  "version": 1,
+  "updated": "2026-10-06 11:25:53",
+  "levels": [
+    "guest",
+    "free",
+    "pro",
+    "vip"
+  ],
+  "level_labels": {
+    "guest": "訪客（未登入）",
+    "free": "free 免費會員",
+    "pro": "pro 進階會員",
+    "vip": "vip 尊榮會員"
+  },
+  "admin_note": "admin（管理員）不受此矩陣限制，一律全開。",
+  "keys": [ {"key": "履歷生成網", "icon": "📄", "label": "履歷生成網", "panel": 1, "admin_only": false, "desc": "履歷之神 · AI 精美履歷生成器（RenderCV 引擎）。生成一次扣 150000 token。", "page": "/report/履歷之神/履歷生成網/index.html"},
+    {
+      "key": "__panel__",
+      "icon": "🔲",
+      "label": "右側工具面板（整塊）",
+      "panel": 1,
+      "admin_only": false,
+      "special": "panel",
+      "desc": "整個右側工具面板是否顯示。關掉＝該等級完全看不到右側欄（訪客目前預設關）。",
+      "page": null
+    },
+    {
+      "key": "agentInfoBtn",
+      "icon": "🌸",
+      "label": "Agent 資訊",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "顯示當前對話 Agent 的資訊卡（名稱／模型／狀態）。",
+      "page": null
+    },
+    {
+      "key": "room",
+      "icon": "🏠",
+      "label": "房間",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "打開「房間」工作區：瀏覽自己 agent 房間的檔案樹、預覽／下載檔案。",
+      "page": null
+    },
+    {
+      "key": "bookmark",
+      "icon": "📑",
+      "label": "書籤",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "個人書籤頁（iframe：/webTools/書籤/書籤.html）。",
+      "page": "/static/書籤.html"
+    },
+    {
+      "key": "search",
+      "icon": "🔍",
+      "label": "搜尋",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "站內／對話內容搜尋面板。",
+      "page": null
+    },
+    {
+      "key": "notebook",
+      "icon": "📝",
+      "label": "筆記",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "開啟右下角「筆記」浮動面板（個人筆記）。",
+      "page": null
+    },
+    {
+      "key": "billing",
+      "icon": "📊",
+      "label": "token",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "MOKAGI 用量帳單：本月 token 用量／餘額。",
+      "page": "/webTools/token_billing"
+    },
+    {
+      "key": "會員系統說明",
+      "icon": "💠",
+      "label": "會員系統說明",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "會員系統／方案規則說明頁。",
+      "page": "/report/凜/會員系統說明/index.html"
+    },
+    {
+      "key": "mokagiWIKI",
+      "icon": "📖",
+      "label": "說明書 WIKI",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "MOKAGI 說明書 WIKI（iframe：/project/wiki/index.html）。",
+      "page": "/project/wiki/index.html"
+    },
+    {
+      "key": "頻道清單",
+      "icon": "📡",
+      "label": "頻道清單",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "頻道清單頁（iframe：/report/indexPage/頻道清單/index.html）。",
+      "page": "/report/indexPage/頻道清單/index.html"
+    },
+    {
+      "key": "admin",
+      "icon": "🧑💼",
+      "label": "admin",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "開出 admin 管理面板（系統管理操作）。",
+      "page": null
+    },
+    {
+      "key": "backup",
+      "icon": "💾",
+      "label": "備份",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "備份中心：立即備份／列還原點／一鍵還原並重啟服務。",
+      "page": null
+    },
+    {
+      "key": "github使用",
+      "icon": "🐙",
+      "label": "github 使用",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "GitHub 使用說明頁（iframe：/report/github/github使用/index.html）。",
+      "page": "/report/github/github使用/index.html"
+    },
+    {
+      "key": "進化",
+      "icon": "🧬",
+      "label": "進化",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "進化面板（MOKAGI 編輯標記鎖／技能進化）。",
+      "page": null
+    },
+    {
+      "key": "夢",
+      "icon": "🌙",
+      "label": "夢",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "做夢（EXP 反思）面板（iframe）。",
+      "page": "/report/衍/夢/index.html"
+    },
+    {
+      "key": "復活",
+      "icon": "✨",
+      "label": "復活",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "復活（Agent 喚醒／還原）面板（iframe）。",
+      "page": "/report/mokagi說明/復活/index.html"
+    },
+    {
+      "key": "logs",
+      "icon": "📋",
+      "label": "日誌",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "即時日誌（socket 訂閱 pm2 後端日誌）。",
+      "page": null
+    },
+    {
+      "key": "monitor",
+      "icon": "📊",
+      "label": "監控",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "系統監控儀表板（CPU／記憶體／程序）。",
+      "page": null
+    },
+    {
+      "key": "files",
+      "icon": "📁",
+      "label": "文件",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "檔案管理：瀏覽／編輯 ~/.mok 檔案樹。",
+      "page": null
+    },
+    {
+      "key": "tools",
+      "icon": "🔧",
+      "label": "工具",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "工具清單：目前可用工具一覽。",
+      "page": null
+    },
+    {
+      "key": "novnc",
+      "icon": "🖥️",
+      "label": "桌面",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "遠端桌面（noVNC 虛擬桌面，iframe）。",
+      "page": "/webTools/novnc/index.html"
+    },
+    {
+      "key": "gpu",
+      "icon": "💻",
+      "label": "GPU",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "GPU 狀態／算力檢視。",
+      "page": null
+    },
+    {
+      "key": "coldcall",
+      "icon": "📞",
+      "label": "冷呼控制台",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "冷呼（cold call）控制台（iframe：/webTools/冷呼控制台.html）。",
+      "page": "/webTools/冷呼控制台.html"
+    },
+    {
+      "key": "傳單王",
+      "icon": "📨",
+      "label": "傳單王",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "網上傳單系統：上傳宣傳單 AI 抽取、選地區找 1 公里內公司 Email、用自己的信箱寄宣傳信（iframe：/report/賺錢王/傳單王/index.html）。",
+      "page": "/report/賺錢王/傳單王/index.html"
+    },
+    {
+      "key": "短劇王",
+      "icon": "🎬",
+      "label": "短劇王",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "短劇王操作台：漫劇／短劇分鏡腳本、出圖出片、審片與成片下載（iframe：/jobs/短劇王/index.html）。",
+      "page": "/jobs/短劇王/index.html"
+    },
+    {
+      "key": "快取日報",
+      "icon": "📰",
+      "label": "快取日報",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "MOKAGI LLM 快取日報：檢視當日 LLM 回應快取命中統計（唯讀）。",
+      "page": "/jobs/快取日報/index.html"
+    },
+    {
+      "key": "金流後台",
+      "icon": "💳",
+      "label": "金流後台",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "充值金流後台：待審核訂單／未匹配鏈上入帳／已入帳訂單、收款設定（iframe：/admin/orders）。",
+      "page": "/admin/orders"
+    },
+    {
+      "key": "p3a-wallet",
+      "icon": "💼",
+      "label": "p3a-wallet",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "p3a 錢包 dashboard（iframe）。",
+      "page": "/report/市場調查侍女/p3a-wallet/dashboard.html"
+    },
+    {
+      "key": "game",
+      "icon": "🎮",
+      "label": "game",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "小遊戲。",
+      "page": "/game"
+    },
+    {
+      "key": "ascii",
+      "icon": "🎨",
+      "label": "ASCII",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "ASCII 藝術產生器。",
+      "page": null
+    },
+    {
+      "key": "openToolsPanel2",
+      "icon": "🧰",
+      "label": "面板2",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "再開一組浮動工具面板（第二面板；面板內按鍵共用同一組權限）。",
+      "page": null
+    },
+    {
+      "key": "toolsMoreBtn",
+      "icon": "⋯",
+      "label": "更多（⋯）",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "版面不足時，把放不下的鍵收進這個下拉。建議恆開，否則被折疊的鍵會打不開。",
+      "page": null
+    },
+    {
+      "key": "pm2面板",
+      "icon": "🎛️",
+      "label": "PM2 開關",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "PM2 一鍵開關面板：列出所有 pm2 進程，逐列啟動／停止／重啟＋即時狀態燈（iframe：/report/mokagi說明/pm2面板/index.html）。",
+      "page": "/report/mokagi說明/pm2面板/index.html"
+    }
+  ],
+  "perms": { "履歷生成網": {"guest": 0, "free": 1, "pro": 1, "vip": 1},
+    "agentInfoBtn": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "room": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "bookmark": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "search": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "notebook": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "billing": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "會員系統說明": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "mokagiWIKI": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "頻道清單": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "admin": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "backup": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "github使用": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "進化": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "夢": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "復活": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "logs": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "monitor": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "files": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "tools": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "novnc": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "gpu": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "coldcall": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "快取日報": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "p3a-wallet": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "game": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "ascii": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "openToolsPanel2": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "toolsMoreBtn": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "__panel__": {
+      "guest": 0,
+      "free": 0,
+      "pro": 1,
+      "vip": 1
+    },
+    "傳單王": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 1
+    },
+    "短劇王": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "pm2面板": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "金流後台": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    }
+  },
+  "plan_pages_url": "/static/plans_pages.json",
+  "_page_note": "page＝該工具鍵開啟的站內頁路徑（null＝純前端面板／非頁面）；供 /admin/tools 與各方案 pages 白名單做一致性提示。by 凜 2026-10-03"
+}

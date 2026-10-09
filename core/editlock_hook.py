@@ -89,6 +89,20 @@ def guard(file, agent=None, agent_config=None, purpose=None):
             "⛔ 編輯登記鎖：`%s` 正由「%s」編輯中（%s），已擋下本次寫入。\n"
             "👉 待對方 `python3 ~/.mok/skill/進化/editlock.py done %s <說明>` 後再登記。"
             % (rf, b.get("agent"), b.get("id"), b.get("id")))
+    # 共用檔硬擋（2026-10-04）：目標是共用檔時，登記「必須」附 --ack-parallel，
+    # 否則 editlock.py 一樣拒鎖（登了也白登）→ 這裡直接把正確指令給出來。
+    try:
+        _shared = el.is_shared(rf)
+    except Exception:
+        _shared = False
+    if _shared:
+        return False, (
+            "⛔ 編輯登記鎖：`%s` 尚未登記，已擋下本次寫入。\n"
+            "   ⚠️ 這是「共用檔」（屬 %s）：登記時必須附 --ack-parallel 影響面說明，否則拒鎖。\n"
+            "👉 請先登記：python3 ~/.mok/skill/進化/editlock.py start %s %s <目的> --ack-parallel 「影響面一句話」\n"
+            "   完成後：python3 ~/.mok/skill/進化/editlock.py done %s <說明>"
+            % (rf, "、".join(getattr(el, "SHARED_PREFIXES", ())) or "共用區",
+               os.path.join(MOK, rf), agent, rf))
     return False, (
         "⛔ 編輯登記鎖：`%s` 尚未登記，已擋下本次寫入。\n"
         "👉 請先登記：python3 ~/.mok/skill/進化/editlock.py start %s %s <目的>\n"
@@ -191,12 +205,72 @@ def _is_editlock_call(cmd):
     return True
 
 
+# ---------------- 全樹掃描攔阻（2026-10-04 靜） ----------------
+# 背景：對整個 home / 根目錄做遞迴 grep/find，會把磁碟 I/O 榨乾
+# （實測 iowait 52%、sda %util 80%、load 5+，多侍女同時工作時全體變慢）。
+# 原則：找檔走 code_index（技能「找檔規範」）；非用 shell 不可就限定目錄 + 排除重目錄。
+_BROAD_ROOTS = {
+    "/", "/home", "/home/ubuntu", "/home/ubuntu/.mok",
+    "~", "~/", "$HOME", "${HOME}", os.path.expanduser("~"), MOK,
+}
+_SCAN_CMD = re.compile(r"(^|[\s;&|(])(grep|rg|egrep|fgrep|ack|ag|find)\b")
+_RECUR_FLAG = re.compile(r"(?:^|\s)(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive|--dereference-recursive)(?=\s|$)")
+_FIND_MAXDEPTH = re.compile(r"(?:^|\s)-maxdepth\s+([0-9]+)")
+_SCAN_ESCAPE = re.compile(r"--exclude-dir|--exclude(?![-a-z])|--glob|(?:^|\s)-path\b|(?:^|\s)-prune\b")
+
+
+def _norm_root(tok):
+    t = tok.strip("'\"")
+    t = t.replace("${HOME}", os.path.expanduser("~")).replace("$HOME", os.path.expanduser("~"))
+    t = os.path.expanduser(t)
+    return os.path.normpath(t) if t else t
+
+
+def guard_scan(cmd):
+    """擋下「掃整個家目錄/根目錄」的遞迴 grep/find。回傳 (ok: bool, msg: str)。"""
+    if _bypass() or not cmd:
+        return True, ""
+    if _SCAN_ESCAPE.search(cmd):          # 已自行排除重目錄 → 放行
+        return True, ""
+    m = _FIND_MAXDEPTH.search(cmd)
+    if m and int(m.group(1)) <= 3:        # 淺層掃描 → 放行
+        return True, ""
+    hits = []
+    for seg in _CMD_SPLIT.split(cmd):
+        seg = seg.strip()
+        if not seg or not _SCAN_CMD.search(seg):
+            continue
+        if "find" not in seg and not _RECUR_FLAG.search(seg) \
+                and not re.search(r"(^|[\s;&|(])(rg|ack|ag)\b", seg):   # rg/ack/ag 預設就是遞迴
+            continue
+        for t in re.findall(r"[^\s;&|()<>'\"]+", seg)[1:]:
+            if t.startswith("-"):
+                continue
+            if _norm_root(t) in _BROAD_ROOTS:
+                hits.append(t)
+                break
+    if not hits:
+        return True, ""
+    return False, (
+        "⛔ admin exec 被「全樹掃描攔阻」擋下：偵測到對 `%s` 的遞迴 grep/find。\n"
+        "   全樹掃描會打爆磁碟 I/O（曾把 iowait 拉到 52%%，整台機器一起卡）。\n"
+        "   ✅ 找檔請走 code_index（技能「找檔規範」）。\n"
+        "   ✅ 非用 shell 不可時，請限定目錄並排除重目錄，例如：\n"
+        "      grep -rn 關鍵字 /home/ubuntu/.mok/agent/<agent> --exclude-dir=browser_profiles --exclude-dir=node_modules --exclude-dir=backups --exclude-dir=.chroma_data --exclude-dir=.git\n"
+        "      find /home/ubuntu/.mok/agent/<agent> -maxdepth 3 -name '*.md'"
+        % ", ".join(sorted(set(hits)))
+    )
+
+
 def guard_command(cmd, agent=None, agent_config=None):
     """檢查 shell 命令會寫到的 ~/.mok 檔案。回傳 (ok: bool, msg: str)。"""
     if _bypass() or not cmd:
         return True, ""
     if _is_editlock_call(cmd):               # 只放行「純登記工具呼叫」，避免用註解提及 editlock.py 就整條繞過
         return True, ""
+    ok_scan, scan_msg = guard_scan(cmd)       # 2026-10-04 靜：全樹掃描攔阻
+    if not ok_scan:
+        return False, scan_msg
     if not _has_write_intent(cmd):
         return True, ""
     seen, problems = set(), []

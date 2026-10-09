@@ -9,6 +9,7 @@ PLUGIN_INFO = {
     "icon": "❤️",
     "handler": "handle_heart",
     "description": "心跳引擎：掃描所有啟用心跳的工具並自動執行。",
+    "intent_keywords": ["/heart", "心跳", "心跳掃描", "觸發掃描", "掃描心跳", "心跳引擎"],
     "tool_schema": {
         "name": "heart",
         "description": "查詢心跳狀態與手動觸發掃描",
@@ -41,7 +42,7 @@ from app_loop import run_async
 logger = logging.getLogger(__name__)
 
 # ---------- 全域設定 ----------
-HEART_ENABLED = True   # 可從環境變數 MOK_HEART_ENABLED 讀取
+HEART_ENABLED = str(os.environ.get("MOK_HEART_ENABLED", "1")).strip().lower() not in ("0", "false", "no", "off")   # 可由環境變數 MOK_HEART_ENABLED 關閉（預設開啟）
 _HEART_INTERVAL = 60   # 全域掃描間隔（秒）
 _heart_stop_event = threading.Event()
 _heart_thread = None

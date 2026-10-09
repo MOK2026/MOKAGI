@@ -41,8 +41,8 @@ import time
 import threading
 
 _LOCK = threading.Lock()
-_QUEUE = {}        # {agent: [ {"text":..., "ts":..., "id":..., "user_id":...} ]}
-_CONSUMED = {}     # {agent: int} 累計已注入則數（統計）
+_QUEUE = {}        # {"tenant|agent": [ {"text":..., "ts":..., "id":..., "user_id":...} ]}
+_CONSUMED = {}     # {"tenant|agent": int} 累計已注入則數（統計）
 _MAX_QUEUE = 20
 _TTL_SEC = 600
 _MAX_INJECT_PER_CALL = 5
@@ -52,13 +52,21 @@ def _norm(a):
     return a or ""
 
 
+def _key(agent, tenant=""):
+    """20260929（凜）：插話佇列改以「tenant|agent」為鍵，避免不同會員的插話互相注入。"""
+    return f"{_norm(tenant)}|{_norm(agent)}"
+
+
 def _prune_locked(agent):
     """清掉過期插話（需在持有 _LOCK 時呼叫）。"""
     now = time.time()
     q = _QUEUE.get(agent)
     if not q:
         return
-    keep = [it for it in q if (now - it.get("ts", now)) <= _TTL_SEC]
+    if not isinstance(q, list):
+        _QUEUE.pop(agent, None)
+        return
+    keep = [it for it in q if isinstance(it, dict) and (now - it.get("ts", now)) <= _TTL_SEC]
     if keep:
         _QUEUE[agent] = keep
     else:
@@ -66,8 +74,8 @@ def _prune_locked(agent):
 
 
 def enqueue(agent, text, user_id=""):
-    """把一則插話排入佇列，回傳目前待消費數量。"""
-    a = _norm(agent)
+    """把一則插話排入佇列，回傳目前待消費數量。佇列以 (user_id, agent) 隔離。"""
+    a = _key(agent, user_id)
     t = (text or "").strip()
     if not t:
         return 0
@@ -81,16 +89,20 @@ def enqueue(agent, text, user_id=""):
         return len(q)
 
 
-def peek_count(agent):
-    a = _norm(agent)
+def peek_count(agent, tenant=""):
+    a = _key(agent, tenant)
     with _LOCK:
         _prune_locked(a)
         return len(_QUEUE.get(a, []))
 
 
-def drain(agent, limit=_MAX_INJECT_PER_CALL):
-    """取出並移除最多 limit 則插話，回傳文字列表。"""
-    a = _norm(agent)
+def drain(agent, tenant="", limit=_MAX_INJECT_PER_CALL):
+    """取出並移除最多 limit 則插話（僅限自己的 tenant），回傳文字列表。"""
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = _MAX_INJECT_PER_CALL
+    a = _key(agent, tenant)
     with _LOCK:
         _prune_locked(a)
         q = _QUEUE.get(a)
@@ -106,17 +118,17 @@ def drain(agent, limit=_MAX_INJECT_PER_CALL):
     return [it.get("text", "") for it in take]
 
 
-def pop_leftover(agent):
-    """取出該 agent 全部殘留插話（用於本輪結束後自動續開一輪）。"""
-    a = _norm(agent)
+def pop_leftover(agent, tenant=""):
+    """取出該 (tenant, agent) 全部殘留插話（用於本輪結束後自動續開一輪）。"""
+    a = _key(agent, tenant)
     with _LOCK:
         _prune_locked(a)
         q = _QUEUE.pop(a, None) or []
     return [it.get("text", "") for it in q]
 
 
-def has_pending(agent):
-    return peek_count(agent) > 0
+def has_pending(agent, tenant=""):
+    return peek_count(agent, tenant) > 0
 
 
 def _agent_of(agent_config):
@@ -128,11 +140,12 @@ def _agent_of(agent_config):
     return ""
 
 
-def _inject_into_messages(messages, agent):
-    """把插話 append 進 messages（role=user），回傳實際注入的文字列表。"""
+def _inject_into_messages(messages, agent, tenant=""):
+    """把插話 append 進 messages（role=user），回傳實際注入的文字列表。
+    20260929（凜）：只注入「自己 tenant」的插話，杜絕跨會員注入到別人的工作輪。"""
     if not agent or not isinstance(messages, list):
         return []
-    texts = drain(agent)
+    texts = drain(agent, tenant)
     for t in texts:
         try:
             messages.append({
@@ -172,13 +185,21 @@ def install_call_llm_hook():
                 agent = _agent_of(kwargs.get("agent_config"))
                 if not agent:
                     agent = _agent_of(getattr(mokagi, "_agent_config", None))
+                # 20260929（凜）：call_llm 的 user_id 即本次對話的 tenant，用它隔離插話。
+                _tenant = kwargs.get("user_id")
+                if _tenant is None and len(args) >= 2:
+                    _tenant = args[1]
+                if not isinstance(_tenant, str):
+                    _tenant = ""
                 if agent and isinstance(msgs, list):
-                    injected = _inject_into_messages(msgs, agent)
+                    injected = _inject_into_messages(msgs, agent, _tenant)
                     if injected:
                         print("[interject_patch] injected %d msg(s) into agent=%s"
                               % (len(injected), agent))
             except Exception as _e:
-                print("[interject_patch] hook error:", _e)
+                import traceback as _tb
+                print("[interject_patch] hook error:", repr(_e))
+                print("[interject_patch] traceback:\n" + _tb.format_exc())
             return await orig(*args, **kwargs)
 
         wrapped._interject_wrapped = True
@@ -191,8 +212,11 @@ def install_call_llm_hook():
         return False
 
 
-def register_routes(app, is_running_fn=None):
-    """把插話端點註冊到 Flask app。is_running_fn(agent)->bool 判斷是否工作中。"""
+def register_routes(app, is_running_fn=None, resolve_tenant_fn=None):
+    """把插話端點註冊到 Flask app。
+    is_running_fn(agent)->bool 判斷是否工作中；
+    resolve_tenant_fn(data)->str 由伺服器端解析 tenant（避免前端偽造 user_id）。
+    """
     from flask import request, jsonify
 
     def _running(a):
@@ -206,7 +230,14 @@ def register_routes(app, is_running_fn=None):
         data = request.get_json(force=True, silent=True) or {}
         agent = _norm(data.get("agent"))
         msg = (data.get("message") or "").strip()
-        user_id = data.get("user_id") or ""
+        # 20260929（凜）：tenant 一律由伺服器端解析（以 session 為準），不再信任前端 body 的 user_id。
+        if callable(resolve_tenant_fn):
+            try:
+                user_id = resolve_tenant_fn(data) or ""
+            except Exception:
+                user_id = ""
+        else:
+            user_id = data.get("user_id") or ""
         if not agent or not msg:
             return jsonify({"ok": False, "error": "empty agent or message"}), 400
         if _running(agent):

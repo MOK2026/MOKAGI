@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>莫氏集團 · MOKAGI 商業預告（V1）</title>
+<meta name="description" content="MOKAGI 商業預告：一個能長出數碼員工的自製引擎。公開只放鉤子，數字私下給。">
+<!--
+  =========================================================
+  MOKAGI 商業預告 · v1（佔位符版）
+  =========================================================
+  本檔所有 {{...}} 皆為佔位符，待填入後即可上線。
+  佔位符清單（在編輯器搜尋 "{{" 可全部找到）：
+
+    {{SITE_URL}}       主站網址（建議 https://64071181.xyz/）
+    {{SEATS}}          首批限量席位（內部規劃：100）
+    {{PRICE}}          預付金額（內部規劃：100）
+    {{TOKEN_BONUS}}    即時回贈 token 額度（內部規劃：2,000,000）
+    {{AGENT_COUNT}}    已上線 agent 數
+    {{UPTIME}}         穩定運行天數
+    {{LINE_URL}}       Line 官方帳號連結
+    {{TG_URL}}         Telegram 連結
+    {{FB_URL}}         Facebook 連結
+    {{IG_URL}}         Instagram 連結
+    {{YT_URL}}         YouTube 連結
+    {{X_URL}}          X / Twitter 連結
+    {{FORM_ENDPOINT}}  表單送出網址（未定則留空）
+    {{CONTACT_EMAIL}}  聯絡電郵
+    {{CONTACT_LINE}}   聯絡 Line ID
+
+  鐵則：公開頁面只放鉤子，具體數字一律私下給。
+  =========================================================
+-->
+<style>
+:root{
+  --ui-font:"Noto Sans TC","PingFang TC","Hiragino Sans TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono-font:"JetBrains Mono","Cascadia Code",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --bg:#15151a; --surface-1:#1c1c22; --surface-2:#23232b; --surface-3:#2b2b34;
+  --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.15);
+  --text:#e9e9f0; --text-dim:#a7a7b4; --text-mute:#7b7b88;
+  --accent:#4ec9b0; --accent-dim:rgba(78,201,176,.16);
+  --danger:#e05561; --warn:#ffb84d; --info:#6aa9ff; --violet:#a98bff;
+  --r-sm:10px; --r-md:14px; --r-lg:20px;
+  --shadow-1:0 2px 8px rgba(0,0,0,.28); --shadow-2:0 10px 30px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--ui-font);color:var(--text);background:var(--bg);line-height:1.75;
+  background-image:
+    radial-gradient(1200px 700px at 8% -12%, rgba(78,201,176,.10), transparent 60%),
+    radial-gradient(900px 600px at 100% 0%, rgba(169,139,255,.08), transparent 55%);
+  background-attachment:fixed;
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+
+.v1bar{background:linear-gradient(90deg, rgba(255,184,77,.18), rgba(255,184,77,.04));
+  border-bottom:1px solid rgba(255,184,77,.30);color:var(--warn);
+  font-family:var(--mono-font);font-size:12px;letter-spacing:1px;text-align:center;padding:7px 14px}
+.topbar{position:sticky;top:0;z-index:50;background:rgba(21,21,26,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.topbar .wrap{display:flex;align-items:center;gap:14px;height:60px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.5px}
+.brand .mark{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;
+  background:linear-gradient(140deg,#4ec9b0,#2a8f7c);color:#08130f;font-weight:900;font-size:17px;
+  box-shadow:0 4px 14px rgba(78,201,176,.35)}
+.brand small{color:var(--text-mute);font-weight:600;font-size:12px;letter-spacing:2px}
+.navlinks{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
+  font-size:13px;font-weight:600;border:1px solid var(--line-2);
+  background:rgba(255,255,255,.04);color:var(--text-dim);transition:.18s}
+.pill:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim);text-decoration:none}
+
+.hero{padding:62px 0 8px}
+.kicker{font-family:var(--mono-font);font-size:12.5px;letter-spacing:3px;color:var(--accent);margin-bottom:16px}
+.hero h1{font-size:clamp(30px,5.4vw,52px);line-height:1.22;font-weight:800;letter-spacing:-.5px}
+.hero h1 b{color:var(--accent);background:linear-gradient(transparent 62%, rgba(78,201,176,.18) 0)}
+.lead{margin-top:20px;font-size:16.5px;color:var(--text-dim);max-width:780px}
+.cta-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:999px;
+  font-weight:700;font-size:14.5px;border:1px solid transparent;cursor:pointer;transition:.18s;
+  background:linear-gradient(140deg,#4ec9b0,#2a8f7c);color:#08130f;box-shadow:var(--shadow-1);
+  font-family:var(--ui-font)}
+.btn:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(78,201,176,.3);text-decoration:none}
+.btn.ghost{background:rgba(255,255,255,.04);border-color:var(--line-2);color:var(--text)}
+.btn.ghost:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+
+section{padding:52px 0;border-top:1px solid var(--line)}
+.sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.sec-head h2{font-size:23px;font-weight:800;letter-spacing:.5px}
+.sec-head span{font-family:var(--mono-font);font-size:11.5px;color:var(--accent);letter-spacing:2px}
+.sec-head .rule{flex:1;height:1px;background:linear-gradient(90deg,var(--line-2),transparent);min-width:40px}
+.p{color:var(--text-dim);font-size:14.5px;max-width:840px}
+
+.hooks{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-top:22px}
+.hook{background:var(--surface-1);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:var(--r-md);padding:18px}
+.hook .n{font-family:var(--mono-font);font-size:11.5px;color:var(--text-mute);letter-spacing:2px}
+.hook h4{font-size:16px;margin:6px 0 8px}
+.hook p{font-size:13.5px;color:var(--text-dim)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:22px}
+.card{display:block;background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:18px 18px 16px;transition:.18s;color:inherit}
+.card:hover{border-color:var(--line-2);transform:translateY(-2px);box-shadow:var(--shadow-2);text-decoration:none}
+.card .tag{font-family:var(--mono-font);font-size:11px;color:var(--accent);letter-spacing:1px}
+.card h4{font-size:15.5px;margin:7px 0 8px;color:var(--text)}
+.card p{font-size:13.5px;color:var(--text-dim)}
+.card .go{margin-top:12px;font-family:var(--mono-font);font-size:12px;color:var(--accent)}
+
+.kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-top:18px}
+.kv .cell{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 16px}
+.kv .k{font-size:11.5px;color:var(--text-mute);letter-spacing:1px}
+.kv .v{font-family:var(--mono-font);font-size:18px;font-weight:700;color:var(--accent);margin-top:4px;word-break:break-all}
+
+.ph{display:inline-block;font-family:var(--mono-font);font-size:12.5px;color:var(--warn);
+  background:rgba(255,184,77,.10);border:1px dashed rgba(255,184,77,.55);border-radius:6px;
+  padding:1px 7px;letter-spacing:.5px}
+.note-banner{margin-top:24px;background:rgba(255,184,77,.08);border:1px solid rgba(255,184,77,.28);
+  border-radius:var(--r-md);padding:14px 18px;font-size:13.5px;color:#ffd79a}
+
+.form{display:grid;gap:12px;margin-top:20px;max-width:680px}
+.field{display:grid;gap:6px}
+.field label{font-size:12.5px;color:var(--text-mute);letter-spacing:1px}
+.field input,.field select,.field textarea{background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:11px 13px;color:var(--text);font-family:var(--ui-font);font-size:14px;
+  outline:none;transition:.16s}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
+.form .btn{justify-self:start}
+
+.socials{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.social{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:999px;
+  border:1px solid var(--line-2);background:rgba(255,255,255,.04);font-size:13.5px;font-weight:600;color:var(--text-dim)}
+.social:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim);text-decoration:none}
+.social i{font-style:normal;opacity:.85}
+
+footer{border-top:1px solid var(--line);padding:34px 0 60px;color:var(--text-mute);font-size:12.5px;font-family:var(--mono-font)}
+footer .wrap{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+footer .dot{opacity:.4}
+
+@media(max-width:640px){.hero{padding:44px 0 4px} section{padding:40px 0}}
+@media print{body{background:#fff;color:#000}.topbar,.v1bar{display:none}}
+</style>
+</head>
+<body>
+<script src="https://64071181.xyz/static/Mok6407Nav/mok6407nav.js" data-placeholder="莫生我想查詢數碼員工"></script>
+
+<div class="v1bar">V1 佔位版 · 全站 {{...}} 為待填佔位符 · 藍圖已定，待填入真實數字與連結</div>
+
+<div class="topbar">
+  <div class="wrap">
+    <div class="brand"><span class="mark">莫</span>莫氏集團 <small>MOKAGI</small></div>
+    <nav class="navlinks">
+      <a class="pill" href="#hooks">鉤子</a>
+      <a class="pill" href="#audience">四類合作</a>
+      <a class="pill" href="#prepaid">預付方案</a>
+      <a class="pill" href="#intent">表達意向</a>
+      <a class="pill" href="#social">追蹤</a>
+      <a class="pill" href="{{SITE_URL}}" target="_blank" rel="noopener">↗ 主站</a>
+    </nav>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="kicker">BUSINESS PREVIEW / 商業預告 · 只放鉤子，數字私下給</div>
+    <h1>我們正在造一間<br><b>不需要請人的公司</b>。</h1>
+    <p class="lead">
+      MOKAGI 是一個自製的數碼員工引擎：客服、內容、電商、投資顧問……
+      你需要什麼職能，就在現場長出一個 agent 去跑。<br>
+      現在，我們第一次對外開放合作意向 —— 公開頁面只放鉤子，具體條件私下給。
+    </p>
+    <div class="cta-row">
+      <a class="btn" href="#intent">我有意向 →</a>
+      <a class="btn ghost" href="#social">先追蹤，再決定</a>
+    </div>
+    <div class="kv">
+      <div class="cell"><div class="k">限量席位</div><div class="v"><span class="ph">{{SEATS}}</span></div></div>
+      <div class="cell"><div class="k">預付金額</div><div class="v"><span class="ph">{{PRICE}}</span></div></div>
+      <div class="cell"><div class="k">即時回贈</div><div class="v"><span class="ph">{{TOKEN_BONUS}}</span></div></div>
+      <div class="cell"><div class="k">上線 agent</div><div class="v"><span class="ph">{{AGENT_COUNT}}</span></div></div>
+    </div>
+    <div class="note-banner">
+      🔒 為什麼看到 <span class="ph">{{ }}</span> 而不是數字？本輪名額與價格只提供給<b>已表達意向</b>的人 ——
+      私下私訊完整方案，避免比價內耗與無效流量。
+    </div>
+  </header>
+
+  <section id="hooks">
+    <div class="sec-head"><h2>三個鉤子</h2><span>WHY NOW</span><div class="rule"></div></div>
+    <p class="p">如果以下任何一句讓你停下來，那你就是我們要找的人。</p>
+    <div class="hooks">
+      <div class="hook">
+        <div class="n">HOOK 01</div>
+        <h4>一個引擎，長出整間公司</h4>
+        <p>同一套 MOKAGI：今天長出客服，明天長出內容，後天長出投資顧問。不是買 SaaS，是養自己的數碼員工。</p>
+      </div>
+      <div class="hook">
+        <div class="n">HOOK 02</div>
+        <h4>它在跑，不是 PPT</h4>
+        <p>已 <span class="ph">{{AGENT_COUNT}}</span> 個 agent 在線、穩定運行 <span class="ph">{{UPTIME}}</span> 天。真實流量、真實對話、真實產出。</p>
+      </div>
+      <div class="hook">
+        <div class="n">HOOK 03</div>
+        <h4>現在入場，鎖早期條件</h4>
+        <p>首批席位與價格只對本輪意向者有效，之後只會更貴。窗口不會一直開著。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="audience">
+    <div class="sec-head"><h2>四類合作對象</h2><span>AUDIENCE</span><div class="rule"></div></div>
+    <p class="p">我們只找四種人。對號入座，直接表達意向即可；細則與數字一律私下談。</p>
+    <div class="cards">
+      <a class="card" href="#intent">
+        <div class="tag">PREPAID</div><h4>💰 預付客</h4>
+        <p>先付、先鎖、先用人。以預付換更長期使用權與更低單位成本，名額限量。</p>
+        <div class="go">→ 我要預付</div>
+      </a>
+      <a class="card" href="#intent">
+        <div class="tag">ANGEL</div><h4>🕊 天使金主</h4>
+        <p>小額、早期、高透明。你看得到真實營運數據與現金流，而不是包裝過的簡報。</p>
+        <div class="go">→ 我想了解</div>
+      </a>
+      <a class="card" href="#intent">
+        <div class="tag">FRANCHISE</div><h4>🔧 技術加盟</h4>
+        <p>你有人脈與客源，我們有引擎與後端。以加盟／代理方式，把你的流量變成收入。</p>
+        <div class="go">→ 我要加盟</div>
+      </a>
+      <a class="card" href="#intent">
+        <div class="tag">PARTNER</div><h4>🤝 開發合作</h4>
+        <p>接 API、共同開發垂直 agent，成果分潤。你出場景，我們出引擎。</p>
+        <div class="go">→ 我要合作</div>
+      </a>
+    </div>
+  </section>
+
+  <section id="prepaid">
+    <div class="sec-head"><h2>預付方案（鉤子版）</h2><span>PREPAID POOL</span><div class="rule"></div></div>
+    <p class="p">一句話：<b style="color:var(--text)">先付一筆小錢，鎖住限量名額與一大筆 token 額度。</b>具體數字，私下給。</p>
+    <div class="kv">
+      <div class="cell"><div class="k">限量名額</div><div class="v"><span class="ph">{{SEATS}}</span> 席</div></div>
+      <div class="cell"><div class="k">預付金額</div><div class="v"><span class="ph">{{PRICE}}</span></div></div>
+      <div class="cell"><div class="k">即時回贈 token</div><div class="v"><span class="ph">{{TOKEN_BONUS}}</span></div></div>
+      <div class="cell"><div class="k">完整條款</div><div class="v" style="font-size:14px">🔒 私下給</div></div>
+    </div>
+    <div class="note-banner">
+      ⚠️ 本頁為 <b>v1 佔位版</b>：上列 <span class="ph">{{...}}</span> 待填入正式數字後才上線；
+      目前僅供內部確認結構與文案。內部規劃值（100 席 / 預付 100 / 回贈 200 萬 token）見 HTML 註解，不上頁面。
+    </div>
+  </section>
+
+  <section id="intent">
+    <div class="sec-head"><h2>表達意向</h2><span>INTENT ONLY</span><div class="rule"></div></div>
+    <p class="p">本階段<b>只收意向，不收錢、不綁約</b>。留下聯絡方式，我們會私下把完整條件給你。</p>
+    <form class="form" action="{{FORM_ENDPOINT}}" method="post">
+      <div class="field"><label>稱呼</label>
+        <input type="text" name="name" placeholder="怎麼稱呼你"></div>
+      <div class="field"><label>聯絡方式（Line / Email / 電話，任一）</label>
+        <input type="text" name="contact" placeholder="{{CONTACT_LINE}} / {{CONTACT_EMAIL}}"></div>
+      <div class="field"><label>我有興趣的是</label>
+        <select name="role">
+          <option>💰 預付客</option>
+          <option>🕊 天使金主</option>
+          <option>🔧 技術加盟</option>
+          <option>🤝 開發合作</option>
+          <option>其他 / 先了解</option>
+        </select></div>
+      <div class="field"><label>想說什麼（可留空）</label>
+        <textarea name="note" rows="3" placeholder="你的場景、你的期待、你的問題…"></textarea></div>
+      <button class="btn" type="submit">送出意向 →</button>
+      <div class="p" style="font-size:12.5px">
+        送出即表示同意我們以你留下的方式與你聯絡，不作其他用途。
+        表單後端 <span class="ph">{{FORM_ENDPOINT}}</span> 待接。
+      </div>
+    </form>
+  </section>
+
+  <section id="social">
+    <div class="sec-head"><h2>追蹤我們</h2><span>FOLLOW</span><div class="rule"></div></div>
+    <p class="p">還沒決定？先關注。所有開放消息、名額釋出，第一時間在這些平台公佈。</p>
+    <div class="socials">
+      <a class="social" href="{{LINE_URL}}" target="_blank" rel="noopener"><i>💬</i>Line 官方帳號</a>
+      <a class="social" href="{{TG_URL}}" target="_blank" rel="noopener"><i>✈️</i>Telegram</a>
+      <a class="social" href="{{FB_URL}}" target="_blank" rel="noopener"><i>📘</i>Facebook</a>
+      <a class="social" href="{{IG_URL}}" target="_blank" rel="noopener"><i>📸</i>Instagram</a>
+      <a class="social" href="{{YT_URL}}" target="_blank" rel="noopener"><i>▶️</i>YouTube</a>
+      <a class="social" href="{{X_URL}}" target="_blank" rel="noopener"><i>𝕏</i>X</a>
+    </div>
+    <p class="p" style="margin-top:14px;font-size:13px">
+      以上 <span class="ph">{{LINE_URL}}</span> 等為佔位符，待填入正式帳號後上線。
+    </p>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <span>莫氏集團 · MOKAGI</span><span class="dot">·</span>
+      <span>{{SITE_URL}}</span><span class="dot">·</span>
+      <span>商業預告 v1（佔位版）</span><span class="dot">·</span>
+      <span>2026-09-27</span>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

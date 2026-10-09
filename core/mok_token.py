@@ -20,6 +20,7 @@ import os
 import json
 import time
 import sqlite3
+from db_conn import connect
 from contextlib import closing
 from config import MOKAGI_home,MOK_max_tokens
 # ===== 新增：Token 計數工具（供其他模組重用）=====
@@ -28,9 +29,20 @@ import importlib.util
 # token 統計數據庫路徑（與 chat_history 共用數據庫）
 TOKEN_DB_PATH = os.path.expanduser(f"~/.{MOKAGI_home}/.memory/chat_history.db")
 
+def _connect():
+    # 統一 SQLite 連線參數：多 agent 進程共用同一個 chat_history.db，
+    # 預設 timeout(5s) 在併發寫入時會拋 OperationalError: database is locked。
+    # 這裡統一拉高 timeout / busy_timeout，並使用 WAL + synchronous=NORMAL。
+    conn = connect(TOKEN_DB_PATH)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    return conn
+
+
 def _ensure_token_table():
     """確保 token_usage 表存在"""
-    with closing(sqlite3.connect(TOKEN_DB_PATH)) as conn:
+    with closing(_connect()) as conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS token_usage (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +78,7 @@ def log_token_usage(
 ):
     """記錄單次 LLM 調用的 token 用量"""
     _ensure_token_table()
-    with closing(sqlite3.connect(TOKEN_DB_PATH)) as conn:
+    with closing(_connect()) as conn:
         conn.execute(
             '''INSERT INTO token_usage
                (user_id, agent_name, model_name, conversation_id, workflow_id,
@@ -77,6 +89,14 @@ def log_token_usage(
              json.dumps(extra, ensure_ascii=False) if extra else None)
         )
         conn.commit()
+
+    # === cost_guard 插樁（shadow：只記帳；fail-open，絕不影響主流程）===
+    try:
+        import cost_guard
+        cost_guard.note_usage(agent_name, model_name, prompt_tokens,
+                              completion_tokens, extra, user_id)
+    except Exception:
+        pass
 
 
 

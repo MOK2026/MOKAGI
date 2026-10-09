@@ -652,3 +652,13 @@ body.perf-lite #chatInputWrapper::after{
     max-height:min(18dvh, 110px) !important;
   }
 }
+
+/* 最近對話：頂部分層（不分組，只按最後對話時間排序）★ indexPage 2026-09-27 */
+.agent-group--recent{
+  margin-bottom:12px !important;
+  padding-bottom:6px;
+  border-bottom:1px dashed color-mix(in srgb, #7ec8a8 34%, transparent);
+}
+.agent-group--recent > .agent-group-header{
+  color:#7ec8a8 !important;
+}

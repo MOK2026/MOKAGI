@@ -614,7 +614,7 @@ async def heartbeat_handler(agent_name: str, agent_config: dict):
             now = time.time()
             last_reminder = float(data.get("_last_reminder_ts", 0))
             if now - last_reminder >= 3600:
-                logger.info(f"⏰ 發送 awaiting_confirm 提醒: {job_name}")
+                logger.debug(f"⏰ 發送 awaiting_confirm 提醒: {job_name}")  # [P0-3] 降噪
                 await send_tg_notification(
                     agent_name,
                     agent_config,

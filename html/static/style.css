@@ -390,6 +390,8 @@
             background: #4ec9b0;
             color: #1e1e1e;
         }
+.tools-token-balance{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;font-size:.8rem;line-height:1;color:#e5c07b;background:#2a2a2e;border:1px solid #4a4a50;border-radius:16px;white-space:nowrap;cursor:pointer;transition:background .15s,border-color .15s;}
+.tools-token-balance:hover{background:#3a3a40;border-color:#e5c07b;}
         .tools-content {
             flex: 1;
             overflow-y: auto;
@@ -1965,6 +1967,60 @@
    向下滾動 → 輸入列自動收合，只留懸浮喚回圓鈕；向上滾動或點鈕 → 喚回
    ══════════════════════════════════════════════════════════════ */
 #floatInputBtn { display: none; }
+
+/* ══════════════════════════════════════════════════════════════
+   樣式8 桌機版延伸：手勢隱藏 + 浮動鍵（沉浸式）by indexPage 2026-10-03
+   電腦版比照手機版：向下滾動 → 輸入列自動收合，只留懸浮 ⌨️ 圓鈕；
+   向上滾動、回到最新、或點圓鈕 → 喚回輸入列。
+   浮動鍵由 main.js 掛載於 .chat-main 內，故桌機以 absolute 對齊聊天欄右下角
+   （不會壓到右側工具面板）。
+   ══════════════════════════════════════════════════════════════ */
+@media (min-width: 769px) {
+    .chat-main { position: relative; }
+    .chat-input-area {
+        max-height: 560px;
+        transition: max-height .2s ease, padding .2s ease, margin .2s ease,
+                    opacity .18s ease, transform .2s ease;
+    }
+    body.scrolling .chat-input-area {
+        max-height: 0 !important;
+        overflow: hidden;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        margin-bottom: 0 !important;
+        border-width: 0 !important;
+        opacity: 0;
+        transform: translateY(10px);
+        pointer-events: none;
+    }
+    #floatInputBtn {
+        position: absolute;
+        right: 16px;
+        bottom: 16px;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #4ec9b0, #2aa88f);
+        border: none;
+        color: #0f1f1c;
+        font-size: 1.4rem;
+        box-shadow: 0 6px 20px rgba(0,0,0,.5), 0 0 0 1px rgba(78,201,176,.35);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 400;
+        touch-action: manipulation;
+    }
+    body.scrolling #floatInputBtn {
+        display: inline-flex;
+        animation: floatInD .25s ease;
+    }
+    @keyframes floatInD {
+        from { transform: translateY(16px) scale(.8); opacity: 0; }
+        to   { transform: translateY(0) scale(1); opacity: 1; }
+    }
+}
 @media (max-width: 768px) {
     .chat-input-area {
         max-height: 560px;
@@ -2359,3 +2415,102 @@ body.font-xl #chatMessages .round-reply-text pre code {
 .md-body hr { border: none; border-top: 1px solid #4a4a50; margin: 0.8em 0; }
 .md-body img { max-width: 100%; height: auto; display: block; border-radius: 8px; margin: 0.5em 0; }
 .md-body video { max-width: 100%; height: auto; border-radius: 8px; margin: 0.5em 0; }
+
+/* ---------- 快捷問題列（每 agent 3 條） by 病毒引擎 20261001 ---------- */
+.quick-questions-bar{
+    display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+    padding:6px 10px 2px 10px; margin:0 0 2px 0;
+    animation:qqFade .18s ease-out;
+}
+.quick-questions-bar .qq-lead{ font-size:12px; opacity:.7; margin-right:2px; }
+.quick-questions-bar .qq-chip{
+    display:inline-flex; align-items:center;
+    font-size:12px; line-height:1.35; color:#cfe9ff;
+    background:rgba(78,201,176,.10);
+    border:1px solid rgba(78,201,176,.35);
+    border-radius:14px; padding:5px 11px; cursor:pointer;
+    white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis;
+    transition:background .15s, border-color .15s, transform .1s, box-shadow .15s;
+}
+.quick-questions-bar .qq-chip:hover{
+    background:rgba(78,201,176,.22); border-color:rgba(78,201,176,.75);
+    box-shadow:0 0 8px rgba(78,201,176,.25);
+}
+.quick-questions-bar .qq-chip:active{ transform:scale(.97); }
+@keyframes qqFade{ from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;} }
+@media (max-width:600px){
+    .quick-questions-bar{ flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:4px; }
+    .quick-questions-bar .qq-chip{ flex:0 0 auto; }
+}
+
+
+/* ===== 插話氣泡（indexPage 20261008｜原因：工作中補充的訊息與一般訊息長得一樣，看不出是插話）===== */
+.message.interject-note { align-self: flex-end; opacity: 1 !important; }
+.message.interject-note .message-bubble {
+    background: #2b2136 !important;
+    border: 1px dashed #c78bff !important;
+    border-radius: 14px !important;
+    opacity: 1 !important;
+    word-break: break-word;
+}
+.message.interject-note .message-bubble .interject-badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #e3b6ff;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+.message.interject-note .message-meta { color: #b992d6; }
+
+/* ===== L3 結構化媒體卡片（20261008 indexPage）
+   統一渲染工具/助手回傳的圖、影、音；各前端共用同一份 media 資料 ===== */
+.mok-media-wrap{display:flex;flex-wrap:wrap;gap:10px;padding:8px 12px;}
+.mok-media{border:1px solid #3e3e42;border-radius:10px;overflow:hidden;background:#1a1a1d;max-width:100%;}
+.mok-media-image img{display:block;max-width:min(420px,100%);max-height:420px;object-fit:contain;background:#111;cursor:zoom-in;}
+.mok-media-video video{display:block;max-width:min(520px,100%);max-height:420px;background:#000;}
+.mok-media-audio{display:flex;align-items:center;gap:8px;padding:6px 10px;}
+.mok-media-audio audio{height:34px;max-width:320px;}
+.mok-media-ico{font-size:1.1rem;}
+.mok-media-cap{padding:6px 10px;font-size:0.78rem;color:#b0b0b0;word-break:break-word;}
+
+/* ===== 頂端會員 Token 能量條 · idx 2026-10-09 (HK) =====
+   寬度＝Token 剩餘額度百分比；健康度分級：
+   >=80% 綠 5px ｜ >=50% 黃 10px ｜ >=10% 橙 15px ｜ <10% 紅 20px 柔和慢閃。
+   純顯示層：pointer-events:none，不攔任何點擊、不改任何既有規則。 ===== */
+.token-energy-bar{
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 20px;
+    z-index: 2147483000;
+    pointer-events: none;
+    background: transparent;
+    opacity: 0;
+    transition: opacity .6s ease;
+}
+.token-energy-bar.is-on{ opacity: 1; }
+/* idx | 血條可點→充值頁：僅 is-on 時色塊本身可點，其餘維持 pointer-events:none | 20261009 (HK) */
+.token-energy-bar.is-on .token-energy-fill{ pointer-events: auto; cursor: pointer; }
+.token-energy-bar.is-on .token-energy-fill:hover{ filter: brightness(1.2); }
+.token-energy-fill{
+    /* idx | 修正：色塊改為「由左右兩端同時向中間收縮」 | 由 JS 設定 left/right，兩端各留 (100−剩餘%)/2；圓角改全圓角藥丸形 | 20261008 1927 (HK) */
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 5px;
+    border-radius: 999px;
+    transition: left .9s cubic-bezier(.4,0,.2,1), right .9s cubic-bezier(.4,0,.2,1), height .5s ease, background .9s ease, box-shadow .9s ease;
+}
+.token-energy-bar.lv-ok   .token-energy-fill{ height:5px;  background:linear-gradient(90deg,rgba(63,191,127,.55),rgba(94,224,160,.85));  box-shadow:0 0 6px rgba(94,224,160,.30); }
+.token-energy-bar.lv-warn .token-energy-fill{ height:10px; background:linear-gradient(90deg,rgba(216,180,92,.55),rgba(240,211,138,.85)); box-shadow:0 0 8px rgba(240,211,138,.30); }
+.token-energy-bar.lv-mid  .token-energy-fill{ height:15px; background:linear-gradient(90deg,rgba(217,138,74,.55),rgba(240,171,109,.85)); box-shadow:0 0 10px rgba(240,171,109,.30); }
+.token-energy-bar.lv-low  .token-energy-fill{ height:20px; background:linear-gradient(90deg,rgba(192,80,92,.45),rgba(232,139,147,.80));  box-shadow:0 0 12px rgba(232,139,147,.40); animation:tokenEnergyPulse 2.8s ease-in-out infinite; }
+@keyframes tokenEnergyPulse{ 0%,100%{ opacity:.30; } 50%{ opacity:.85; } }
+@media (prefers-reduced-motion: reduce){
+    .token-energy-bar.lv-low .token-energy-fill{ animation:none; opacity:.65; }
+}
+@media (max-width:640px){
+  .mok-media-image img,.mok-media-video video{max-width:100%;max-height:60vh;}
+}

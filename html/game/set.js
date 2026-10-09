@@ -158,6 +158,25 @@ function updateCharacterPanel() {
 
   if (nameEl) nameEl.textContent = "🧑 勇者";
   if (titleEl) titleEl.textContent = "莫氏集團討伐戰 · Lv." + getPlayerLevelFromStorage() + " 勇者";
+
+  // ★ 2026-10-01 凜：玩家資料改接會員系統（/api/member/header 單一真源）
+  (function () {
+    fetch('/api/member/header', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || d.success === false) return;
+        var loggedIn = !!d.logged_in;
+        if (nameEl) nameEl.textContent = loggedIn
+          ? ('🧑 ' + (d.display_name || d.username || '會員'))
+          : '🧑 未登入訪客';
+        if (titleEl) {
+          var tok = d.unlimited ? '∞' : ((d.remaining != null) ? Number(d.remaining).toLocaleString('en-US') : '-');
+          titleEl.textContent = (d.plan_label || (loggedIn ? '會員' : '訪客')) +
+            ' · Lv.' + getPlayerLevelFromStorage() + ' · 剩餘 token ' + tok;
+        }
+      })
+      .catch(function () {});
+  })();
   if (avatarEl) avatarEl.textContent = "🧑";
   if (atkEl) atkEl.textContent = ps.normalDmg;
   if (defEl) defEl.textContent = ps.blockDmg;

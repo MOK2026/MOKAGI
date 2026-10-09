@@ -236,7 +236,7 @@
     let agentStartMsg = '';
     let modelsList = [];
     let currentModelIndex = 0;
-    let currentTool = 'files';
+    let currentTool = 'room';
     const RUNNING_AGENT_STORAGE_KEY = 'mokagi_running_agent_v1';
     const RUNNING_AGENT_MAX_AGE_MS = 5 * 60 * 1000;
 
@@ -420,49 +420,59 @@ let currentHtmlContent = '';      // 儲存當前 HTML 檔案的完整內容
         localStorage.setItem('web_user_id', userId);
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    // 🔧 20260927【未登入用戶對話保留】凜
+    //   /api/chat_history 需帶「後端頒發的訪客身分」才會回資料：
+    //   resolve_tenant_arg()／resolve_tenant() 只認 (a) 登入 session 或
+    //   (b) ?user_id= / body.user_id（且須符合 web_guest_* 或 guest:<sid>），
+    //   否則一律回 None → GET 回空陣列、POST 回 401 → 刷新後對話全清空。
+    //   這裡統一提供：① ensureMokIdentity() 取得後端身分並落地
+    //                ② _mokUidNow() / _mokUidQuery() 供 chat_history 請求帶上身分
+    // ══════════════════════════════════════════════════════════════════════
+    let _mokUidCache = '';
+    let _mokIdentityPromise = null;
+    function _mokUidNow() {
+        try { if (_mokUidCache) return _mokUidCache; } catch (e) {}
+        try {
+            const _s = localStorage.getItem('mokagi_user_id') || '';
+            if (_s) return _s;
+        } catch (e) {}
+        try { if (typeof userId !== 'undefined' && userId) return userId; } catch (e) {}
+        try { return localStorage.getItem('web_user_id') || ''; } catch (e) { return ''; }
+    }
+    function _mokUidQuery() {
+        const _u = _mokUidNow();
+        return _u ? ('&user_id=' + encodeURIComponent(_u)) : '';
+    }
+    function ensureMokIdentity() {
+        if (_mokIdentityPromise) return _mokIdentityPromise;
+        _mokIdentityPromise = fetch('/api/member/header', { credentials: 'same-origin' })
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(d) {
+                if (d && d.success !== false) {
+                    const _uid = d.logged_in ? String(d.username || '') : String(d.temp_id || '');
+                    if (_uid) {
+                        _mokUidCache = _uid;
+                        try {
+                            localStorage.setItem('mokagi_user_id', _uid);
+                            if (!d.logged_in) localStorage.setItem('web_user_id', _uid);
+                        } catch (e) {}
+                        try { if (typeof userId !== 'undefined') userId = _uid; } catch (e) {}
+                    }
+                }
+                return _mokUidCache || _mokUidNow();
+            })
+            .catch(function() { return _mokUidNow(); });
+        return _mokIdentityPromise;
+    }
+
 
 // --- 程式碼庫 直接將檔傳給llm ----
 
     // 附件列表
     let attachments = [];
-    const LARGE_TEXT_THRESHOLD = 4000;
-    const LARGE_TEXT_LINE_THRESHOLD = 30;
-    let convertingLargeText = false;
-
-    function isLargeText(content) {
-        return content.length > LARGE_TEXT_THRESHOLD || content.split(/\r?\n/).length > LARGE_TEXT_LINE_THRESHOLD;
-    }
-
-    async function addLargeTextAttachment(content) {
-        if (!content || convertingLargeText) return false;
-        convertingLargeText = true;
-        try {
-            const response = await fetch('/api/upload_text', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content })
-            });
-            const result = await response.json();
-            if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
-            attachments.push({
-                name: result.filename,
-                type: 'text/plain',
-                kind: 'text',
-                size: content.length,
-                server_path: result.path,
-                temporary: true,
-                titlePreview: titlePreviewText(content)
-            });
-            updateAttachmentsUI();
-            return true;
-        } catch (error) {
-            console.error('大型文字暫存失敗', error);
-            showQuoteToast('⚠️ 大型文字暫存失敗，未移除原文字。');
-            return false;
-        } finally {
-            convertingLargeText = false;
-        }
-    }
+    // 【idx｜2026-10-09 12:59 (HK)｜移除「輸入過長文字自動轉臨時文件」機制】
+    // 原因：臨時文件在對話後難以找回原內容。現改為長文字直接留在輸入框、原樣送出。
 
 
 /* ===== 批次E：標題預覽（內文首 X 字）與附件類型辨識 ===== */
@@ -714,7 +724,7 @@ async function handleFiles(files) {
             };
             reader.readAsDataURL(file);
         } else if (kind === 'audio') {
-            // 錄音/音頻：上傳到後端暫存，AI 用 stt 轉錄後刪除
+            // 錄音/音頻：上傳到後端暫存，AI 用 stt 轉錄（暫存檔由系統自動清理，不主動刪）
             att.processing = true;
             attachments.push(att);
             updateAttachmentsUI();
@@ -761,7 +771,7 @@ function buildMessageWithAttachments(userMessage) {
             attachmentText += `- 📄 ${att.name} (文字檔案)\n\`\`\`\n${contentPreview}\n\`\`\`\n`;
         } else if (att.type.startsWith('image/')) {
             if (att.server_path) {
-                attachmentText += `- 🖼️ ${att.name}（已暫存：${att.server_path}）\n  請用 vision 工具分析這張圖片（file_path="${att.server_path}"），分析完成後用 admin exec 執行 rm "${att.server_path}" 刪除暫存檔。\n`;
+                attachmentText += `- 🖼️ ${att.name}（已暫存：${att.server_path}）\n  請用 vision 工具分析這張圖片（file_path="${att.server_path}"）。暫存圖由系統自動清理（上傳滿 60 分鐘自動刪除），無需手動刪除。\n`;
             } else if (att.error) {
                 attachmentText += `- 🖼️ ${att.name}（圖片暫存失敗：${att.error}）\n`;
             } else {
@@ -769,7 +779,7 @@ function buildMessageWithAttachments(userMessage) {
             }
         } else if (att.type.startsWith('audio/')) {
             if (att.server_path) {
-                attachmentText += `- 🎵 ${att.name}（已暫存：${att.server_path}）\n  請用 stt 工具轉錄這段錄音（file_path="${att.server_path}"），轉錄完成後用 admin exec 執行 rm "${att.server_path}" 刪除暫存檔。若使用者是語音留言，請用 tts 工具以語音回覆。\n`;
+                attachmentText += `- 🎵 ${att.name}（已暫存：${att.server_path}）\n  請用 stt 工具轉錄這段錄音（file_path="${att.server_path}"）。暫存音檔由系統自動清理（上傳滿 60 分鐘自動刪除），無需手動刪除。若使用者是語音留言，請用 tts 工具以語音回覆。\n`;
             } else if (att.error) {
                 attachmentText += `- 🎵 ${att.name}（錄音上傳失敗：${att.error}）\n`;
             } else {
@@ -1127,8 +1137,8 @@ function renderMarkdown(text) {
         const container = document.getElementById('toolsContent');
         container.innerHTML = '<div class="tools-loading">加載工具列表中...</div>';
 
-        fetch('/api/tools')
-            .then(res => res.json())
+        safeFetch('/api/tools')
+            .then(res => res ? res.json() : Promise.reject(new Error('tools 需要登入或服務不可用')))
             .then(data => {
                 const tools = data.tools;
                 if (!tools.length) {
@@ -1295,6 +1305,50 @@ function renderAgentList() {
     const saveGroupState = () => {
         try { localStorage.setItem(GROUP_STORE_KEY, JSON.stringify(collapsedGroups)); } catch(e) {}
     };
+    // ====== ① 最近對話：不分組，只按「最後對話時間」排序（最新在最上）======
+    const RECENT_LIMIT = 8;
+    const RECENT_KEY = 'agentRecentCollapsed_v1';
+    const timeOf = (ag) => {
+        const s = agentStates[ag.name];
+        const t = (s && typeof s.lastActive === 'number') ? s.lastActive : 0;
+        return t || ag.last_active || 0;
+    };
+    let recentCollapsed = false;
+    try { recentCollapsed = localStorage.getItem(RECENT_KEY) === '1'; } catch (e) {}
+    const recentAgents = [...agentList]
+        .filter(a => timeOf(a) > 0)
+        .sort((a, b) => timeOf(b) - timeOf(a))
+        .slice(0, RECENT_LIMIT);
+    if (recentAgents.length) {
+        const rWrap = document.createElement('div');
+        rWrap.className = 'agent-group agent-group--recent' + (recentCollapsed ? ' collapsed' : '');
+        rWrap.dataset.group = '__recent__';
+
+        const rHeader = document.createElement('div');
+        rHeader.className = 'agent-group-header';
+        rHeader.innerHTML = '<span class="agent-group-arrow">' + (recentCollapsed ? '▶' : '▼') + '</span> <span class="agent-group-name">🕘 最近對話</span> <span class="agent-group-count">' + recentAgents.length + '</span>';
+        rHeader.title = '最近對話（不分組，依最後對話時間排序）';
+        rHeader.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            const wrap = this.parentElement;
+            const isCollapsed = wrap.classList.toggle('collapsed');
+            try { localStorage.setItem(RECENT_KEY, isCollapsed ? '1' : '0'); } catch (e) {}
+            this.querySelector('.agent-group-arrow').textContent = isCollapsed ? '▶' : '▼';
+            const b = wrap.querySelector('.agent-group-body');
+            if (b) b.style.display = isCollapsed ? 'none' : '';
+        });
+
+        const rBody = document.createElement('div');
+        rBody.className = 'agent-group-body';
+        if (recentCollapsed) rBody.style.display = 'none';
+
+        rWrap.appendChild(rHeader);
+        rWrap.appendChild(rBody);
+        container.appendChild(rWrap);
+        recentAgents.forEach(ag => rBody.appendChild(makeCard(ag)));
+    }
+
+    // ====== ② 分組列表（依 MOK_AGENT_group 分類）======
     sortedAgents.forEach(agent => {
         const g = groupOf(agent.name);
         if (g !== lastGroup) {
@@ -1331,13 +1385,19 @@ function renderAgentList() {
             container.appendChild(groupWrap);
             lastGroup = g;
         }
-        // 卡片放入對應的分組 body
         const targetBody = groupWrap ? groupWrap.querySelector('.agent-group-body') : container;
+        targetBody.appendChild(makeCard(agent));
+    });
+
+    /** 建立單張名片（供「最近對話」與分組列表共用） */
+    function makeCard(agent) {
         const state = agentStates[agent.name] || { isRunning: false, hasNewCompleted: false };
         const icon = agentIcons[agent.name] || '🌸';
-        const statusMark = state.isRunning ? ':...' : (state.hasNewCompleted ? '🔔' : '');
+        // ★ indexPage|2026-10-08|🔔與金色樣式改由「持久化未讀」驅動（單一真實來源）：刷新／重啟後仍在，點進該 agent 清除未讀時才熄滅
         const unreadMap = getUnreadMap();
         const hasUnread = !!unreadMap[agent.name];
+        const hasNew = hasUnread;
+        const statusMark = state.isRunning ? ':...' : (hasNew ? '🔔' : '');
         let classes = 'agent-item';
         if (hasUnread) classes += ' has-unread';
         if (currentAgent === agent.name) {
@@ -1345,14 +1405,14 @@ function renderAgentList() {
         }
         if (state.isRunning) {
             classes += ' running';
-        } else if (state.hasNewCompleted) {
+        } else if (hasNew) {
             classes += ' has-new';
         }
         const div = document.createElement('div');
         div.className = classes;
         const _unote = hasUnread ? getUnreadNote(agent.name) : '';
         const _ulbl = _unote || '未讀';
-        div.title = agent.name + ':' + (state.isRunning ? ' (執行中)' : (state.hasNewCompleted ? ' (有新完成)' : '')) + (hasUnread ? (' (未讀' + (_unote ? '：' + _unote : '') + ')') : '') + escapeHtml(agent.post);
+        div.title = agent.name + ':' + (state.isRunning ? ' (執行中)' : '') + (hasUnread ? (' (未讀' + (_unote ? '：' + _unote : '') + ')') : '') + escapeHtml(agent.post);
         let waTag = '';
         const unreadBadge = hasUnread
             ? '<span class="agent-unread-badge" data-unread-agent="' + escNoteHtml(agent.name) + '" title="' + escNoteHtml(_unote ? ('📝 便條：' + _unote) : '📭 未讀（點此填寫便條）') + '">' + escNoteHtml(_ulbl) + '</span>'
@@ -1370,14 +1430,15 @@ function renderAgentList() {
                 openUnreadNoteDialog(agent.name);
             });
         }
-        // 內聯點擊監聽
+        // 內聯點擊監聽（★ 2026-10-08：點進該 agent 即清除未讀，後端同步）
         div.addEventListener('click', function() {
+            clearUnreadOnOpen(agent.name);
             if (currentAgent !== agent.name) {
                 activateAgent(agent.name);
             }
         });
-        targetBody.appendChild(div);
-    });
+        return div;
+    }
 
     // ----- ws客服：wa_auto.py 狀態標籤輪詢 -----
     if (document.getElementById('waAutoTag')) {
@@ -1413,7 +1474,37 @@ async function updateWaAutoTag() {
     
 
 // 在 activateAgent 函數開頭增加對 headerDisplay 和 agentList 的檢查，避免因元素缺失導致異常：
+function updatePageTitle(a){try{var n=String(a==null?"":a).trim();document.title=n?n+"房間":"MOK";}catch(e){}}
+// ===== 防呆（2026-10-02 by mokagi說明）=====
+// Cloudflare Access session 過期時 /api/models 會 302 轉往 cloudflareaccess.com（跨域），
+// 跨域轉址無 CORS 標頭 → fetch 直接 reject；若此 reject 進入 Promise.all，會讓 activateAgent
+// 整個中止、後面 UI 全不渲染 = 整個 web 卡死。safeFetch 讓單一 API 失效不拖垮整頁。
+let __mokAuthExpiredShown = false;
+function showAuthExpiredHint() {
+    if (__mokAuthExpiredShown) return;
+    __mokAuthExpiredShown = true;
+    try {
+        const bar = document.createElement("div");
+        bar.id = "mok-auth-expired-bar";
+        bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#b3261e;color:#fff;font-size:13px;line-height:1.5;padding:8px 12px;text-align:center;box-shadow:0 1px 6px rgba(0,0,0,.35);cursor:pointer";
+        bar.textContent = "🔒 登入狀態可能已過期（Cloudflare Access），部分資料載入失敗。點此重新整理。";
+        bar.addEventListener("click", function () { location.reload(); });
+        document.body.appendChild(bar);
+    } catch (e) {}
+}
+async function safeFetch(url, opts) {
+    try {
+        const r = await fetch(url, opts);
+        if (r && r.redirected && /cloudflareaccess\.com/i.test(r.url || "")) showAuthExpiredHint();
+        return r;
+    } catch (e) {
+        console.warn("[safeFetch] 請求失敗:", url, e);
+        showAuthExpiredHint();
+        return null;
+    }
+}
 async function activateAgent(agentName) {
+    await ensureMokIdentity();   // 🔧 未登入者：先取得後端頒發身分，歷史才拿得到
 
     const headerDisplay = document.getElementById('agentHeaderDisplay');
     if (!headerDisplay) {
@@ -1443,6 +1534,7 @@ if (headerDisplay) {
     
     // 從 agentList 中獲取實際的 file 路徑（後端返回的）
     //const agentInfo = agentList.find(a => a.name === agentName);
+    updatePageTitle(agentName);
     const fileName = agentInfo ? agentInfo.file : ('.' + agentName);
     window.currentAgentFile = `.mok/agent/${agentName}/${fileName}`;   // 保存當前 Agent 的 .agent 檔案路徑
     try {
@@ -1462,15 +1554,15 @@ if (headerDisplay) {
 
         // ===== 再並行獲取配置、模型列表和歷史消息 =====
         const [configRes, modelsRes, historyRes] = await Promise.all([
-            fetch('/api/mok_config'),
-            fetch('/api/models'),
-            fetch(`/api/chat_history?agent=${encodeURIComponent(agentName)}&limit=10&offset=0`)
+            safeFetch('/api/mok_config'),
+            safeFetch('/api/models'),
+            safeFetch(`/api/chat_history?agent=${encodeURIComponent(agentName)}&limit=10&offset=0${_mokUidQuery()}`)
         ]);
 
         // 獲取配置數據
         let configData = {};
         try {
-            configData = await configRes.json();
+            if (configRes) configData = await configRes.json();
         } catch (e) {
             console.warn('獲取配置失敗:', e);
         }
@@ -1480,7 +1572,7 @@ if (headerDisplay) {
         // 獲取模型列表
         let modelsData = { models: [], current_index: 0 };
         try {
-            modelsData = await modelsRes.json();
+            if (modelsRes) modelsData = await modelsRes.json();
         } catch (e) {
             console.warn('獲取模型列表失敗:', e);
         }
@@ -1490,13 +1582,14 @@ if (headerDisplay) {
         // 獲取歷史消息（用於 loadChatHistory）
         let historyData = { messages: [], has_more: false };
         try {
-            historyData = await historyRes.json();
+            if (historyRes) historyData = await historyRes.json();
         } catch (e) {
             console.warn('獲取歷史消息失敗:', e);
         }
 
         // ===== 所有請求成功，開始更新 UI =====
         currentAgent = agentName;
+        try { if (typeof window.MOK_renderQuickQuestions === "function") { window.MOK_renderQuickQuestions(agentName); } else { var _qqT = 0; (function _qqWait(){ _qqT++; if (typeof window.MOK_renderQuickQuestions === "function") { window.MOK_renderQuickQuestions(agentName); } else if (_qqT < 20) { setTimeout(_qqWait, 150); } })(); } } catch (e) { console.warn("quickQuestions", e); }
         // 🔧 記住最後使用的 Agent，刷新後回到同一個 Agent（連同進行中的串流一起續流）
         try { localStorage.setItem('mokagi_last_agent', agentName); } catch (e) {}
         // 🔔 Live2D 桌面寵物：廣播 agent 切換事件（Open-LLM-VTuber/live2d-pet.js 監聽）
@@ -1623,7 +1716,7 @@ if (headerDisplay) {
     } catch (err) {
         console.error('activateAgent 錯誤:', err);
         // 嘗試重新加載 Agent 列表
-        await loadAgentList();
+        // <-- 這行會造成無限遞迴！ await loadAgentList();
         // 如果仍無 Agent，顯示錯誤信息
         if (headerDisplay) {
             headerDisplay.textContent = '❌ 加載失敗，請刷新頁面';
@@ -1637,7 +1730,8 @@ if (headerDisplay) {
     // 模型
     async function loadModels() {
         try {
-            const res = await fetch('/api/models');
+            const res = await safeFetch('/api/models');
+            if (!res) return;  // 取不到（如登入過期）就直接放棄，避免 null.json() 丟錯
             const data = await res.json();
             modelsList = data.models;
             currentModelIndex = data.current_index;
@@ -1883,10 +1977,11 @@ function renderPlainTextWithFold(text) {
 
 
 async function loadChatHistoryFromServer() {
+    await ensureMokIdentity();   // 🔧 未登入者：等身分就緒再讀歷史
     chatHistoryOffset = 0;
     chatHistoryHasMore = true;
     try {
-        const res = await fetch(`/api/chat_history?agent=${encodeURIComponent(currentAgent)}&limit=${CHAT_HISTORY_PAGE_SIZE}&offset=0`);
+        const res = await fetch(`/api/chat_history?agent=${encodeURIComponent(currentAgent)}&limit=${CHAT_HISTORY_PAGE_SIZE}&offset=0${_mokUidQuery()}`);
         const data = await res.json();
         let messages = data.messages || [];
         chatHistoryHasMore = data.has_more || false;
@@ -1951,7 +2046,7 @@ async function loadChatHistory() {
 
 
 
-async function saveChatMessageToServer(msg) {
+function _mokTsToSec(ts){const n=Number(ts);if(!isFinite(n)||n<=0)return Date.now()/1000;return n>1e11?n/1000:n;} /* 修2026-09-27：重複/1000 → 毫秒才除，已是秒則原樣 */ async function saveChatMessageToServer(msg) {
     try {
         await fetch('/api/chat_history', {
             method: 'POST',
@@ -1962,7 +2057,8 @@ async function saveChatMessageToServer(msg) {
                 content: msg.content,
                 thinkContent: msg.thinkContent || null,
                 conv_id: msg.conv_id || null,
-                timestamp: (msg.timestamp || Date.now()) / 1000
+                user_id: _mokUidNow(),
+                timestamp: _mokTsToSec(msg.timestamp)
             })
         });
     } catch (err) {
@@ -1972,7 +2068,7 @@ async function saveChatMessageToServer(msg) {
 
 async function clearChatHistoryOnServer() {
     try {
-        await fetch(`/api/chat_history?agent=${encodeURIComponent(currentAgent)}`, { method: 'DELETE' });
+        await fetch(`/api/chat_history?agent=${encodeURIComponent(currentAgent)}${_mokUidQuery()}`, { method: 'DELETE' });
     } catch (err) {
         console.error('清除歷史失敗', err);
     }
@@ -1984,10 +2080,11 @@ async function clearChatHistoryOnServer() {
 // 新的 loadChatHistory (異步)
 async function loadMoreChatHistory() {
     if (!chatHistoryHasMore || loadingMore) return [];
+    await ensureMokIdentity();   // 🔧 未登入者：等身分就緒再翻頁
     loadingMore = true;
     chatHistoryOffset += CHAT_HISTORY_PAGE_SIZE;
     try {
-        const res = await fetch(`/api/chat_history?agent=${encodeURIComponent(currentAgent)}&limit=${CHAT_HISTORY_PAGE_SIZE}&offset=${chatHistoryOffset}`);
+        const res = await fetch(`/api/chat_history?agent=${encodeURIComponent(currentAgent)}&limit=${CHAT_HISTORY_PAGE_SIZE}&offset=${chatHistoryOffset}${_mokUidQuery()}`);
         const data = await res.json();
         chatHistoryHasMore = data.has_more || false;
         const newMessages = (data.messages || []).reverse().map(msg => ({
@@ -2037,7 +2134,8 @@ async function resumeActiveSessionForAgent(agent) {
     // 🔧 防重連風暴：同一 agent 已有一條續流連線時不再重複開（避免「不停刷新」）
     if (_activeEventSources[agent]) return true;
     try {
-        const res = await fetch(`/api/chat/active?agent=${encodeURIComponent(agent)}`, { cache: 'no-store' });
+        const _uidQ = _mokUidNow();
+        const res = await fetch(`/api/chat/active?agent=${encodeURIComponent(agent)}&user_id=${encodeURIComponent(_uidQ)}`, { cache: 'no-store' });
         if (!res.ok) return false;
         const data = await res.json();
         if (!data.ok || !data.sessions || data.sessions.length === 0) return false;
@@ -2057,7 +2155,8 @@ async function resumeActiveSessionForAgent(agent) {
                     iteration: (r && r.iteration) || 0,
                     semantic: (r && r.semantic) || '',
                     experience: (r && r.experience) || '',
-                    tool_process: (r && r.tool_process) || ''
+                    tool_process: (r && r.tool_process) || '',
+                    media: (r && Array.isArray(r.media)) ? r.media : []
                 };
             });
         } else {
@@ -2093,6 +2192,7 @@ async function resumeActiveSessionForAgent(agent) {
         const _resumeAfter = (_st && typeof _st.n === 'number') ? _st.n : 0;
         _restoreStreamState(agent);
         _sseSessionByAgent[agent] = s.session_id;
+        _sseAppliedCount[s.session_id] = _resumeAfter;   // 🔧A：聚合快照已含 buf[:n]，游標直接對齊
         _resumeViaEventSource(agent, s.session_id, 0, _resumeAfter);
         return true;
     } catch (e) {
@@ -2123,6 +2223,82 @@ function _foldLegacyToolDump(raw) {
         + "</details>";
 }
 // 🔧 方案1：舊格式 / 純文字 assistant 訊息「工具輸出自動摺疊」（見 _foldLegacyToolDump）
+// 🔧 20260927 修復（owner: indexPage）：訊息操作按鈕改「集中綁定 + 自動重綁守衛」
+// 病根：done 事件用 meta.innerHTML = meta.innerHTML.replace(...) 改寫節點時，innerHTML 會整段重新解析，
+//       把 [ID:] / [MID:] / 👍 / 🔖 按鈕換成全新節點，先前綁好的事件監聽器全部消失
+//       → 按鈕看起來一模一樣、實際點不到，要切走侍女再回來（重跑 renderChatMessages）才恢復。
+function bindMessageActionButtons() {
+    document.querySelectorAll('.copy-msg-btn').forEach(function (btn) {
+        btn.removeEventListener('click', copyMsgHandler);
+        btn.addEventListener('click', copyMsgHandler);
+    });
+    document.querySelectorAll('.quote-id-btn').forEach(function (btn) {
+        btn.removeEventListener('click', quoteIdClickHandler);
+        btn.addEventListener('click', quoteIdClickHandler);
+    });
+    document.querySelectorAll('.quote-mid-btn').forEach(function (btn) {
+        btn.removeEventListener('click', quoteMidClickHandler);
+        btn.addEventListener('click', quoteMidClickHandler);
+    });
+    document.querySelectorAll('.like-msg-btn').forEach(function (btn) {
+        btn.removeEventListener('click', likeMsgHandler);
+        btn.addEventListener('click', likeMsgHandler);
+    });
+    document.querySelectorAll('.bookmark-msg-btn').forEach(function (btn) {
+        btn.removeEventListener('click', bookmarkMsgHandler);
+        btn.addEventListener('click', bookmarkMsgHandler);
+    });
+    installMessageBindingGuard();
+}
+
+// 🔧 20260927：訊息區若有「含操作按鈕的元素」被任何程式碼重建（innerHTML 改寫／輪次重建…），
+// 60ms 後自動重新綁定；串流期間只追加純文字節點，不會觸發，故不影響效能。
+function installMessageBindingGuard() {
+    if (window.__mokMsgBindGuardInstalled) return;
+    var host = document.getElementById('chatMessages') || document.body;
+    if (!host) return;
+    window.__mokMsgBindGuardInstalled = true;
+    var timer = null;
+    try {
+        new MutationObserver(function (muts) {
+            var need = false;
+            for (var i = 0; i < muts.length && !need; i++) {
+                var added = muts[i].addedNodes;
+                for (var j = 0; j < added.length; j++) {
+                    var n = added[j];
+                    if (n.nodeType === 1 && n.querySelector && n.querySelector('.quote-id-btn, .quote-mid-btn, .copy-msg-btn, .like-msg-btn, .bookmark-msg-btn')) {
+                        need = true; break;
+                    }
+                }
+            }
+            if (!need) return;
+            clearTimeout(timer);
+            timer = setTimeout(function () { try { bindMessageActionButtons(); } catch (e) {} }, 60);
+        }).observe(host, { childList: true, subtree: true });
+    } catch (e) {}
+}
+
+// 🔧 20260927：更新 meta 內的 [ID:xxx] —— 只改文字節點與 data 屬性，絕不動 innerHTML，
+// 所以不會重建按鈕節點、不會洗掉監聽器，也不會誤改 title 裡的 [ID:] 說明文字。
+function _setMetaConvId(metaEl, convId, addIfMissing) {
+    if (!metaEl || !convId) return;
+    var label = '[ID:' + convId + ']';
+    var qb = metaEl.querySelector('.quote-id-btn');
+    if (qb) {
+        qb.setAttribute('data-conv-id', String(convId));
+        if (/\[ID:[^\]]*\]/.test(qb.textContent)) qb.textContent = qb.textContent.replace(/\[ID:[^\]]*\]/, label);
+        else qb.textContent = label;
+    }
+    var hit = false;
+    var walker = document.createTreeWalker(metaEl, NodeFilter.SHOW_TEXT, null);
+    var tn;
+    while ((tn = walker.nextNode())) {
+        if (qb && qb.contains(tn)) continue;
+        if (/\[ID:[^\]]*\]/.test(tn.nodeValue)) { tn.nodeValue = tn.nodeValue.replace(/\[ID:[^\]]*\]/, label); hit = true; }
+    }
+    if (!hit && !qb && addIfMissing) metaEl.insertBefore(document.createTextNode(label + ' '), metaEl.firstChild);
+}
+
 function renderChatMessages(messages) { chatMessagesDiv = document.getElementById('chatMessages') || chatMessagesDiv; /* 🔧20260922修復：不可把 chatMessagesDiv 指向 #message-list，否則切換 agent 後 scrollToBottom 與滾動按鈕狀態全算錯 → 畫面停在最舊訊息、按鈕不顯示 */
     const listEl = document.getElementById('message-list') || document.getElementById('chatMessages');
     if (!listEl) return;
@@ -2182,7 +2358,7 @@ function renderChatMessages(messages) { chatMessagesDiv = document.getElementByI
 
     function renderMessageContent(content, role) {
         if (!content) return '';
-        if (isCodeMessage(content)) {
+        if (role !== 'user' && isCodeMessage(content)) { // indexPage 20261008: 使用者訊息一律不折疊成程式碼
             const label = role === 'user' ? '📝 使用者程式碼' : '📄 程式碼';
             return wrapWithFold(content, label);
         }
@@ -2190,17 +2366,21 @@ function renderChatMessages(messages) { chatMessagesDiv = document.getElementByI
     }
     // ===== 結束輔助函數 =====
 
+    // 顯示層（indexPage 20261009）：插話擺位改由 _attachInterjectNotes 統一處理，歸屬它所補充的那一輪。
     messages.forEach(msg => {
         seqNum++;
         const time = new Date(msg.timestamp).toLocaleString();
         const rawContent = msg.content || '';
 
         if (msg.role === 'user') {
+            const _isInterject = isInterjectContent(rawContent);   // 20261008 indexPage：插話單獨標記
             const div = document.createElement('div');
-            div.className = "message user";
+            div.className = _isInterject ? "message interject-note" : "message user";
+            if (_isInterject) div.dataset.interject = '1';
             div.dataset.id = msg.id || Date.now();
             div.dataset.conv_id = msg.conv_id;
-            const renderedContent = renderMessageContent(rawContent, 'user');
+            const _displayText = _isInterject ? stripInterjectTag(rawContent) : rawContent;
+            const renderedContent = _isInterject ? interjectBubbleHtml(_displayText) : renderMessageContent(rawContent, 'user');
             // --- 新增：估算 Token 與費用 ---
             const estimatedTokens = Math.ceil(rawContent.length / 4);
             const estimatedCost = (estimatedTokens * MokAgi_Token_Price_HK).toFixed(6);
@@ -2211,11 +2391,13 @@ function renderChatMessages(messages) { chatMessagesDiv = document.getElementByI
                 <div class="round-blocks-container">
                     <div class="message-bubble" style="flex:1;">
                         ${renderedContent}
-                        <button class="copy-msg-btn" data-msg="${escapeHtml(rawContent).replace(/"/g, '&quot;')}" style="background:none; border:none; cursor:pointer; color:#ccc; font-size:12px;">📋</button>
+                        
                     </div>
                 </div>
-                <div class="message-meta">[#${seqNum}] <button class="quote-id-btn" data-conv-id="${msg.conv_id || msg.id || '?'}" data-msg-id="${msg.id || '?'}" style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;" title="引用對話：點擊＝插入 [ID:] 上下文（可連點累積多條）；Shift+點擊＝精準錨點 [MID:]；Ctrl/Alt+點擊＝複製">[ID:${msg.conv_id || msg.id || '?'}]</button> ${time} · <button style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;"  onclick="renderTokenStats()" title="HK$${(MokAgi_Token_Price_HK*1000000)} 每百萬詞元 · MOKAGI">~💰$${estimatedCost}/${estimatedTokens}🧮~</button> <button class="like-msg-btn" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="贊好">👍</button> <button class="bookmark-msg-btn" data-conv-id="${msg.conv_id || '?'}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="加入書籤">🔖</button></div>
+                <div class="message-meta"><button class="copy-msg-btn" data-msg="${escapeHtml(_displayText).replace(/"/g, '&quot;')}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="複製訊息">📋</button> [#${seqNum}] <button class="quote-id-btn" data-conv-id="${msg.conv_id || msg.id || '?'}" data-msg-id="${msg.id || '?'}" style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;" title="引用對話：點擊＝插入 [ID:] 上下文（可連點累積多條）；Shift+點擊＝精準錨點 [MID:]；Ctrl/Alt+點擊＝複製">[ID:${msg.conv_id || msg.id || '?'}]</button> ${time} · <button style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;"  onclick="renderTokenStats()" title="HK$${(MokAgi_Token_Price_HK*1000000)} 每百萬詞元 · MOKAGI">~💰$${estimatedCost}/${estimatedTokens}🧮~</button> <button class="like-msg-btn" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="贊好">👍</button> <button class="bookmark-msg-btn" data-conv-id="${msg.conv_id || '?'}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="加入書籤">🔖</button></div>
             `;
+            // 顯示層（indexPage 20261009）：先照原順序放置；整份清單建好後，
+            // 再由 _attachInterjectNotes 統一歸位到「它所補充的那一輪」底下。
             listEl.appendChild(div);
         } else {
             // 助手消息
@@ -2269,7 +2451,7 @@ function renderChatMessages(messages) { chatMessagesDiv = document.getElementByI
             let thinkFoldHtml = '';
 
             // ---- 複製按鈕 ----
-            const copyBtnHtml = `<button class="copy-msg-btn" data-msg="${content.replace(/"/g, '&quot;')}" style="background:none; border:none; cursor:pointer; color:#ccc; font-size:12px;">📋</button>`;
+            const copyBtnHtml = ``;
 
             // 🔧 輪次結構持久化：若帶有 rounds 結構，用輪次區塊渲染；否則用傳統氣泡
             let bodyHtml;
@@ -2292,41 +2474,17 @@ function renderChatMessages(messages) { chatMessagesDiv = document.getElementByI
                 <div class="round-blocks-container">
                     ${bodyHtml}
                 </div>
-                <div class="message-meta">🧠 : ${(modelsList[currentModelIndex] && modelsList[currentModelIndex].name) || '模型名'} <button class="quote-id-btn" data-conv-id="${msg.conv_id || msg.id || '?'}" data-msg-id="${msg.id || '?'}" style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;" title="引用對話：點擊＝插入 [ID:] 上下文（可連點累積多條）；Shift+點擊＝精準錨點 [MID:]；Ctrl/Alt+點擊＝複製">[ID:${msg.conv_id || msg.id || '?'}]</button> ${currentAgent} · ${time} · <button style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;"  onclick="renderTokenStats()" title="HK$${(MokAgi_Token_Price_HK*1000000)} 每百萬詞元 · MOKAGI">~💰$${estimatedCost}/${estimatedTokens}🧮~</button> <button class="like-msg-btn" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="贊好">👍</button> <button class="bookmark-msg-btn" data-conv-id="${msg.conv_id || '?'}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="加入書籤">🔖</button></div>
+                <div class="message-meta"><button class="copy-msg-btn" data-msg="${content.replace(/"/g, '&quot;')}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="複製訊息">📋</button> 🧠 : ${(modelsList[currentModelIndex] && modelsList[currentModelIndex].name) || '模型名'} <button class="quote-id-btn" data-conv-id="${msg.conv_id || msg.id || '?'}" data-msg-id="${msg.id || '?'}" style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;" title="引用對話：點擊＝插入 [ID:] 上下文（可連點累積多條）；Shift+點擊＝精準錨點 [MID:]；Ctrl/Alt+點擊＝複製">[ID:${msg.conv_id || msg.id || '?'}]</button> ${currentAgent} · ${time} · <button style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;"  onclick="renderTokenStats()" title="HK$${(MokAgi_Token_Price_HK*1000000)} 每百萬詞元 · MOKAGI">~💰$${estimatedCost}/${estimatedTokens}🧮~</button> <button class="like-msg-btn" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="贊好">👍</button> <button class="bookmark-msg-btn" data-conv-id="${msg.conv_id || '?'}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="加入書籤">🔖</button></div>
             `;
             listEl.appendChild(div);
         }
     });
 
-    // 綁定複製按鈕事件
-    document.querySelectorAll('.copy-msg-btn').forEach(btn => {
-        btn.removeEventListener('click', copyMsgHandler);
-        btn.addEventListener('click', copyMsgHandler);
-    });
+    // 顯示層（indexPage 20261009）：插話歸屬它所補充的那一輪，不再自成獨立對話
+    try { _attachInterjectNotes(listEl); } catch (e) { console.warn('[interject] 歸位失敗', e); }
 
-    // 綁定引用對話 ID 按鈕事件
-    document.querySelectorAll('.quote-id-btn').forEach(btn => {
-        btn.removeEventListener('click', quoteIdClickHandler);
-        btn.addEventListener('click', quoteIdClickHandler);
-    });
-
-    // 綁定訊息 ID（[MID:n] 新錨點）按鈕事件
-    document.querySelectorAll('.quote-mid-btn').forEach(btn => {
-        btn.removeEventListener('click', quoteMidClickHandler);
-        btn.addEventListener('click', quoteMidClickHandler);
-    });
-
-    // 綁定贊好按鈕事件
-    document.querySelectorAll('.like-msg-btn').forEach(btn => {
-        btn.removeEventListener('click', likeMsgHandler);
-        btn.addEventListener('click', likeMsgHandler);
-    });
-
-    // 綁定書籤按鈕事件
-    document.querySelectorAll('.bookmark-msg-btn').forEach(btn => {
-        btn.removeEventListener('click', bookmarkMsgHandler);
-        btn.addEventListener('click', bookmarkMsgHandler);
-    });
+    // 綁定訊息操作按鈕（複製／引用 [ID:]／[MID:]／讚好／書籤）
+    bindMessageActionButtons();
 
     // 重新構建快速跳轉面板
     if (quickJumpPanel) quickJumpPanel.remove();
@@ -2384,8 +2542,8 @@ async function addUserMessageAndSave(content) {
     const estimatedCost = (estimatedTokens * MokAgi_Token_Price_HK).toFixed(6);
     // -------------------------------
     div.innerHTML = `
-        <div class="round-blocks-container"><div class="message-bubble" style="flex:1;">${escapedContent}<button class="copy-msg-btn" data-msg="${escapedContent.replace(/"/g, '&quot;')}" style="background:none; border:none; cursor:pointer; color:#ccc; font-size:12px;">📋</button></div></div>
-        <div class="message-meta">輸出已捷斷 ${new Date().toLocaleString()} · <button style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;"  onclick="renderTokenStats()" title="HK$${(MokAgi_Token_Price_HK*1000000)} 每百萬詞元 · MOKAGI">~💰$${estimatedCost}/${estimatedTokens}🧮~</button></div>
+        <div class="round-blocks-container"><div class="message-bubble" style="flex:1;">${escapedContent}</div></div>
+        <div class="message-meta"><button class="copy-msg-btn" data-msg="${escapedContent.replace(/"/g, '&quot;')}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="複製訊息">📋</button> 輸出已捷斷 ${new Date().toLocaleString()} · <button style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;"  onclick="renderTokenStats()" title="HK$${(MokAgi_Token_Price_HK*1000000)} 每百萬詞元 · MOKAGI">~💰$${estimatedCost}/${estimatedTokens}🧮~</button></div>
     `;
     const copyBtn = div.querySelector('.copy-msg-btn');
     copyBtn.addEventListener('click', copyMsgHandler);
@@ -2415,9 +2573,9 @@ async function addAssistantMessageAndSave(thinkContent, replyContent) {
     // -------------------------------------------
     div.innerHTML = thinkHtml + `
         <div class="round-blocks-container">
-            <div class="message-bubble" style="flex:1;">${renderedContent}<button class="copy-msg-btn" data-msg="${content.replace(/"/g, '&quot;')}" style="background:none; border:none; cursor:pointer; color:#ccc; font-size:12px;">📋</button></div>
+            <div class="message-bubble" style="flex:1;">${renderedContent}</div>
         </div>
-        <div class="message-meta">${currentAgent} · ${new Date().toLocaleString()} · <button style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;"  onclick="renderTokenStats()" title="HK$${(MokAgi_Token_Price_HK*1000000)} 每百萬詞元 · MOKAGI">~💰$${estimatedCost}/${estimatedTokens}🧮~</button></div>
+        <div class="message-meta"><button class="copy-msg-btn" data-msg="${content.replace(/"/g, '&quot;')}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="複製訊息">📋</button> ${currentAgent} · ${new Date().toLocaleString()} · <button style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;"  onclick="renderTokenStats()" title="HK$${(MokAgi_Token_Price_HK*1000000)} 每百萬詞元 · MOKAGI">~💰$${estimatedCost}/${estimatedTokens}🧮~</button></div>
     `;
     const copyBtn = div.querySelector('.copy-msg-btn');
     copyBtn.addEventListener('click', copyMsgHandler);
@@ -2437,9 +2595,18 @@ async function clearAllChats() {
 const _activeSSEControllers = {};  // 每個 agent 獨立的 SSE 控制器，支援多 agent 並行串流
 const _activeEventSources = {};    // 每個 agent 的 SSE GET 續流連線
 const _sseSessionByAgent = {};     // 記錄每個 agent 當前可續流的 session id
+const _sseAppliedCount = {};       // 🔧A（2026-09-29 稚）：每個 SSE session 已套用的事件數（= 續流 after 游標，防重播疊字）
 const _eventSourceRetryTimers = {}; // 每個 agent 的續流重試計時器
 const _eventSourceRetryCount = {};  // 每個 agent 的續流重試次數
-const _MAX_EVENTSOURCE_RETRIES = 3;
+const _MAX_EVENTSOURCE_RETRIES = 5;
+// 【凜·前端看門狗 item1】SSE 停滯看門狗：連上後 N 毫秒零事件即判定卡死，強制收尾自癒
+const _SSE_STALL_MS = 18e4;            // 停滯門檻（毫秒）
+const _sseStallTimers = {};           // { agent: timeoutId } 停滯看門狗計時器
+// 【凜·前端看門狗 item2】連線失敗看門狗：本輪零事件且連續 onerror 達 _SSE_ERROR_STREAK_LIMIT 次 → 立即收尾
+const _SSE_ERROR_STREAK_LIMIT = 2;    // 連續失敗上限（僅在「本輪尚未收到任何事件」時套用）
+const _sseErrorStreak = {};           // { agent: 連續 onerror 次數 }
+const _sseConnGotData = {};           // { agent: 本輪連線是否已收到任何事件 }
+const _sseEverGotData = {};           // { agent: 整輪（含重試）是否曾收到任何事件；false 才套用連續失敗上限 }   // 2026-09-29 架：重啟後新 web 需數秒才起來，容錯拉高（item2）
 const _sseReplayQ = {};        // 續流重放事件佇列（批次 flush，避免主執行緒被上萬事件卡死 → 全黑/無法捲動）
 const _sseReplayFlush = {};    // 每個 agent 是否已有排程中的批次 flush
 function _drainSseReplayQ(agent) {
@@ -2453,6 +2620,11 @@ function _drainSseReplayQ(agent) {
         if (ed.type === 'done' || ed.type === 'error') {
             _closeAgentEventSource(agent);
             delete _eventSourceRetryCount[agent];
+            delete _sseErrorStreak[agent];   // 【凜·前端看門狗】正常結束：清計數
+            delete _sseConnGotData[agent];
+            delete _sseEverGotData[agent];
+            const _doneSid = _sseSessionByAgent[agent];
+            if (_doneSid) delete _sseAppliedCount[_doneSid];
             delete _sseSessionByAgent[agent];
         }
     }
@@ -2469,6 +2641,7 @@ function _closeAgentEventSource(agent) {
         clearTimeout(t);
         delete _eventSourceRetryTimers[agent];
     }
+    _clearSseStallWatchdog(agent);   // 【凜·前端看門狗 item1】關閉連線時一併解除停滯看門狗
     const es = _activeEventSources[agent];
     if (es) {
         try { es.close(); } catch (e) {}
@@ -2476,17 +2649,66 @@ function _closeAgentEventSource(agent) {
     }
 }
 
+// 【凜·前端看門狗】共用收尾：把「卡死／中斷」收乾淨（關動畫、清 running、提示重試）
+function _finalizeSseAbort(agent, toastMsg) {
+    try { _clearSseStallWatchdog(agent); } catch (e0) {}
+    try { if (typeof streamFinished !== 'undefined') streamFinished[agent] = true; } catch (e1) {}
+    try { clearPersistedRunningAgent(agent); } catch (e2) {}
+    try { if (typeof agentStates !== 'undefined' && agentStates[agent]) agentStates[agent].isRunning = false; } catch (e3) {}
+    try { if (agent === currentAgent) hideWorkingIndicator(); } catch (e4) {}
+    try { renderAgentList(); } catch (e5) {}
+    if (toastMsg) { try { showQuoteToast(toastMsg); } catch (e6) {} }
+}
+
+// 【凜·前端看門狗 item1】啟動／重置停滯看門狗
+function _armSseStallWatchdog(agent) {
+    _clearSseStallWatchdog(agent);
+    _sseStallTimers[agent] = setTimeout(() => {
+        delete _sseStallTimers[agent];
+        console.warn('[SSE watchdog] 停滯逾時，強制收尾:', agent);
+        _sseErrorStreak[agent] = 0;
+        _sseConnGotData[agent] = false;
+        _closeAgentEventSource(agent);
+        delete _sseSessionByAgent[agent];
+        _finalizeSseAbort(agent, '⏱ 連線逾時（' + Math.round(_SSE_STALL_MS / 1e3) + ' 秒無回應），請重試。');
+    }, _SSE_STALL_MS);
+}
+
+// 【凜·前端看門狗 item1】解除停滯看門狗
+function _clearSseStallWatchdog(agent) {
+    const t = _sseStallTimers[agent];
+    if (t) { clearTimeout(t); delete _sseStallTimers[agent]; }
+}
+
 function _resumeViaEventSource(agent, sessionId, retryCount = 0, after = 0) {
     if (!sessionId) return false;
     _closeAgentEventSource(agent);
     try {
         _eventSourceRetryCount[agent] = retryCount;
+        // 🔧A（2026-09-29 稚）：續流一律帶上「已套用事件游標」= max(呼叫端指定, 本地已處理數)，
+        //   否則 after=0 會讓後端從緩衝區頭重播 → 同一段回覆被 append 兩次（畫面重複）。
+        after = Math.max(after || 0, _sseAppliedCount[sessionId] || 0);
+        // 🔧 重連前清掉尚未 flush 的舊佇列：這些事件會依正確游標重新送達，避免與新連線重複。
+        _sseReplayQ[agent] = [];
+        _sseReplayFlush[agent] = false;
         const retryNonce = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
         const _afterQ = (after > 0) ? `&after=${after}` : '';
-        const es = new EventSource(`/api/chat/stream/${encodeURIComponent(sessionId)}?r=${retryNonce}${_afterQ}`);
+        const _uidQ = _mokUidNow();
+        const es = new EventSource(`/api/chat/stream/${encodeURIComponent(sessionId)}?r=${retryNonce}${_afterQ}&user_id=${encodeURIComponent(_uidQ)}`);
         _activeEventSources[agent] = es;
+        _sseConnGotData[agent] = false;   // 【凜·前端看門狗 item2】新連線重置「已收資料」標記
+        if (!retryCount) {                 // 全新一輪才重置整輪狀態（重試時保留，才能累計連續失敗）
+            _sseEverGotData[agent] = false;
+            _sseErrorStreak[agent] = 0;
+        }
+        _armSseStallWatchdog(agent);      // 【凜·前端看門狗 item1】啟動停滯看門狗
         es.onmessage = (evt) => {
             if (!evt || !evt.data) return;
+            // 【凜·前端看門狗 item1】有事件 → 連線確實活著：重置停滯看門狗、清失敗計數
+            _sseConnGotData[agent] = true;
+            _sseEverGotData[agent] = true;
+            _sseErrorStreak[agent] = 0;
+            _armSseStallWatchdog(agent);
             try {
                 const eventData = JSON.parse(evt.data);
                 if (eventData.type === 'stream_meta' && eventData.sse_session_id) {
@@ -2507,8 +2729,11 @@ function _resumeViaEventSource(agent, sessionId, retryCount = 0, after = 0) {
         };
         es.onerror = () => {
             const nextRetry = (_eventSourceRetryCount[agent] || 0) + 1;
+            // 【凜·前端看門狗 item2】連線失敗看門狗：本輪尚未收到任何事件時的「連續失敗」計數
+            _sseErrorStreak[agent] = _sseConnGotData[agent] ? 0 : (_sseErrorStreak[agent] || 0) + 1;
+            const _hardDead = !_sseEverGotData[agent] && _sseErrorStreak[agent] >= _SSE_ERROR_STREAK_LIMIT;
             _closeAgentEventSource(agent);
-            if (nextRetry <= _MAX_EVENTSOURCE_RETRIES) {
+            if (nextRetry <= _MAX_EVENTSOURCE_RETRIES && !_hardDead) {
                 const backoffMs = Math.min(1000 * Math.pow(2, nextRetry - 1), 4000);
                 console.warn(`[SSE resume] EventSource 續流失敗，第 ${nextRetry} 次重試，${backoffMs}ms 後重連`);
                 _eventSourceRetryTimers[agent] = setTimeout(() => {
@@ -2518,17 +2743,34 @@ function _resumeViaEventSource(agent, sessionId, retryCount = 0, after = 0) {
                 return;
             }
             delete _eventSourceRetryCount[agent];
+            delete _sseErrorStreak[agent];
+            delete _sseConnGotData[agent];
+            delete _sseEverGotData[agent];
             delete _sseSessionByAgent[agent];
-            console.warn('[SSE resume] EventSource 續流最終失敗');
-            clearPersistedRunningAgent(agent);
-            if (agentStates[agent]) agentStates[agent].isRunning = false;
-            if (agent === currentAgent) hideWorkingIndicator();
-            renderAgentList();
-            showQuoteToast('⚠️ 串流中斷且續流失敗，請重試。');
+            console.warn('[SSE resume] EventSource 續流最終失敗' + (_hardDead ? '（連續失敗達上限，直接收尾）' : ''));
+            // 【凜·前端看門狗】收尾一律走共用清理（關動畫、清 running、提示重試）
+            _finalizeSseAbort(agent, _hardDead ? '⏱ 連線連續失敗，請稍後重試。' : '⚠️ 串流中斷且續流失敗，請重試。');
         };
         return true;
     } catch (e) {
         console.warn('[SSE resume] 建立 EventSource 失敗:', e);
+        return false;
+    }
+}
+
+// 【2026-10-02 凜】訪客額度硬擋：後端寫死的引導句，用既有串流渲染管線顯示（全程零 LLM）
+function _guestBlockedNotice(msg, agent) {
+    try {
+        var _a = agent || (typeof currentAgent !== 'undefined' ? currentAgent : '');
+        if (!msg) msg = '免費額度已用完，請「註冊 / 登入會員」繼續使用。';
+        try { if (typeof streamFinished !== 'undefined') streamFinished[_a] = false; } catch (e0) {}
+        try { if (typeof agentStates !== 'undefined') agentStates[_a] = agentStates[_a] || { isRunning: false, hasNewCompleted: false }; } catch (e1) {}
+        window.dispatchEvent(new CustomEvent('chat_stream_sse', { detail: { type: 'iteration_start', agent: _a, iteration: 1 } }));
+        window.dispatchEvent(new CustomEvent('chat_stream_sse', { detail: { type: 'reply', agent: _a, content: msg } }));
+        window.dispatchEvent(new CustomEvent('chat_stream_sse', { detail: { type: 'done', agent: _a, final_reply: msg } }));
+        return true;
+    } catch (e) {
+        try { showQuoteToast(msg); } catch (e2) {}
         return false;
     }
 }
@@ -2552,12 +2794,18 @@ async function _startThenStreamViaEventSource(message, agent) {
         return false;
     }
     const data = await res.json();
+    if (data && (data.blocked === true || data.error === 'guest_quota_exceeded')) {
+        // 【2026-10-02 凜】訪客/free 額度硬擋（後端已直接拒絕、零 LLM）
+        _guestBlockedNotice(data.message || '', agent);
+        return 'blocked';
+    }
     const sid = data && data.sse_session_id;
     if (!sid) {
         console.warn('[SSE start] 缺少 sse_session_id');
         return false;
     }
     _sseSessionByAgent[agent] = sid;
+    _sseAppliedCount[sid] = 0;   // 🔧A：新 session 由游標 0 起算
     return _resumeViaEventSource(agent, sid);
 }
 
@@ -2574,6 +2822,9 @@ async function sendViaSSE(message, agent) {
 
     try {
         const ok = await _startThenStreamViaEventSource(message, agent);
+        if (ok === 'blocked') {   // 【2026-10-02 凜】硬擋：直接顯示引導句，不再回退
+            return;
+        }
         if (ok && ok !== 'legacy') {
             return;
         }
@@ -2603,6 +2854,21 @@ async function sendViaSSE(message, agent) {
             socket.emit('chat_message', { message, agent, source: 'web', user_id: userId });
             return;
         }
+
+        // 【2026-10-02 凜】訪客額度硬擋：後端回 JSON（非串流）時直接顯示寫死的引導句，
+        // 避免落入下方 Socket.IO fallback 而繞過額度閘。
+        try {
+            var _bct = (response.headers.get('content-type') || '').toLowerCase();
+            if (_bct.indexOf('json') >= 0) {
+                var _bdata = await response.json().catch(function () { return null; });
+                if (_bdata && (_bdata.blocked === true || _bdata.error === 'guest_quota_exceeded')) {
+                    _guestBlockedNotice(_bdata.message || '', agent);
+                } else {
+                    console.warn('[sendViaSSE] 非串流 JSON 回應:', _bdata);
+                }
+                return;
+            }
+        } catch (eBlk) {}
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -2645,7 +2911,7 @@ async function sendViaSSE(message, agent) {
         } else {
             console.error('[sendViaSSE] 串流錯誤:', err);
             const sid = _sseSessionByAgent[agent];
-            if (sid && _resumeViaEventSource(agent, sid)) {
+            if (sid && _resumeViaEventSource(agent, sid, 0, _sseAppliedCount[sid] || 0)) {
                 showQuoteToast('⚠️ 主串流斷線，已自動切換續流通道。');
                 return;
             }
@@ -2674,6 +2940,72 @@ function _interjectListEl() {
     return el;
 }
 
+// ===== INTERJECT-ATTR-BEGIN （indexPage 20261009 顯示層：插話歸屬「它所補充的那一輪」）=====
+// 簽名：indexPage|插話補充後畫面「分開了、自成獨立對話」|插話訊息一律歸位到它所補充的那一輪助手回覆之下，不再自成獨立對話|202610090127(香港)
+// 目的：插話訊息一律歸到它所補充的那一輪助手回覆底下，不再自成獨立對話。
+// 只動顯示層 DOM 擺位；不動後端插話注入、不改任何資料格式。
+function _interjectHolderIn(turnEl) {
+    if (!turnEl || !turnEl.querySelector) return null;
+    var holder = turnEl.querySelector('.interject-holder');
+    if (holder) return holder;
+    holder = document.createElement('div');
+    holder.className = 'interject-holder';
+    holder.style.cssText = 'display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin:6px 0 0 0;width:100%;';
+    var meta = turnEl.querySelector('.message-meta');
+    if (meta && meta.parentNode === turnEl) turnEl.insertBefore(holder, meta);
+    else turnEl.appendChild(holder);
+    return holder;
+}
+function _attachInterjectToTurn(noteEl, turnEl) {
+    if (!noteEl || !turnEl || !turnEl.classList) return false;
+    if (!turnEl.classList.contains('assistant')) return false;
+    var holder = _interjectHolderIn(turnEl);
+    if (!holder) return false;
+    holder.appendChild(noteEl);
+    noteEl.style.maxWidth = '100%';
+    var meta = noteEl.querySelector('.message-meta');
+    if (meta) { meta.style.marginTop = '4px'; meta.style.marginBottom = '0'; meta.style.paddingLeft = '2px'; }
+    return true;
+}
+// 掃描整份訊息清單，把插話節點搬進它所屬那一輪的助手回覆區塊內。
+// 規則：插話只歸屬於「最近一則使用者訊息之後」的那一輪；找不到所屬輪就留在原位（不亂搬）。
+function _attachInterjectNotes(listEl) {
+    if (!listEl) return;
+    var kids = Array.prototype.slice.call(listEl.children || []);
+    var host = null;
+    var pending = [];
+    function _isMsg(el) { return !!(el && el.classList && el.classList.contains('message')); }
+    function _tryMove(list, target) {
+        var rest = [];
+        for (var i = 0; i < list.length; i++) {
+            if (!_attachInterjectToTurn(list[i], target)) rest.push(list[i]);
+        }
+        return rest;
+    }
+    for (var i = 0; i < kids.length; i++) {
+        var el = kids[i];
+        if (!_isMsg(el)) continue;
+        if (el.classList.contains('interject-note')) {
+            if (!(host && _attachInterjectToTurn(el, host))) pending.push(el);
+            continue;
+        }
+        if (el.classList.contains('user')) {          // 新的一輪起點
+            if (host) pending = _tryMove(pending, host);
+            else pending = [];
+            host = null;
+            continue;
+        }
+        if (el.classList.contains('assistant')) {      // 這一輪的助手回覆出現
+            host = el;
+            pending = _tryMove(pending, host);
+            continue;
+        }
+    }
+    _tryMove(pending, host);
+}
+// ===== INTERJECT-ATTR-END =====
+
+
 async function sendInterjectWhileWorking(message, agent) {
     try {
         var res = await fetch('/api/chat/interject', {
@@ -2694,16 +3026,33 @@ async function sendInterjectWhileWorking(message, agent) {
     }
 }
 
+// ===== 插話標記（indexPage 20261008｜原因：插話訊息在畫面上與一般訊息無異、重整後更像消失）=====
+// 存檔時在內容前面加一個標記，渲染時剝除並改畫成「🔔 插話」氣泡，
+// 這樣重新整理／換侍女／重開頁面後，插話依然是插話，不會變成一則沒頭沒尾的普通訊息。
+const INTERJECT_TAG = '⟪插話⟫';
+function isInterjectContent(t) { return typeof t === 'string' && t.indexOf(INTERJECT_TAG) === 0; }
+function stripInterjectTag(t) { return isInterjectContent(t) ? t.slice(INTERJECT_TAG.length).replace(/^\s+/, '') : t; }
+function interjectBubbleHtml(text) {
+    return '<div class="interject-badge">🔔 插話 · 工作中補充</div>' +
+           '<div style="white-space:pre-wrap; word-break:break-word;">' + escapeHtml(text) + '</div>';
+}
 function appendInterjectBubble(text) {
     try {
         var listEl = _interjectListEl();
         if (!listEl) return;
         var div = document.createElement('div');
-        div.className = 'message user interject-note';
+        div.className = 'message interject-note';
+        div.dataset.interject = '1';
         var tt = new Date().toLocaleTimeString();
-        div.innerHTML = '<div class="round-blocks-container"><div class="message-bubble" style="flex:1;">[補充] ' + escapeHtml(text) + '</div></div><div class="message-meta">' + tt + ' · 工作中補充</div>';
-        listEl.appendChild(div);
+        div.innerHTML = '<div class="round-blocks-container"><div class="message-bubble" style="flex:1;">' + interjectBubbleHtml(text) + '</div></div><div class="message-meta">' + escapeHtml(tt) + ' · 🔔 插話</div>';
+        var _turnEl = (typeof currentAssistantDiv !== 'undefined' && currentAssistantDiv) ? currentAssistantDiv[currentAgent] : null;
+        var _placed = false;
+        if (_turnEl && document.contains(_turnEl)) { _placed = _attachInterjectToTurn(div, _turnEl); }
+        if (!_placed) { listEl.appendChild(div); }
         listEl.scrollTop = listEl.scrollHeight;
+        // 落盤：插話原本只注入本輪 LLM 上下文，畫面一重整就消失；
+        // 這裡補存進對話歷史（僅供顯示層，不影響 LLM 上下文），讓它留得住。
+        try { saveChatMessageToServer({ role: 'user', content: INTERJECT_TAG + text, conv_id: null }); } catch (e2) {}
     } catch (e) { console.warn('[interject] bubble fail', e); }
 }
 
@@ -2779,8 +3128,8 @@ async function sendUserMessage(content) {
     userDiv.className = 'message user';
     userDiv.dataset.id = Date.now();
     userDiv.innerHTML = `
-        <div class="round-blocks-container"><div class="message-bubble" style="flex:1;">${escapedContent}<button class="copy-msg-btn" data-msg="${escapedContent.replace(/"/g, '&quot;')}" style="background:none; border:none; cursor:pointer; color:#ccc; font-size:12px;">📋</button></div></div>
-        <div class="message-meta">${time}</div>
+        <div class="round-blocks-container"><div class="message-bubble" style="flex:1;">${escapedContent}</div></div>
+        <div class="message-meta"><button class="copy-msg-btn" data-msg="${escapedContent.replace(/"/g, '&quot;')}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="複製訊息">📋</button> ${time}</div>
     `;
     (document.getElementById("message-list") || chatMessagesDiv).appendChild(userDiv);
     const copyBtn = userDiv.querySelector('.copy-msg-btn');
@@ -2898,7 +3247,57 @@ function hideWaitingForUserPanel() {
     _waitingForUserState.visible = false;
 }
 
+/* ===== 暫停鍵（pause_patch）：後端阻塞生成，恢復不重送、不重複計費 | 20261001 indexPage 重裝 ===== */
+const _pauseState = {};   // {agent: bool} 是否暫停中
+function _mokUpdatePauseBtn(agent) {
+    const btn = document.getElementById('pauseBtn');
+    if (!btn) return;
+    const cur = (typeof currentAgent !== 'undefined') ? currentAgent : '';
+    const running = !!(agent && agent === cur && typeof _activeEventSources !== 'undefined' && _activeEventSources[agent]);
+    if (!running) { btn.style.display = 'none'; btn.classList.remove('paused'); return; }
+    const paused = !!_pauseState[agent];
+    btn.style.display = 'inline-flex';
+    btn.classList.toggle('paused', paused);
+    btn.title = paused ? '已暫停 · 點一下繼續輸出（不會重新發送）' : '暫停輸出（不會重新發送）';
+    btn.innerHTML = paused ? '▶ 繼續' : '⏸ 暫停';
+}
+async function _mokPauseCtl(agent, paused) {
+    try {
+        const r = await fetch('/api/chat/pause', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agent: agent, paused: !!paused, user_id: (typeof userId !== 'undefined' ? userId : '') })
+        });
+        return !!(r && r.ok);
+    } catch (e) { return false; }
+}
+async function _mokTogglePause() {
+    const agent = (typeof currentAgent !== 'undefined') ? currentAgent : '';
+    if (!agent) return;
+    const nowPaused = !_pauseState[agent];
+    _pauseState[agent] = nowPaused;
+    _mokUpdatePauseBtn(agent);
+    await _mokPauseCtl(agent, nowPaused);
+}
+function _mokClearPause(agent) {
+    if (agent && _pauseState[agent]) { _mokPauseCtl(agent, false); }
+    if (agent) _pauseState[agent] = false;
+    const btn = document.getElementById('pauseBtn');
+    if (btn) { btn.style.display = 'none'; btn.classList.remove('paused'); }
+}
+(function _mokBindPauseBtn() {
+    function _bind() {
+        const btn = document.getElementById('pauseBtn');
+        if (btn && !btn.dataset.mokPauseBound) {
+            btn.dataset.mokPauseBound = '1';
+            btn.addEventListener('click', function (ev) { ev.preventDefault(); _mokTogglePause(); });
+        }
+    }
+    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', _bind); } else { _bind(); }
+})();
+
 function showWorkingIndicator() {
+    try { _mokUpdatePauseBtn((typeof currentAgent !== 'undefined') ? currentAgent : ''); } catch (e) {}
     const indicator = document.getElementById('workingIndicator');
     const inputWrapper = document.getElementById('chatInputWrapper');
     if (indicator) indicator.style.setProperty("display", "flex", "important");
@@ -2933,6 +3332,7 @@ function showWorkingIndicator() {
 
 // 隱藏工作中指示器，顯示輸入框
 function hideWorkingIndicator() {
+    try { _mokClearPause((typeof currentAgent !== 'undefined') ? currentAgent : ''); } catch (e) {}
     const indicator = document.getElementById('workingIndicator');
     const inputWrapper = document.getElementById('chatInputWrapper');
     if (indicator) indicator.style.setProperty("display", "none", "important");
@@ -3004,7 +3404,7 @@ function clearRestartWarning() {
 // ===========================================================
 
 function stopGeneration() {
-    if (!window.MOK_IS_ADMIN) { alert('🚫 緊急重啟僅限 admin 操作'); return; }
+    if (!window.MOK_IS_ADMIN) { alert('🔒 主人重啟僅限 admin 操作'); return; }
     // 🔧 取消所有正在進行的 SSE 請求（所有 agent）
     for (const [agent, ctrl] of Object.entries(_activeSSEControllers)) {
         ctrl.abort();
@@ -3019,18 +3419,28 @@ function stopGeneration() {
     Object.keys(agentStates).forEach(agent => { agentStates[agent].isRunning = false; });
     renderAgentList();
     hideWorkingIndicator();
-    // 觸發後端緊急重啟
+    // 觸發後端「主人重啟」：完整重啟 mokagi（所有子進程 + 本體，重載全部程式碼與補丁），不碰 pm2、不觸發守衛
+    try { _showRestartNotice('🔄 主人重啟中（重載所有服務與補丁），完成後自動刷新…'); } catch (e) {}
     socket.emit('stop_generation');
-    // 等待 3 秒後刷新頁面，確保重啟完成
-    setTimeout(() => {
-        location.reload();
-    }, 3000);
+    // 輪詢直到新 Web 起來，再刷新（避免重整時服務還沒好）
+    const _srT0 = Date.now();
+    const _srTimer = setInterval(function () {
+        if (Date.now() - _srT0 > 45000) { clearInterval(_srTimer); location.reload(); return; }
+        fetch('/api/whoami', { cache: 'no-store' }).then(function (r) {
+            if (r && r.ok) { clearInterval(_srTimer); location.reload(); }
+        }).catch(function () {});
+    }, 1200);
 }
 
     // 文件樹
     async function fetchTree() {
         const treeContainer = document.getElementById('tree-root');
         const haveOnline = document.getElementById('haveOnline');
+        // 🔒 非 admin：/api/tree 受機密閘保護（403）；直接給明確提示，勿再誤顯示「被XX趕出房間了」
+        if (!window.MOK_IS_ADMIN) {
+            if (treeContainer) treeContainer.textContent = '🚫 主機文件樹僅限 admin；會員請用「🏠 房間」檢視自己的房間';
+            return;
+        }
 
         
         if (!treeContainer) return;
@@ -3038,13 +3448,21 @@ function stopGeneration() {
             console.log('fetchTree 被呼叫');
             const response = await fetch('/api/tree');
             console.log('API 回應:', response);
-            const data = await response.json();
+            // 2026-10-01 indexPage：後端若回 HTML（500／524 等錯誤頁）會讓 response.json() 丟
+            // 「Unexpected token '<'」；改成先讀文字再自行 parse，錯誤訊息才看得懂。
+            const _raw = await response.text();
+            let data;
+            try { data = JSON.parse(_raw); }
+            catch (_e) { throw new Error('伺服器回應非 JSON（HTTP ' + response.status + '）：' + _raw.slice(0, 120)); }
             console.log('樹資料:', data);
+            if (!response.ok || !data || !Array.isArray(data.tree)) {
+                throw new Error((data && data.error) || ('HTTP ' + response.status));
+            }
             renderTree(data.tree, treeContainer);
         } catch (err) {
             //檢查是否連線失敗
-            treeContainer.innerHTML = '加載失敗';
-            haveOnline.innerHTML = `❌ 被${currentAgent}趕出房間了`;
+            treeContainer.innerHTML = '加載失敗：' + ((err && err.message) ? err.message : err);
+            // 載入失敗只留在文件樹容器內，不覆寫聊天室 header（#haveOnline 是整個 header）
         }
     }
     function renderTree(nodes, container) {
@@ -3060,10 +3478,9 @@ function stopGeneration() {
                 const childUl = document.createElement('ul');
                 childUl.style.display = 'none';
                 span.classList.add('collapsed');
-                if (node.children && node.children.length > 0) {
-                    renderTree(node.children, childUl);
-                    childUl.dataset.loaded = '1';   // 已有子層，不需再掃
-                }
+                // 2026-09-30：一律惰性展開 —— 初始渲染不再預建任何子層，
+                // 收合狀態下完全不掃描；展開時才建/抓子層（見下方 span.onclick）。
+                li._childNodes = (Array.isArray(node.children) && node.children.length) ? node.children : null;
                 li.appendChild(childUl);
                 span.onclick = async (e) => {
                     e.stopPropagation();
@@ -3073,9 +3490,14 @@ function stopGeneration() {
                         if (!childUl.dataset.loaded && !childUl.dataset.loading) {
                             childUl.dataset.loading = '1';
                             try {
-                                const res = await fetch('/api/tree?path=' + encodeURIComponent(node.path));
-                                const data = await res.json();
-                                renderTree(data.tree || [], childUl);
+                                if (li._childNodes) {
+                                    // 後端已附子層資料 → 直接建，省一次往返
+                                    renderTree(li._childNodes, childUl);
+                                } else {
+                                    const res = await fetch('/api/tree?path=' + encodeURIComponent(node.path));
+                                    const data = await res.json();
+                                    renderTree(data.tree || [], childUl);
+                                }
                                 childUl.dataset.loaded = '1';
                             } catch (err) {
                                 console.error('載入子目錄失敗', node.path, err);
@@ -3509,6 +3931,22 @@ async function loadEditorState() {
 
 
 
+// ===== 2026-10-08 凜：存檔 JSON 防呆（前端先驗，壞 JSON 不送出請求）=====
+// 回傳 null = 通過；回傳字串 = 錯誤訊息（呼叫端負責提示，且不送出請求）
+function mokValidateJsonForSave(path, content) {
+    if (!path || !/\.json$/i.test(path)) return null;
+    if (content === null || content === undefined) return null;
+    if (typeof content !== 'string') return null;
+    const probe = content.replace(/^\uFEFF/, '').trim();
+    if (probe === '') return null; // 空內容放行（新建檔案／清空流程另有把關）
+    try {
+        JSON.parse(probe);
+        return null;
+    } catch (e) {
+        return (e && e.message) ? e.message : '無法解析的 JSON';
+    }
+}
+
 // ===== saveFileContent（支援靜默模式，且若檔案不存在則自動建立）=====
 saveFileContent = async function(silent = false, expectedPath = null) {
     const filenameSpan = document.getElementById('current-filename');
@@ -3542,6 +3980,13 @@ saveFileContent = async function(silent = false, expectedPath = null) {
         } catch (e) {
             console.warn('無法檢查原始檔案內容，跳過空內容防護:', e);
         }
+    }
+    // 2026-10-08 凜：前端 JSON 防呆 — 壞 JSON 直接提示、不送出請求
+    const _jsonErr = mokValidateJsonForSave(path, content);
+    if (_jsonErr) {
+        if (!silent) alert('❌ 這不是有效的 JSON，已取消儲存：\n' + _jsonErr + '\n\n（壞資料不會寫入，請修正後再存）');
+        else console.warn('Auto-save cancelled: invalid JSON — ' + _jsonErr);
+        return;
     }
     try {
         // 先嘗試儲存（若檔案不存在，後端會自動建立？我們統一用 save_file 但它不會建立，所以先檢查）
@@ -4320,9 +4765,16 @@ async function createFromPath() {
         }
         currentTool = tool;
         // 更新按鈕 active 狀態（原有邏輯）
-        // ===== 事件委派：工具按鈕 =====
+        // ===== 事件委派：工具按鈕（2026-10-01 indexPage 修：只註冊一次）=====
+        // 舊寫法把 addEventListener 寫在 switchTool 裡面，而這個監聽器又回頭呼叫
+        // switchTool，所以「每點一次工具鍵，監聽器數量就增加一倍」：
+        //   點第1次 → 3 個；第5次 → 63 個；第10次 → 2047 個；第20次 → 200 萬個。
+        // 結果單次點擊就會觸發成千上萬次 switchTool + fetchTree，
+        // 整個右側工作區卡死數分鐘、主機 CPU／瀏覽器記憶體暴衝。
+        // 改法：用 dataset 標記，整頁只註冊一次（行為與原本一致）。
         const toolsHeader = document.querySelector('.tools-header-buttons');
-        if (toolsHeader) {
+        if (toolsHeader && !toolsHeader.dataset.toolDelegateBound) {
+            toolsHeader.dataset.toolDelegateBound = '1';
             toolsHeader.addEventListener('click', (e) => {
                 const btn = e.target.closest('button');
                 if (btn && btn.dataset.tool) {
@@ -4337,10 +4789,12 @@ async function createFromPath() {
         else if (tool === 'monitor') renderMonitorContent();
         else if (tool === 'tools') renderToolsContent();
         else if (tool === 'tokenstats') renderTokenStats();
+        else if (tool === 'billing') renderTokenStats();
         else if (tool === 'logs') renderLogsContent();
         else if (tool === 'search') renderSearchContent();
-        else if (tool === 'bookmark') document.getElementById('toolsContent').innerHTML = '<iframe src="/webTools/書籤/書籤.html" style="width:100%; height:100%; border:none; border-radius:8px;"></iframe>';
+        else if (tool === 'bookmark') document.getElementById('toolsContent').innerHTML = '<iframe src="/static/書籤.html" style="width:100%; height:100%; border:none; border-radius:8px;"></iframe>';
         else if (tool === 'moneymaker') document.getElementById('toolsContent').innerHTML = '<iframe src="/report/賺錢王/index.html" style="width:100%; height:100%; border:none; border-radius:8px;"></iframe>';
+        else if (tool === '快取日報') document.getElementById('toolsContent').innerHTML = '<iframe src="/jobs/快取日報/index.html" style="width:100%; height:100%; border:none; border-radius:8px;"></iframe>';
         else if (tool === 'eml') renderEmlContent();
         else if (tool === 'ml3') renderMl3Content();
 
@@ -4351,7 +4805,9 @@ async function createFromPath() {
         else if (tool === '進化') renderEvo();
         else if (tool === 'admin') renderAdminContent();
         else if (tool === 'room') renderRoomContent();
-        else if (tool === 'agent') renderAgentInfo();
+        else if (tool === 'agent') renderAgentInfo(); else { var _d=(window.__MOK_TOOL_DEFS||{})[tool]; var _pg=(window.__MOK_IFRAME_TOOLS||{})[tool]||(_d&&_d.type==='iframe'?_d.page:''); if(_pg){var _box=document.getElementById('toolsContent'); if(_box) _box.innerHTML='<'+'iframe src="'+_pg+'" style="width:100%;height:100%;border:none;border-radius:8px;"></'+'iframe>';} }
+        window.__MOK_RENDER_FNS = { room: renderRoomContent, search: renderSearchContent, files: renderFilesContent, ascii: renderAsciiContent, monitor: renderMonitorContent, tools: renderToolsContent, tokenstats: renderTokenStats, logs: renderLogsContent, game: rendergame, novnc: renderNovncContent, backup: renderBackupContent, gpu: renderGpuContent, admin: renderAdminContent, agentInfo: renderAgentInfo, agent: renderAgentInfo };
+        window.__MOK_IFRAME_TOOLS = window.__MOK_IFRAME_TOOLS || {};
 
     }
 
@@ -4577,6 +5033,41 @@ async function createFromPath() {
         return html;
     }
 
+    // 🔧 L3 結構化媒體（20261008 indexPage）：統一渲染圖/影/音卡片，各前端共用同一份 media 資料
+    function _buildRoundMediaHtml(mediaArr) {
+        if (!mediaArr || !mediaArr.length) return '';
+        var html = '<div class="mok-media-wrap">';
+        for (var i = 0; i < mediaArr.length; i++) {
+            var m = mediaArr[i] || {};
+            var url = m.url;
+            if (!url) continue;
+            var safeUrl = escapeHtml(url);
+            var t = m.type || 'image';
+            var alt = m.alt ? escapeHtml(m.alt) : '';
+            var posterAttr = m.poster ? ' poster="' + escapeHtml(m.poster) + '"' : '';
+            if (t === 'video') {
+                html += '<div class="mok-media mok-media-video">'
+                     + '<video controls preload="metadata" playsinline' + posterAttr + ' src="' + safeUrl + '"></video>'
+                     + (alt ? '<div class="mok-media-cap">' + alt + '</div>' : '')
+                     + '</div>';
+            } else if (t === 'audio') {
+                html += '<div class="mok-media mok-media-audio">'
+                     + '<span class="mok-media-ico">🔊</span>'
+                     + '<audio controls preload="metadata" src="' + safeUrl + '"></audio>'
+                     + (alt ? '<span class="mok-media-cap">' + alt + '</span>' : '')
+                     + '</div>';
+            } else {
+                html += '<div class="mok-media mok-media-image">'
+                     + '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer">'
+                     + '<img loading="lazy" src="' + safeUrl + '" alt="' + alt + '"></a>'
+                     + (alt ? '<div class="mok-media-cap">' + alt + '</div>' : '')
+                     + '</div>';
+            }
+        }
+        html += '</div>';
+        return html;
+    }
+
     // 🔧 效能修復：tool_calls / tool_result 到達時只重建當前輪次的工具區塊，避免整段 rounds innerHTML 重建卡死
     function _incrementalUpdateRoundTools(agent) {
         if (agent !== currentAgent) return false;
@@ -4649,6 +5140,7 @@ async function createFromPath() {
         }
         html += '<div class="round-tools">' + _buildRoundToolsHtml(r, isActive, isLast, openDetails) + '</div>';
         html += _buildRoundAuxHtml(r, openDetails);
+        if (r.media && r.media.length) html += _buildRoundMediaHtml(r.media);
         if (r.reply) {
             html += '<div class="round-reply-text" style="padding:8px 12px;font-size:0.9rem;color:#e4e4e7;white-space:pre-wrap;">' + renderPlainTextWithFold(stripActionBlocks(String(r.reply))) + '</div>';
             // 🔧 一鍵確認：偵測 /confirm、/admin confirm、/cancel 指令並生成按鈕
@@ -4769,13 +5261,48 @@ async function createFromPath() {
     }
 
 
-    function _onChatStream(data, channel) {
+    // 2026-09-29 架（item1）：重啟提示 —— 頁面頂端浮動橫幅，6 秒後淡出；可重複呼叫不疊加。
+function _showRestartNotice(msg) {
+    try {
+        var el = document.getElementById('mokRestartNotice');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'mokRestartNotice';
+            el.style.cssText = 'position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:99999;'
+                + 'background:#2b2b2b;color:#ffd479;border:1px solid #ffd47955;border-radius:8px;'
+                + 'padding:8px 14px;font-size:13px;box-shadow:0 4px 16px #0008;transition:opacity .4s;';
+            document.body.appendChild(el);
+        }
+        el.textContent = msg;
+        el.style.opacity = '1';
+        clearTimeout(window.__mokRestartTimer);
+        window.__mokRestartTimer = setTimeout(function () { try { el.style.opacity = '0'; } catch (e) {} }, 6000);
+    } catch (e) { console.warn('[restart-notice] 顯示失敗', e); }
+}
+
+function _onChatStream(data, channel) {
     // 🔧 2026-09-19 防「同一事件被處理兩次」：本檔補丁後曾同時掛了兩份 chat_stream 與 chat_stream_sse 監聽，
     // 同一顆事件物件會進到這裡兩次，思考與回覆逐塊加倍、輪次標題也會重複（F5 重新載入歷史才恢復正常）。
     // 用物件標記去重：同一事件物件只處理第一次，即使監聽被重複掛載也不會重複輸出。
     if (data && data.__mokStreamHandled) return;
     try { Object.defineProperty(data, '__mokStreamHandled', { value: true, enumerable: false, configurable: true }); }
     catch (e) { try { data.__mokStreamHandled = true; } catch (e2) {} }
+    // 2026-09-29 架（item1）：優雅重啟通知 —— 後端重啟前廣播，前端顯示提示；連線中斷後會自動續流把答案接回來。
+    if (data && data.type === 'server_restart') {
+        try { _showRestartNotice(data.content || '服務正在重啟，本輪回覆會自動接續，請稍候…'); } catch (eR) {}
+        return;
+    }
+
+    // 🔧A（2026-09-29 稚）：SSE 通道事件計數：每處理一顆事件 +1，即為續流 after 游標（對齊後端 sent_abs）。
+    try {
+        if (channel === 'sse' && data.type !== 'stream_meta' && data.type !== 'ping') {
+            const _sidCnt = _sseSessionByAgent[data.agent];
+            if (_sidCnt) _sseAppliedCount[_sidCnt] = (_sseAppliedCount[_sidCnt] || 0) + 1;
+        }
+    } catch (eCnt) {}
+    // 【2026-10-03 稚 A案】SSE 心跳 ping：只代表連線活著（onmessage 已重置停滯看門狗），
+    //   不進渲染管線、不計入續流游標，避免重連 after 偏移而漏掉真正的事件。
+    if (data && data.type === 'ping') return;
     // 🔧 除錯追蹤：記錄每個事件（含 channel / streamFinished / gen），供重複輸出問題分析
     try {
         if (!window.__chatEventLog) window.__chatEventLog = [];
@@ -4845,7 +5372,7 @@ async function createFromPath() {
             // 方案C：前置的語義搜索/經驗參考已落在這一輪，沿用不另開新輪
             _prevR.iteration = data.iteration;
         } else {
-            rounds[agent].push({think: '', tool_calls: [], tool_results: [], reply: '', iteration: data.iteration});
+            rounds[agent].push({think: '', tool_calls: [], tool_results: [], reply: '', iteration: data.iteration, media: []});
         }
         currentRoundIdx[agent] = rounds[agent].length - 1;
         _renderRoundBlocks(agent);
@@ -4857,8 +5384,12 @@ async function createFromPath() {
         if (rounds[agent] && currentRoundIdx[agent] !== undefined) {
             var rIdx = currentRoundIdx[agent];
             if (rounds[agent][rIdx]) rounds[agent][rIdx].think += data.content;
-            // 🔧 增量更新：只改當前輪次思考文字節點，避免整段重建卡死
-            if (!_incrementalUpdateRoundText(agent, 'think', data.content)) _scheduleRoundRender(agent);
+            // 🔧C（2026-09-29 稚）：緩衝重播事件只重建、不 append（避免重播文字疊加在既有 DOM 上）
+            if (data.replay) {
+                _scheduleRoundRender(agent);
+            } else if (!_incrementalUpdateRoundText(agent, 'think', data.content)) {
+                _scheduleRoundRender(agent);
+            }
         }
         // 方案A/B(20260904)：思考串流只寫入輪次區塊 .round-think-text（單一即時節點）；已移除 #think-content 底部面板與舊式 .think-content 的重複寫入
 } else if (data.type === 'tool_calls') {
@@ -4872,8 +5403,13 @@ async function createFromPath() {
             var rIdx = currentRoundIdx[agent];
             if (rounds[agent][rIdx]) {
                 rounds[agent][rIdx].tool_results.push({name: data.tool_name || '未知工具', content: data.content});
+                if (data.media && data.media.length) {
+                    if (!Array.isArray(rounds[agent][rIdx].media)) rounds[agent][rIdx].media = [];
+                    rounds[agent][rIdx].media = rounds[agent][rIdx].media.concat(data.media);
+                }
             }
-            if (!_incrementalUpdateRoundTools(agent)) _scheduleRoundRender(agent);
+            if (data.media && data.media.length) { _scheduleRoundRender(agent); }
+            else if (!_incrementalUpdateRoundTools(agent)) { _scheduleRoundRender(agent); }
         }
     } else if (data.type === 'reply') {
         const subtype = data.subtype || 'normal';
@@ -4888,7 +5424,7 @@ async function createFromPath() {
         if (subtype === 'tool_process' || subtype === 'semantic_search' || subtype === 'experience') {
             if (!rounds[agent]) rounds[agent] = [];
             if (currentRoundIdx[agent] === undefined || currentRoundIdx[agent] < 0 || !rounds[agent][currentRoundIdx[agent]]) {
-                rounds[agent].push({think: '', tool_calls: [], tool_results: [], reply: '', iteration: rounds[agent].length + 1});
+                rounds[agent].push({think: '', tool_calls: [], tool_results: [], reply: '', iteration: rounds[agent].length + 1, media: []});
                 currentRoundIdx[agent] = rounds[agent].length - 1;
             }
             var _auxKey = subtype === 'semantic_search' ? 'semantic' : (subtype === 'experience' ? 'experience' : 'tool_process');
@@ -4904,17 +5440,27 @@ async function createFromPath() {
                 var trIdx = currentRoundIdx[agent];
                 if (rounds[agent][trIdx] && Array.isArray(rounds[agent][trIdx].tool_results)) {
                     rounds[agent][trIdx].tool_results.push({ name: data.tool_name || '工具', content: content });
+                    if (data.media && data.media.length) {
+                        if (!Array.isArray(rounds[agent][trIdx].media)) rounds[agent][trIdx].media = [];
+                        rounds[agent][trIdx].media = rounds[agent][trIdx].media.concat(data.media);
+                    }
                 }
-                if (!_incrementalUpdateRoundTools(agent)) _scheduleRoundRender(agent);
+                if (data.media && data.media.length) { _scheduleRoundRender(agent); }
+                else if (!_incrementalUpdateRoundTools(agent)) { _scheduleRoundRender(agent); }
             }
             return;
         }
+        try { var _dupr = (rounds[agent] && currentRoundIdx[agent] !== undefined && rounds[agent][currentRoundIdx[agent]]) ? (rounds[agent][currentRoundIdx[agent]].reply || '') : ''; if (content && _dupr && _dupr === content) { console.warn('[dup-guard] skip whole-block reply resend, len=' + content.length); return; } } catch (eDup) {}
         accumulatedReply[agent] = (accumulatedReply[agent] || '') + content;
         if (rounds[agent] && currentRoundIdx[agent] !== undefined) {
             var rIdx = currentRoundIdx[agent];
             if (rounds[agent][rIdx]) rounds[agent][rIdx].reply += content;
-            // 🔧 增量更新：只改當前輪次回覆文字節點，避免整段重建卡死
-            if (!_incrementalUpdateRoundText(agent, 'reply', content)) _scheduleRoundRender(agent);
+            // 🔧C（2026-09-29 稚）：緩衝重播事件只重建、不 append（避免重播文字疊加在既有 DOM 上）
+            if (data.replay) {
+                _scheduleRoundRender(agent);
+            } else if (!_incrementalUpdateRoundText(agent, 'reply', content)) {
+                _scheduleRoundRender(agent);
+            }
         }
         // 方案A/B(20260904)：回覆串流只寫入輪次區塊 .round-reply-text（單一即時節點）；已移除 #reply-content 底部面板的重複寫入
         // 🔧 只更新與當前世代匹配的 div
@@ -4973,6 +5519,7 @@ async function createFromPath() {
             agentStates[agent].isRunning = false;
             if (agent !== currentAgent) {
                 agentStates[agent].hasNewCompleted = true;
+                markAutoUnread(agent);   // ★ 2026-10-08：自動未讀落盤後端，刷新／重啟仍保留
             } else {
                 agentStates[agent].hasNewCompleted = false;
             }
@@ -5003,7 +5550,7 @@ async function createFromPath() {
                 // 🔧 統一顯示：done 後沿用流式時的 round-blocks-container 樣式（有邊框 + 標題列），不再寫入 message-bubble 純文字
                 // 1) 確保最終回覆已進入 rounds，讓 _renderRoundBlocks 以相同樣式渲染
                 if (!rounds[agent] || !rounds[agent].length) {
-                    rounds[agent] = [{ think: think, tool_calls: [], tool_results: [], reply: reply, iteration: 1 }];
+                    rounds[agent] = [{ think: think, tool_calls: [], tool_results: [], reply: reply, iteration: 1, media: [] }];
                     currentRoundIdx[agent] = 0;
                 } else {
                     const lastRound = rounds[agent][rounds[agent].length - 1];
@@ -5030,12 +5577,15 @@ async function createFromPath() {
                     const meta = currentAssistantDiv[agent].querySelector('.message-meta');
                     if (meta) {
                         const finalMeta = agent + ' · ' + new Date().toLocaleTimeString();
-                        meta.innerHTML = '[ID:?] ' + finalMeta;
+                        // 🔧 20260927：也改成節點安全寫法（textContent），避免任何情況下洗掉 meta 內的按鈕監聽器
+                        meta.textContent = '[ID:?] ' + finalMeta;
                     }
                 }
 
                 // 5) 更新 conv_id（從 done 事件獲取）
-                if (data.conv_id) {
+                // 🔧 20260927 修復：只有「目前顯示的侍女」才可改畫面，否則背景侍女 done 會污染當前對話
+                // （改錯 data-conv-id、蓋掉標題）並以 innerHTML 改寫洗掉按鈕的事件監聽器。
+                if (data.conv_id && agent === currentAgent) {
                     const _lastUser = chatMessagesDiv.querySelector(".message.user:last-of-type");
                     const _lastAssistant = chatMessagesDiv.querySelector(".message.assistant:last-of-type");
                     if (_lastUser) { _lastUser.dataset.conv_id = data.conv_id; }
@@ -5043,17 +5593,12 @@ async function createFromPath() {
                     if (_lastAssistant) {
                         const _meta = _lastAssistant.querySelector(".message-meta");
                         if (_meta) {
-                            _meta.innerHTML = _meta.innerHTML.replace(/\[ID:[^\]]*\]/, '[ID:' + data.conv_id + ']');
+                                                        _setMetaConvId(_meta, data.conv_id);
                         }
                     }
                     if (_lastUser) {
                         const _meta2 = _lastUser.querySelector(".message-meta");
-                        if (_meta2) {
-                            _meta2.innerHTML = _meta2.innerHTML.replace(/[ID:?]/g, '[ID:' + data.conv_id + ']');
-                            if (_meta2.innerHTML.indexOf('[ID:' + data.conv_id + ']') === -1) {
-                                _meta2.innerHTML = '[ID:' + data.conv_id + '] ' + _meta2.innerHTML;
-                            }
-                        }
+                        if (_meta2) { _setMetaConvId(_meta2, data.conv_id, true); }
                     }
                 }
             }
@@ -5191,7 +5736,7 @@ async function createFromPath() {
                             fetch('/api/chat_history', {
                                 method: 'POST',
                                 headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({agent: ag, role: 'assistant', content: '🖥️ 【開機進度】' + txt, conv_id: _girlCurrentConvId()})
+                                body: JSON.stringify({agent: ag, role: 'assistant', content: '🖥️ 【開機進度】' + txt, conv_id: _girlCurrentConvId(), user_id: _mokUidNow()})
                             }).then(function(){ if (typeof loadChatHistory === 'function') loadChatHistory().catch(function(){}); })
                               .catch(function(){});
                         }
@@ -5244,21 +5789,15 @@ socket.on('log_line', function(data) {
         const mobileStopBtn = document.getElementById('mobileStopBtn');
         const clearBtn = document.getElementById('clearChatBtn');
         const send = () => {
-            if (convertingLargeText) {
-                showQuoteToast('⏳ 大型文字正在建立臨時文件，請稍候。');
-                return;
-            }
             const msg = textarea.value.trim();
             if (!msg && attachments.length === 0) return;
             const hasAudio = attachments.some(a => (a.type || '').startsWith('audio/') || a.kind === 'audio');
             const hasImage = attachments.some(a => (a.type || '').startsWith('image/') || a.kind === 'image');
-            const hasTempText = attachments.some(a => a.temporary && a.server_path);
             const hasTextFile = attachments.some(a => a.content !== undefined);
             const hasFolder = attachments.some(a => a.kind === 'folder' || a.folder);
             let autoMsg;
             if (hasAudio) autoMsg = '（收到語音留言，請用 stt 轉錄內容後以語音回覆）';
             else if (hasImage) autoMsg = '（已貼上圖片，請分析內容）';
-            else if (hasTempText) autoMsg = '（已附上臨時文字文件，請先讀取檔案內容再回答）';
             else if (hasTextFile) autoMsg = '（已附上文字檔案，請依檔案內容回答）';
             else if (hasFolder) autoMsg = '（已附上資料夾，請先列出檔案清單）';
             else autoMsg = '（已附上檔案，請依內容回答）';
@@ -5511,20 +6050,12 @@ socket.on('log_line', function(data) {
         }
         textarea.oninput = function() {
             fitInputHeight();
-            if (isLargeText(this.value) && !convertingLargeText) {
-                const largeText = this.value;
-                this.value = '';
-                this.style.height = '44px';
-                addLargeTextAttachment(largeText);
-                showQuoteToast('📄 大量文字已轉為臨時文件，可刪除後排除本次上下文。');
-            }
         };
 
         // ===== Ctrl+V 貼上截圖／圖片 =====
         textarea.addEventListener('paste', (e) => {
             const items = e.clipboardData && e.clipboardData.items;
             if (!items) return;
-            const pastedText = e.clipboardData.getData('text/plain');
             const imageFiles = [];
             for (const item of items) {
                 if (item.kind === 'file' && item.type && item.type.startsWith('image/')) {
@@ -5532,14 +6063,7 @@ socket.on('log_line', function(data) {
                     if (f) imageFiles.push(f);
                 }
             }
-            if (imageFiles.length === 0) {
-                if (!isLargeText(pastedText) || convertingLargeText) return;
-                e.preventDefault();
-                addLargeTextAttachment(pastedText).then((added) => {
-                    if (added) showQuoteToast('📄 大量文字已轉為臨時文件，可刪除後排除本次上下文。');
-                });
-                return;
-            }
+            if (imageFiles.length === 0) return;
 
             e.preventDefault(); // 阻止圖片被直接貼進輸入框
 
@@ -5562,12 +6086,12 @@ socket.on('log_line', function(data) {
             showQuoteToast('🖼️ 已加入 ' + imageFiles.length + ' 張截圖');
             textarea.focus();
         });
-        // ===== 批次D 第3條：緊急停止鍵 → 先跳確認提示，確定才真的停止 =====
+        // ===== 批次D 第3條：主人重啟鍵 → 先跳確認提示，確定才真的完整重啟（2026-10-03 by 稚）=====
         const _confirmStopGeneration = () => {
             showMokConfirm(
-                '⚠️ 確定要緊急停止嗎？將立刻中止「所有 Agent」正在生成的回覆，並觸發後端 pm2 緊急重啟；頁面約 3 秒後會自動重新載入。',
+                '🔄 確定要主人重啟嗎？將完整重啟 mokagi（所有 Agent 與網頁服務），重新載入全部程式碼與補丁；正在生成的回覆會中斷，完成後頁面會自動重新載入。',
                 stopGeneration,
-                { okText: '🚫 確定停止', cancelText: '取消' }
+                { okText: '🔄 確定重啟', cancelText: '取消' }
             );
         };
         stopBtn.onclick = _confirmStopGeneration;
@@ -5619,7 +6143,7 @@ socket.on('log_line', function(data) {
 
 
     // ===== 引用插入：點擊訊息上的 [ID:] 直接把引用片段插入輸入框（不送出），可連點累積上下文 =====
-    function insertQuoteToken(text) {
+    function insertQuoteToken(text, optLabel) { const _lbl = optLabel || "引用";
         const ta = document.getElementById('chatInput');
         if (!ta) {
             try { navigator.clipboard.writeText(text); } catch (err) {}
@@ -5643,7 +6167,7 @@ socket.on('log_line', function(data) {
         try { ta.selectionStart = ta.selectionEnd = pos; } catch (err) {}
         ta.focus();
         try { ta.dispatchEvent(new Event('input', { bubbles: true })); } catch (err) {}
-        showQuoteToast('✅ 已插入引用: ' + text);
+        showQuoteToast('✅ 已插入' + _lbl + ': ' + text);
     }
 
     function copyMsgHandler(e) {
@@ -5975,12 +6499,72 @@ function toggleReportPreview(btn) {
     const iframe = wrap.querySelector('iframe');
     if (wrap.style.display === 'none' || !wrap.style.display) {
         if (iframe && !iframe.getAttribute('src')) iframe.src = btn.dataset.src;
+        // indexPage|主人反映報告預覽太短看不清|預覽 iframe 高度 420px→840px（放大一倍）|202610070019(香港)
+        if (iframe) iframe.style.height = '840px';
         wrap.style.display = 'block';
         btn.textContent = '✖ 關閉';
     } else {
         wrap.style.display = 'none';
         btn.textContent = '👁 預覽';
     }
+}
+
+// 📋 複製工作報告相對路徑（2026-10-08 by indexPage｜主人在「👁 預覽」後要求一鍵複製，如「賺錢王/jobs/2026-10-07/coldcall_漏斗升級指標/report.html」）
+function copyReportPath(btn) {
+    const p = btn.getAttribute('data-copypath') || '';
+    if (!p) return;
+    const flash = () => {
+        const old = btn.textContent;
+        btn.textContent = '✅ 已複製';
+        setTimeout(() => { btn.textContent = old; }, 1200);
+    };
+    const fallback = () => {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = p;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.top = '-1000px';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            ta.setSelectionRange(0, p.length);
+            const ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (ok) flash(); else prompt('請手動複製以下路徑：', p);
+        } catch (e) {
+            prompt('請手動複製以下路徑：', p);
+        }
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(p).then(flash).catch(fallback);
+    } else {
+        fallback();
+    }
+}
+
+// 🗑 刪除工作報告（2026-10-07 by indexPage｜主人要求加刪除鍵｜僅 admin 看得到此鍵，後端 delete_agent_report 為唯一權威，一律進回收站）
+function deleteReport(btn) {
+    const agent = btn.getAttribute('data-agent') || '';
+    const rel = btn.getAttribute('data-path') || '';
+    if (!agent || !rel) return;
+    if (!confirm('確定把這份工作報告移入回收站？\n' + rel + '\n\n（30 天內可從 ~/.mok/trash 還原）')) return;
+    const oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ 刪除中';
+    const handler = (data) => {
+        socket.off('agent_report_deleted', handler);
+        if (data && data.error) {
+            btn.disabled = false;
+            btn.textContent = oldText;
+            alert('❌ ' + data.error);
+            return;
+        }
+        const container = document.getElementById('agentTabContent');
+        if (container) loadAgentJobs(container, agent);
+    };
+    socket.on('agent_report_deleted', handler);
+    socket.emit('delete_agent_report', { agent: agent, path: rel });
 }
 
 function loadAgentJobs(container, agentName) {
@@ -6113,7 +6697,7 @@ function saveAgentTabSettings(agentName) {
         document.querySelectorAll('#toolsPanel .tools-header-buttons button').forEach(btn => {
             btn.addEventListener('click', () => { if (window.MOK_LOGGED_IN !== true) return; switchTool(btn.dataset.tool); });
         });
-        switchTool('files');
+        switchTool('room');
         // agent 資訊按鈕
         document.getElementById('agentInfoBtn')?.addEventListener('click', () => switchTool('agent'));
         // 🔧 修復：activateAgent() 已透過 loadAgentList() 載入並渲染歷史，此處不再重複加載，避免覆蓋
@@ -6856,11 +7440,127 @@ document.getElementById('desktopTopBtn')?.addEventListener('click', () => { wind
 });
 
 // ══════════ indexPage：未讀標記 + 標頭按鈕摺疊收藏 ══════════
+// ★ indexPage|主人乙案 2026-10-08：未讀改存後端（per 會員／訪客），跨裝置同步；點進去才清除
 const UNREAD_KEY = 'mokUnreadAgents_v1';
+const UNREAD_OWNER_KEY = 'mokUnreadOwner_v1';     // 這份本機快取是由哪個身分寫下的
+const UNREAD_PENDING_KEY = 'mokUnreadPending_v1'; // POST 沒送達的待補動作 {agent: 'set'|'clear'}
+let unreadCache = null;   // 後端同步結果＝權威來源；null＝尚未同步，暫用 localStorage 離線快取
 function getUnreadMap() {
-    try { return JSON.parse(localStorage.getItem(UNREAD_KEY) || '{}'); } catch (e) { return {}; }
+    if (unreadCache !== null) return unreadCache;
+    return _unreadLocal();
 }
-function saveUnreadMap(m) { try { localStorage.setItem(UNREAD_KEY, JSON.stringify(m)); } catch (e) {} }
+function _unreadLocal() {   // 直接讀本機快取（未經後端同步）——合併時判斷「本地獨有」用
+    try { return JSON.parse(localStorage.getItem(UNREAD_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+function saveUnreadMap(m) {
+    unreadCache = m || {};
+    try { localStorage.setItem(UNREAD_KEY, JSON.stringify(unreadCache)); } catch (e) {}
+}
+function _unreadLsGet(k, d) {
+    try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return (v === null ? d : v); }
+    catch (e) { return d; }
+}
+function _unreadLsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+// 後端身分（訪客為臨時 ID）：只讀 localStorage，避免依賴其他作用域的變數
+function _unreadUid() {
+    try { return localStorage.getItem('mokagi_user_id') || localStorage.getItem('web_user_id') || ''; } catch (e) { return ''; }
+}
+function _unreadPost(url, body) {
+    body.user_id = _unreadUid();
+    return fetch(url, { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+}
+// 待補動作：POST 沒送達（離線／401／後端未啟用）時記下來，下次同步補送，重整也不會丟
+function _unreadMarkPending(name, mode) {
+    const p = _unreadLsGet(UNREAD_PENDING_KEY, {}) || {};
+    if (mode) p[name] = mode; else delete p[name];
+    _unreadLsSet(UNREAD_PENDING_KEY, p);
+}
+// 推送單筆標記（note=null → 取消；'' → 只標未讀；文字 → 便條）；回傳 Promise<bool>
+function _unreadPush(name, note) {
+    return _unreadPost('/api/unread/set', { agent: name, note: (note === null ? null : note) })
+        .then(function (res) {
+            const ok = !!(res && res.success !== false);
+            _unreadMarkPending(name, ok ? null : 'set');
+            return ok;
+        });
+}
+// 推送「清除」
+function _unreadPushClear(name) {
+    return _unreadPost('/api/unread/clear', { agent: name })
+        .then(function (res) {
+            const ok = !!res;
+            _unreadMarkPending(name, ok ? null : 'clear');
+            return ok;
+        });
+}
+// ★ indexPage 2026-10-08：自動未讀 —— 別位侍女回完話時落盤（後端＋本機），
+//   刷新／重啟都還在；只有主人真的點進該 agent 才清除。已有未讀／便條時不打擾、不覆蓋主人寫的字。
+function markAutoUnread(name) {
+    if (!name || name === currentAgent) return;
+    const m = Object.assign({}, getUnreadMap());
+    if (m[name]) return;
+    m[name] = { t: Date.now(), note: '' };
+    saveUnreadMap(m);
+    renderAgentList();
+    updateUnreadBtnState();
+    _unreadPush(name, '');
+}
+// 從後端拉回本會員／訪客的未讀（登入、重整、回到前景時呼叫；跨裝置一致）
+async function syncUnreadFromServer() {
+    try {
+        let uid = _unreadUid();
+        if (!uid) {   // 首次到訪：先向後端索取身分（與 ensureMokIdentity 同一 API，不依賴作用域）
+            try {
+                const hr = await fetch('/api/member/header', { credentials: 'same-origin' });
+                if (hr.ok) {
+                    const hd = await hr.json();
+                    uid = hd.logged_in ? String(hd.username || '') : String(hd.temp_id || '');
+                    if (uid) {
+                        try {
+                            localStorage.setItem('mokagi_user_id', uid);
+                            if (!hd.logged_in) localStorage.setItem('web_user_id', uid);
+                        } catch (e) {}
+                    }
+                }
+            } catch (e) {}
+        }
+        if (!uid) return;                        // 真的拿不到身分 → 保留本地快取
+        const url = '/api/unread/list?user_id=' + encodeURIComponent(uid);
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) return;                       // 401（無身分）→ 保留本地快取，不打擾使用者
+        const d = await r.json();
+        if (!d || d.success === false) return;
+        const server = d.marks || {};
+        const local = _unreadLocal();
+        const owner = _unreadLsGet(UNREAD_OWNER_KEY, '') || '';
+        const pending = _unreadLsGet(UNREAD_PENDING_KEY, {}) || {};
+        const merged = Object.assign({}, server);
+        const pushSet = [], pushClear = [];
+        // ① 本地有、後端沒有 → 只在「身分剛切換」或「上次沒送達」時補上傳（舊版本機標記亦適用）。
+        //    同一身分下後端為權威 → 尊重「在別處已清除」，絕不復活。
+        Object.keys(local).forEach(function (n) {
+            if (Object.prototype.hasOwnProperty.call(server, n)) return;
+            if (owner === uid && pending[n] !== 'set') return;
+            merged[n] = local[n];
+            pushSet.push(n);
+        });
+        // ② 上次清除沒送達 → 補送
+        Object.keys(server).forEach(function (n) {
+            if (pending[n] === 'clear') { delete merged[n]; pushClear.push(n); }
+        });
+        saveUnreadMap(merged);
+        _unreadLsSet(UNREAD_OWNER_KEY, uid);
+        renderAgentList();
+        updateUnreadBtnState();
+        for (let i = 0; i < pushSet.length; i++) {
+            const _it = local[pushSet[i]];
+            await _unreadPush(pushSet[i], (_it && _it.note) || '');
+        }
+        for (let i = 0; i < pushClear.length; i++) { await _unreadPushClear(pushClear[i]); }
+    } catch (e) {}
+}
 
 // ★ idx 2026-09-23：便條（筆記）
 // 未讀值格式：{t: 時間戳, note: '便條文字'}；兼容舊版純數字時間戳
@@ -6883,7 +7583,7 @@ function escNoteHtml(s) {
 // note = null → 取消未讀；note = '' → 只標記未讀；note = '文字' → 便條
 function setUnreadNote(name, note) {
     if (!name) return;
-    const m = getUnreadMap();
+    const m = Object.assign({}, getUnreadMap());
     if (note === null) {
         delete m[name];
         showQuoteToast('📭 已取消未讀便條');
@@ -6896,7 +7596,23 @@ function setUnreadNote(name, note) {
     renderAgentList();
     updateUnreadBtnState();
     updateHeaderBtnsLayout();
+    // ★ 2026-10-08：同步後端（per 會員／訪客，跨裝置一致）；note=null 代表取消
+    _unreadPush(name, (note === null ? null : note));
 }
+
+// ★ indexPage 2026-10-08：點進某 agent（名片）→ 清除其未讀（含便條），並同步後端。
+function clearUnreadOnOpen(name) {
+    if (!name) return;
+    const m = getUnreadMap();
+    if (!m[name]) return;
+    const nm = Object.assign({}, m);
+    delete nm[name];
+    saveUnreadMap(nm);
+    renderAgentList();
+    updateUnreadBtnState();
+    _unreadPushClear(name);   // 送達失敗會記入待補，下次同步補送
+}
+
 function openUnreadNoteDialog(agentName) {
     const name = agentName || currentAgent;
     if (!name) { showQuoteToast('請先選擇一位 Agent'); return; }
@@ -7015,46 +7731,77 @@ function closeHeaderDropdown() {
     if (d) d.classList.remove('open');
 }
 
-// ★ idx 2026-09-20：把登入中的會員名稱寫進「更多」鍵與面板頂（GET /api/member/me）
+// ★ idx 2026-09-20：把登入中的會員名稱寫進「更多」鍵與面板頂
+// ★ indexPage 2026-09-27：改由後端 /api/member/header 統一驅動（身分 + 額度/已用/剩餘，依用戶分開）
+//    - 已登入：會員帳號；未登入：後端頒發的臨時 ID（guest:<uuid>），不再寫死任何稱呼字樣
+//    - Token：一律顯示「每月 Token 額度 - 已用 = 剩餘」（admin/無限方案顯示 ∞）
 function refreshHeaderMemberName() {
     const btnLabel = document.getElementById('headerMemberName');
     const balLabel = document.getElementById('headerTokenBalance');
     if (!btnLabel && !balLabel) return;
-    // ★ 2026-09-21 多租戶：登入後把 localStorage.web_user_id 覆寫成會員帳號；未登入則換回訪客 id
+    const num = (n) => (typeof n === 'number' && isFinite(n)) ? n.toLocaleString('en-US') : '0';
+    // 多租戶：登入後把 localStorage 覆寫成會員帳號；未登入則帶上後端頒發的臨時 ID
     const applyIdentity = (name) => {
         try {
+            if (!name) return;
             const cur = localStorage.getItem('web_user_id') || '';
-            if (name) {
-                if (cur !== name) {
-                    localStorage.setItem('web_user_id', name);
-                    localStorage.setItem('mokagi_user_id', name);
-                    if (typeof userId !== 'undefined') userId = name;
-                    console.log('[MOK_TENANT] 身分切換為會員:', name);
-                }
-            } else if (!/^web_guest_/.test(cur)) {
-                const g = 'web_guest_' + Math.random().toString(36).substring(2, 10);
-                localStorage.setItem('web_user_id', g);
-                localStorage.setItem('mokagi_user_id', g);
-                if (typeof userId !== 'undefined') userId = g;
-                console.log('[MOK_TENANT] 未登入 → 訪客身分:', g);
-            }
+            if (cur === name) return;
+            localStorage.setItem('web_user_id', name);
+            localStorage.setItem('mokagi_user_id', name);
+            if (typeof userId !== 'undefined') userId = name;
+            console.log('[MOK_TENANT] 身分切換為:', name);
         } catch (e) {}
     };
-    fetch('/api/member/me', { credentials: 'same-origin' })
+    fetch('/api/member/header', { credentials: 'same-origin' })
         .then(r => (r.ok ? r.json() : null))
         .then(d => {
-            const name = (d && d.logged_in && d.username) ? String(d.username) : '';
-            applyIdentity(name);
-            if (!name) return;                       // 取不到（未登入等）→ 保留預設「會員名稱」
-            if (btnLabel) btnLabel.textContent = name;
-            if (balLabel && typeof d.balance_tokens === 'number') {
-                balLabel.textContent = '💰 Token 餘額：' + d.balance_tokens.toLocaleString('en-US');
+            if (!d || d.success === false) return;
+            const loggedIn = !!d.logged_in;
+            const uid = loggedIn ? String(d.username || '') : String(d.temp_id || '');
+            if (uid) applyIdentity(uid);
+            if (btnLabel) {
+                btnLabel.textContent = loggedIn ? (d.display_name || uid || '會員') : '未登入訪客';
+                btnLabel.title = (d.plan_label ? d.plan_label + '｜' : '') + (loggedIn ? '' : '臨時 ID：' + uid);
             }
-            const btn = document.getElementById('headerMoreBtn');
-            if (btn) btn.title = '會員：' + name;
+            if (balLabel) {
+                const quotaTxt = d.unlimited ? '∞' : num((d.quota != null) ? d.quota : d.monthly_quota);
+                // ★ 2026-10-03 indexPage：ADMIN（無限方案）也要顯示用量。
+                //   後端 /api/member/header 由「用量接駁」補丁回本月真實已用（需重啟 Web 後生效）；
+                //   未生效前退回 /api/token_stats 的累計用量，確保 admin 一定有用量數字可看。
+                if (d.unlimited) {
+                    const _mkTitle = (tag) => 'Token 用量（' + (d.plan_label || '-') + '｜' + (d.month_key || d.month || '') + '）' + tag + '（額度無上限）' + (loggedIn ? ('｜會員：' + uid) : ('｜未登入（臨時 ID：' + uid + '）'));
+                    const _u = (typeof d.used === 'number') ? d.used : 0;
+                    if (_u > 0) {
+                        balLabel.textContent = '🧮 本月 ' + num(_u);
+                        balLabel.title = _mkTitle('本月已用 ' + num(_u));
+                    } else {
+                        balLabel.textContent = '🧮 ∞';
+                        balLabel.title = _mkTitle('本月用量讀取中…');
+                        if (loggedIn && uid) {
+                            fetch('/api/token_stats?user=' + encodeURIComponent(uid), { credentials: 'same-origin' })
+                                .then(r => (r.ok ? r.json() : null))
+                                .then(j => {
+                                    const tot = (j && typeof j.total_tokens === 'number') ? j.total_tokens : 0;
+                                    if (tot > 0) {
+                                        balLabel.textContent = '🧮 累計 ' + num(tot);
+                                        balLabel.title = _mkTitle('累計用量 ' + num(tot) + '（本月用量於服務重啟後顯示）');
+                                        try { var _tb = document.getElementById('toolsTokenBalance'); if (_tb) _tb.title = 'token（累計已用 ' + num(tot) + '；本月用量於服務重啟後顯示）'; } catch (e2) {}
+                                    }
+                                })
+                                .catch(() => {});
+                        }
+                    }
+                } else {
+                    balLabel.textContent = '🧮 ' + num(d.remaining);
+                    balLabel.title = 'Token 用量（' + (d.plan_label || '-') + '｜' + (d.month_key || d.month || '') + '）' + (loggedIn ? ('｜會員：' + uid) : ('｜未登入（臨時 ID：' + uid + '）'));
+                }
+            }
+            const tbal=document.getElementById('toolsTokenBalance'); if(tbal){ var _tokq=(d.unlimited?'∞':num((d.quota!=null)?d.quota:d.monthly_quota)); if(d.unlimited){ tbal.title = (d.used>0) ? ('token（本月額度 ∞ − 已用 '+num(d.used)+' = 剩餘 ∞）') : 'token（無限方案：額度無上限；用量見上方 🧮）'; } else { var _tokr=num(d.remaining); tbal.title='token（本月額度 '+_tokq+' − 已用 '+num(d.used)+' = 剩餘 '+_tokr+'）'; } } const btn = document.getElementById('headerMoreBtn');
+            if (btn) btn.title = loggedIn ? ('會員：' + uid + (d.plan_label ? '｜' + d.plan_label : '')) : ('未登入（臨時 ID：' + uid + '）');
         })
         .catch(() => {});
 }
+
 
 // 綁定（main.js 在 <head> 載入，DOM 尚未就緒 → 等 DOMContentLoaded）
 document.addEventListener('DOMContentLoaded', function initUnreadFold() {
@@ -7068,6 +7815,11 @@ document.addEventListener('DOMContentLoaded', function initUnreadFold() {
         if (d) d.classList.toggle('open');
     });
     refreshHeaderMemberName();
+    // ★ 2026-10-08：未讀改存後端 —— 載入時同步一次；回到前景再同步（跨裝置）
+    syncUnreadFromServer();
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') syncUnreadFromServer();
+    });
     // 點擊外部關閉下拉
     document.addEventListener('click', (e) => {
         const d = document.getElementById('headerBtnsDropdown');
@@ -7090,18 +7842,41 @@ document.addEventListener('DOMContentLoaded', function initUnreadFold() {
 });
 
 // BatchC item2: collapse overflowing right-panel tool buttons into a more menu
+// ★ 2026-10-01 indexPage：統一排程器。面板寬度變化（展開／收合／側欄拖拉）或「面板本來隱藏、
+//   之後才顯示」時，都要重算工具列摺疊；用 debounce 避免 ResizeObserver 反覆觸發造成抖動。
+var __mokToolsHdrTimer = null;
+function __mokScheduleToolsHeaderOverflow(delay){
+    if(__mokToolsHdrTimer) clearTimeout(__mokToolsHdrTimer);
+    __mokToolsHdrTimer = setTimeout(function(){
+        __mokToolsHdrTimer = null;
+        try{ updateToolsHeaderOverflow(); }catch(err){}
+    }, (typeof delay === "number") ? delay : 60);
+}
+
 function updateToolsHeaderOverflow(){
     var wrap = document.querySelector('.tools-header .tools-header-buttons');
     var moreBtn = document.getElementById('toolsMoreBtn');
     var moreDD = document.getElementById('toolsMoreDropdown');
     if(!wrap || !moreBtn || !moreDD) return;
-    var btns = Array.prototype.filter.call(wrap.children, function(el){ if(el.classList.contains("mok-hidden")) return false; return el.tagName === 'BUTTON'; });
+    var btns = Array.prototype.filter.call(wrap.children, function(el){ if(el.classList.contains("mok-hidden") || el.classList.contains("mok-mh")) return false; return el.tagName === 'BUTTON'; /* indexPage 2026-10-01：機密閘 mok-mh 隱藏鍵不可參與摺疊，否則會被塞進 ⋯ 下拉造成越權露出 */ });
     if(!btns.length) return;
-    btns.forEach(function(b){ b.classList.remove('tools-folded'); });
+        // ★ 2026-10-01 indexPage：連隱藏鍵（admin-only／mok-hidden）也一起清掉舊的 tools-folded，
+    //   否則會員視角會殘留摺疊標記（摺疊數與實際不符，下拉也會殘留）。
+    Array.prototype.forEach.call(wrap.querySelectorAll("button.tools-folded"), function(b){ b.classList.remove("tools-folded"); });
     moreBtn.style.display = 'none';
-    moreDD.classList.remove('open');
-    if(!wrap.clientWidth) return;
-    if(wrap.scrollWidth - wrap.clientWidth < 2){ moreDD.innerHTML = ''; return; }
+    /* ★ 春 2026-10-02：此處原本無條件 moreDD.classList.remove("open")，只要點開後有任何模組再補跑一次重算（非 admin 會員的身分/權限閘會在點擊後排程重算），⋯ 下拉就會「點開即自動關」。改為只在下方「已無存在必要」的分支才關。 */
+        // ★ 2026-10-01 indexPage：舊寫法在「面板還沒排版」時（隱藏／收合／手機未展開）clientWidth=0
+    //   就直接 return，不留任何重試；等面板之後顯示出來又沒有事件重算，
+    //   會員就會看到一排被裁掉、卻沒有「⋯ 更多」鈕的工具列（＝看不全該顯示的所有鍵）。
+    //   現在：先清乾淨，再排一次重試；面板一有寬度就會由 ResizeObserver／重試接手。
+    if(!wrap.clientWidth){
+        moreBtn.style.display = "none";
+        moreDD.classList.remove("open"); /* 春 2026-10-02：面板無寬度（未顯示）時仍應收起下拉 */
+        moreDD.innerHTML = "";
+        __mokScheduleToolsHeaderOverflow(250);
+        return;
+    }
+    if(wrap.scrollWidth - wrap.clientWidth < 2){ moreDD.classList.remove('open'); moreDD.innerHTML = ''; return; }
     moreBtn.style.display = 'inline-flex';
     var avail = wrap.clientWidth;
     var folded = [];
@@ -7110,7 +7885,7 @@ function updateToolsHeaderOverflow(){
         btns[i].classList.add('tools-folded');
         folded.unshift(btns[i]);
     }
-    if(!folded.length){ moreBtn.style.display = 'none'; moreDD.innerHTML = ''; return; }
+    if(!folded.length){ moreBtn.style.display = 'none'; moreDD.classList.remove('open'); moreDD.innerHTML = ''; return; }
     moreDD.innerHTML = '';
     folded.forEach(function(b){
         var item = document.createElement('button');
@@ -7143,7 +7918,17 @@ document.addEventListener('DOMContentLoaded', function initToolsHeaderFold(){
     var wrap = document.querySelector('.tools-header .tools-header-buttons');
     if(wrap){
         var obs = new MutationObserver(function(){ updateToolsHeaderOverflow(); try{ obs.takeRecords(); }catch(err){} });
-        obs.observe(wrap, { childList:true, attributes:true, subtree:true, attributeFilter:['style','class'] });
+                obs.observe(wrap, { childList:true, attributes:true, subtree:true, attributeFilter:["style","class"] });
+        // ★ 2026-10-01 indexPage：ResizeObserver 才能抓到「面板從 display:none 變成有寬度」這種
+        //   不會觸發 window.resize 的情況（會員／手機版展開右側工作區＝這條路）。
+        if(window.ResizeObserver){
+            try{
+                if(!window.__mokToolsHdrRO){
+                    window.__mokToolsHdrRO = new ResizeObserver(function(){ __mokScheduleToolsHeaderOverflow(60); });
+                    window.__mokToolsHdrRO.observe(wrap);
+                }
+            }catch(err){}
+        }
     }
     var tt = null;
     window.addEventListener('resize', function(){ clearTimeout(tt); tt = setTimeout(updateToolsHeaderOverflow, 120); });
@@ -7157,7 +7942,7 @@ setTimeout(function() {
 }, 100);
 
 // ===== 第二組浮動工具面板 =====
-let currentTool2 = "files";
+let currentTool2 = "room";
 let panel2Active = false;
 
 function renderForPanel2(fn) {
@@ -7185,6 +7970,7 @@ function switchTool2(tool) {
     else if (tool === "monitor") renderForPanel2(renderMonitorContent);
     else if (tool === "game") renderForPanel2(rendergame);
     else if (tool === "tokenstats") renderForPanel2(renderTokenStats);
+    else if (tool === "billing") renderForPanel2(renderTokenStats);
     else if (tool === "tools") renderForPanel2(renderToolsContent);
     else if (tool === "logs") renderForPanel2(renderLogsContent);
     else if (tool === "search") renderForPanel2(renderSearchContent);
@@ -7331,7 +8117,7 @@ function switchTool2(tool) {
         btn.title = "開啟輸入";
         btn.setAttribute("aria-label", "開啟輸入");
         btn.textContent = "⌨️";
-        document.body.appendChild(btn);
+        (document.querySelector(".chat-main") || document.body).appendChild(btn);
         var input = document.getElementById("chatInput");
         var lastY = chatEl.scrollTop;
         var ticking = false;
@@ -7371,9 +8157,24 @@ function switchTool2(tool) {
 
 
 
-// ===== 🏠 房間：只顯示目前侍女自己房間（~/.mok/agent/<agent>）的文件樹 =====
+// ===== 🏠 房間：侍女 ~/.mok/agent/<agent>；會員 ~/.mok/user/<會員> 的文件樹 =====
 async function renderRoomContent() {
-    const agent = (typeof currentAgent !== 'undefined' && currentAgent) ? currentAgent : '';
+    let agent = (typeof currentAgent !== 'undefined' && currentAgent) ? currentAgent : '';
+    // ★ 2026-09-30 indexPage：房間歸屬一律向後端問身分，不信任前端快取
+    //   （舊寫法用 window.MOK_IS_ADMIN 這個「非同步才落地」的旗標，時序一歪就會把 admin
+    //    誤判成會員，房間被指向 ~/.mok/agent/<自己的帳號>（不存在）→ 一片空白看不到）
+    //   admin → 跟隨「當前對話侍女」；會員 → 一律自己同名的房間（a01 → .mok/user/a01）
+    try {
+        const _r0 = await fetch('/api/whoami', { credentials: 'same-origin', cache: 'no-store' });
+        const _d0 = await _r0.json();
+        if (_d0 && typeof _d0 === 'object') {
+            window.MOK_IS_ADMIN = !!_d0.is_admin;
+            if (!_d0.is_admin) {
+                const _me = (_d0.logged_in && _d0.username) ? String(_d0.username) : '';
+                if (_me) agent = _me;
+            }
+        }
+    } catch (e) { /* 取不到身分時：維持跟隨當前侍女 */ }
     const container = document.getElementById('toolsContent');
     if (!container) return;
     container.innerHTML = '';
@@ -7531,6 +8332,13 @@ async function renderRoomContent() {
         const ta = edBody.querySelector('textarea');
         if (!ta) return;
         const newText = ta.value;
+        // 2026-10-08 凜：房間存檔前端 JSON 防呆 — 壞 JSON 直接提示、不送出請求
+        const _roomJsonErr = mokValidateJsonForSave(curRoomPath, newText);
+        if (_roomJsonErr) {
+            edStatus.textContent = '❌ JSON 格式錯誤，未儲存：' + _roomJsonErr;
+            edStatus.style.color = '#ff6b6b';
+            return;
+        }
         edStatus.textContent = '⏳ 儲存中…';
         edStatus.style.color = '#ffd479';
         try {
@@ -7590,7 +8398,7 @@ async function renderRoomContent() {
     // 開啟房間檔案：與主機文件樹一樣，用 /api/file、/api/raw 讀取顯示
     window._roomOpenFile = async function (node) {
         const rel = node.rel || node.name;
-        const roomPath = '.mok/agent/' + agent + '/' + rel;
+        const roomPath = '.mok/' + (window._roomBase || 'agent') + '/' + agent + '/' + rel;
         const rawUrl = '/api/raw/' + encodeURIComponent(roomPath);
         edName.textContent = node.name;
         edRel.textContent = '📄 ' + rel;
@@ -7665,6 +8473,8 @@ async function renderRoomContent() {
     try {
         const res = await fetch('/api/room_tree?agent=' + encodeURIComponent(agent), { cache: 'no-store' });
         const data = await res.json();
+        // 2026-09-30：會員房間在 ~/.mok/user/，侍女在 ~/.mok/agent/（以後端回傳的 base 為準）
+        window._roomBase = (data && data.base) ? data.base : (window.MOK_IS_ADMIN ? 'agent' : 'user');
         if (!data || !Array.isArray(data.tree)) {
             rootEl.innerHTML = '<div style="color:#f88;padding:8px;">讀取失敗：' + ((data && data.error) || res.status) + '</div>';
             return;
@@ -7816,16 +8626,58 @@ function addRoomNode(node, agent, parentUl, depth) {
 (function () {
     var frameLoaded = false;
 
-    function openMemberPanel() {
+    // ★ 2026-10-03 indexPage：admin（無限方案）會員中心「本月已用」在後端補丁重啟前仍為 0；
+    //   這裡在前端即時補上真實用量（本月優先，後端未生效前退回累計），重啟後數值自動一致。
+    function _patchAdminUsage(frame) {
+        try {
+            var doc = frame && frame.contentDocument;
+            if (!doc) return;
+            var fmt = function (n) { return (typeof n === 'number' && isFinite(n)) ? n.toLocaleString('en-US') : '0'; };
+            var set = function (used, tag) {
+                var top = doc.querySelector('.mc-usage-top');            // A. 美化版：<span>本月已用</span><span><b>0</b> / 1</span>
+                if (top) {
+                    var spans = top.querySelectorAll('span');
+                    if (spans.length >= 2) { spans[0].textContent = tag; spans[1].innerHTML = '<b>' + fmt(used) + '</b> / ∞'; return; }
+                }
+                var all = doc.querySelectorAll('div,span,p'), best = null, bestN = 1e9;   // B. 精簡版：<div>本月已用：0 / 1</div>
+                for (var i = 0; i < all.length; i++) {
+                    var el = all[i];
+                    if (!/^本月已用[:：]/.test((el.textContent || '').trim())) continue;
+                    var n = el.getElementsByTagName('*').length;
+                    if (n < bestN) { bestN = n; best = el; }
+                }
+                if (best) best.textContent = tag + '：' + fmt(used) + ' / ∞';
+            };
+            fetch('/api/member/header', { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (!d || !d.unlimited) return;   // 只有 admin/無限方案需要修正
+                    if (d.used > 0) { set(d.used, '本月已用'); return; }
+                    if (!d.username) return;
+                    fetch('/api/token_stats?user=' + encodeURIComponent(d.username), { credentials: 'same-origin' })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (j) { if (j && j.total_tokens > 0) set(j.total_tokens, '累計已用'); })
+                        .catch(function () {});
+                })
+                .catch(function () {});
+        } catch (e) {}
+    }
+
+    // ★ idx 2026-10-09 (HK)：加可選 src 參數；頂端 Token 血條沿用同一浮動面板開 /recharge，預設仍 /member（行為不變）。
+    function openMemberPanel(src) {
         var panel = document.getElementById('memberPanel');
         if (!panel) return;
         var frame = document.getElementById('memberFrame');
-        if (frame && !frameLoaded) {           // ★ 第一次點鍵才注入 src="/member"
-            frame.src = frame.dataset.src || '/member';
-            frameLoaded = true;
+        var _ms = (typeof src === 'string' && src) || (frame && frame.dataset.src) || '/member';
+        if (frame) {                           // ★ indexPage 2026-10-03：每次開啟都重新載入（加 cache-bust），避免面板停在舊資料
+            if (!frame._mokUsageHooked) { frame._mokUsageHooked = true; frame.addEventListener('load', function () { _patchAdminUsage(frame); }); }
+            frame.src = _ms + (_ms.indexOf('?') < 0 ? '?' : '&') + '_t=' + Date.now();
         }
+        var _ttl = document.getElementById('memberPanelTitle');   // ★ idx 2026-10-09：依頁面切換面板標題
+        if (_ttl) _ttl.textContent = (_ms.indexOf('recharge') >= 0) ? '💰 充值' : '🧑💼 會員';
         panel.style.display = 'flex';
     }
+    window.MOK_openMemberPanel = openMemberPanel;   // ★ idx 2026-10-09：供頂端 Token 血條呼叫
 
     function closeMemberPanel() {
         var panel = document.getElementById('memberPanel');
@@ -7833,7 +8685,7 @@ function addRoomNode(node, agent, parentUl, depth) {
     }
 
     function bind() {
-        var key = document.getElementById('headerMemberBtn');
+        var key = document.getElementById('headerTokenBalance');   // ★ 2026-09-27：餘額鍵兼任會員面板入口
         if (key) key.addEventListener('click', function (e) {
             e.stopPropagation();
             var d = document.getElementById('headerBtnsDropdown');
@@ -7874,4 +8726,470 @@ function addRoomNode(node, agent, parentUl, depth) {
     } else {
         bind(); setTimeout(bindDrag, 300);
     }
+})();
+
+
+/* __MOK_TOOLDYN_LOADED__ */
+/* 工具列 data-driven（/static/tools.json）by indexPage 2026-09-27 - B 方案 */
+
+(function () {
+  var SKIP_IDS = { agentInfo: 1 };
+  function applyAdmin(btn, def) {
+    if (def.adminOnly) { btn.setAttribute('data-admin-only', ''); btn.classList.toggle('mok-hidden', !window.MOK_IS_ADMIN); }
+    else { btn.removeAttribute('data-admin-only'); btn.classList.remove('mok-hidden'); }
+  }
+  function mountFrame(page) {
+    var box = document.getElementById('toolsContent');
+    if (!box) return;
+    box.innerHTML = '';
+    var f = document.createElement('IFRAME');
+    f.style.cssText = 'width:100%;height:100%;border:none;border-radius:8px;';
+    f.setAttribute('src', page);
+    box.appendChild(f);
+  }
+  function showAccessNeed(page) {
+    var box = document.getElementById('toolsContent');
+    if (!box) return;
+    var url = location.origin + page;
+    box.innerHTML = '<div style="padding:22px;color:#ddd;font-family:system-ui,sans-serif;">'
+      + '<div style="font-size:15px;font-weight:600;">\ud83d\udd12 \u6b64\u9801\u9700\u8981 Cloudflare Access \u767b\u5165</div>'
+      + '<div style="color:#9aa;font-size:13px;margin:8px 0 14px;">iframe \u5167\u7121\u6cd5\u986f\u793a Access \u767b\u5165\u9801\uff0c\u8acb\u5148\u5728\u65b0\u5206\u9801\u767b\u5165\uff08\u4e00\u6b21\u53ef\u7dad\u6301\u4e00\u500b\u6708\uff09\u3002</div>'
+      + '<a href="' + url + '" target="_blank" rel="noopener" style="display:inline-block;background:#4ec9b0;color:#101418;font-weight:600;padding:8px 14px;border-radius:8px;text-decoration:none;">\ud83d\udd13 \u958b\u65b0\u5206\u9801\u767b\u5165</a>'
+      + '<div style="color:#667;font-size:12px;margin-top:12px;">\u767b\u5165\u5b8c\u6210\u5f8c\u56de\u5230\u672c\u9801\uff0c\u518d\u9ede\u4e00\u6b21\u9019\u500b\u9375\u5373\u53ef\u3002</div>'
+      + '</div>';
+  }
+  function openPage(page) {
+    var box = document.getElementById('toolsContent');
+    if (!box) return;
+    box.innerHTML = '<div style="padding:18px;color:#889;font-size:13px;">\u23f3 \u8f09\u5165\u4e2d\u2026</div>';
+    try {
+      fetch(page, { method: 'GET', redirect: 'manual', credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) { if (r.type === 'opaqueredirect') { showAccessNeed(page); } else { mountFrame(page); } })
+        .catch(function () { mountFrame(page); });
+    } catch (e) { mountFrame(page); }
+  }
+  function bindNew(btn, def) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (window.MOK_LOGGED_IN !== true) return;
+      if (def.type === 'iframe' && def.page) { openPage(def.page); return; }
+      var fn = window.__MOK_RENDER_FNS && window.__MOK_RENDER_FNS[def.id];
+      if (typeof fn === 'function') { try { fn(); } catch (err) { console.warn('[tools] render error', def.id, err); } }
+    });
+  }
+  function buildPanel1(arr) {
+    var container = document.querySelector('#toolsPanel .tools-header .tools-header-buttons');
+    if (!container) return;
+    var ref = document.getElementById('openToolsPanel2') || document.getElementById('toolsMoreBtn') || document.getElementById('toggleToolsPanel');
+    arr.forEach(function (def) {
+      if ((def.panel || 1) !== 1) return;
+      if (def.type === 'action') return;
+      if (SKIP_IDS[def.id]) return;
+      var btn = container.querySelector('button[data-tool="' + def.id + '"]');
+      if (!btn) { btn = document.createElement('button'); btn.setAttribute('data-tool', def.id); bindNew(btn, def); }
+      btn.innerHTML = (def.icon ? def.icon + ' ' : '') + (def.label || def.id);
+      if (def.label) btn.title = def.label;
+      applyAdmin(btn, def);
+      if (ref) container.insertBefore(btn, ref); else container.appendChild(btn);
+    });
+  }
+  function loadToolsJson() {
+    return fetch('/static/tools.json', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (data) {
+      var arr = (data && data.tools) ? data.tools : [];
+      window.__MOK_TOOL_DEFS = {};
+      window.__MOK_IFRAME_TOOLS = window.__MOK_IFRAME_TOOLS || {};
+      arr.forEach(function (t) {
+        window.__MOK_TOOL_DEFS[t.id] = t;
+        if (t.type === 'iframe' && t.page) window.__MOK_IFRAME_TOOLS[t.id] = t.page;
+      });
+      buildPanel1(arr);
+      if (typeof updateToolsHeaderOverflow === 'function') { try { updateToolsHeaderOverflow(); } catch (e) {} }
+      if (typeof window.MOK_refreshAdmin === 'function') { try { window.MOK_refreshAdmin(); } catch (e) {} }
+      console.log('[tools.json] 工具列已套用，共 ' + arr.length + ' 項');
+      return arr;
+    }).catch(function (err) { console.warn('[tools.json] load failed:', err); });
+  }
+  window.MOK_reloadTools = loadToolsJson;
+  if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', loadToolsJson); } else { loadToolsJson(); }
+})();
+
+/* ===== 春 2026-09-27 (A案)：HTML 程式碼區塊「👁 預覽」按鈕（純前端，不落地、不經後端） ===== */
+(function () {
+  if (window.__mokHtmlPreviewInit) return;
+  window.__mokHtmlPreviewInit = true;
+
+  function looksLikeHtml(s) {
+    if (!s) return false;
+    var t = String(s).trim().toLowerCase();
+    if (!t) return false;
+    if (t.indexOf("<!doctype") === 0) return true;
+    if (t.indexOf("<html") === 0) return true;
+    if (t.indexOf("<body") === 0) return true;
+    if (t.indexOf("<svg") === 0) return true;
+    if (t.indexOf("<div") === 0) return true;
+    if (t.indexOf("<") === 0 && /<\/(html|body|head|div|svg|p|section|header|footer|main|button|table|ul|ol|li|form|canvas|script|style|h1|h2|h3)>/i.test(t)) return true;
+    return false;
+  }
+
+  function ensureModal() {
+    var m = document.getElementById("htmlPreviewModal");
+    if (!m) {
+      m = document.createElement("div");
+      m.id = "htmlPreviewModal";
+      m.style.cssText = "display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:99999;flex-direction:column;";
+      m.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#252526;border-bottom:1px solid #3e3e42;color:#ddd;flex:0 0 auto;">'
+        + '<span data-pv="title" style="flex:1;font-size:0.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">HTML 預覽</span>'
+        + '<button type="button" data-pv="newtab" style="background:#4ec9b0;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;">↗ 新分頁</button>'
+        + '<button type="button" data-pv="close" style="background:#444;color:#eee;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;">✕ 關閉</button>'
+        + '</div>'
+        + '<iframe data-pv="frame" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox" style="flex:1 1 auto;width:100%;border:none;background:#fff;"></iframe>';
+      document.body.appendChild(m);
+    }
+    if (!m.__mokBound) {
+      m.__mokBound = true;
+      m.addEventListener("click", function (e) {
+        var t = e.target;
+        var act = t && t.getAttribute ? t.getAttribute("data-pv") : null;
+        if (act === "close") { closePreview(); }
+        else if (act === "newtab") {
+          try {
+            var f = m.querySelector('iframe[data-pv="frame"]');
+            var code = (f && f.__mokCode) || "";
+            var blob = new Blob([code], { type: "text/html" });
+            var u = URL.createObjectURL(blob);
+            window.open(u, "_blank");
+            setTimeout(function () { URL.revokeObjectURL(u); }, 60000);
+          } catch (err) {}
+        } else if (t === m) { closePreview(); }
+      });
+      document.addEventListener("keydown", function (e) { if (e.key === "Escape") closePreview(); });
+    }
+    return m;
+  }
+
+  function openPreview(code, title) {
+    var m = ensureModal();
+    var f = m.querySelector('iframe[data-pv="frame"]');
+    var ttl = m.querySelector('[data-pv="title"]');
+    if (ttl) ttl.textContent = title || "HTML 預覽";
+    f.__mokCode = code || "";
+    f.srcdoc = code || "";
+    m.style.display = "flex";
+  }
+  function closePreview() {
+    var m = document.getElementById("htmlPreviewModal");
+    if (!m) return;
+    m.style.display = "none";
+    var f = m.querySelector('iframe[data-pv="frame"]');
+    if (f) { f.srcdoc = ""; f.__mokCode = ""; }
+  }
+  window.openHtmlPreview = openPreview;
+
+  function enhance(pre) {
+    try {
+      if (!pre || pre.nodeType !== 1) return;
+      if (pre.getAttribute("data-mokpv") === "1") return;
+      if (pre.closest && pre.closest(".think-container")) return;
+      var code = pre.querySelector("code") || pre;
+      var cls = (code.className || "") + " " + (pre.className || "");
+      var isHtml = /language-(html|htm|svg|xml)/i.test(cls) || looksLikeHtml(code.textContent);
+      if (!isHtml) return;
+      pre.setAttribute("data-mokpv", "1");
+
+      var host = pre.parentNode;
+      if (!host || !host.style || host.style.position !== "relative") {
+        var wrap = document.createElement("div");
+        wrap.style.position = "relative";
+        wrap.style.overflow = "visible";
+        pre.parentNode.insertBefore(wrap, pre);
+        wrap.appendChild(pre);
+        host = wrap;
+      }
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-mokpv", "1");
+      btn.textContent = "👁 預覽";
+      btn.style.cssText = "position:absolute;top:6px;left:6px;background:#e0a800;color:#1a1a1a;border:none;border-radius:6px;padding:8px 12px;font-size:0.85rem;font-weight:bold;cursor:pointer;opacity:0.95;z-index:5;touch-action:manipulation;";
+      btn.addEventListener("click", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        var c = pre.querySelector("code") || pre;
+        openPreview(c.textContent || "", "HTML 預覽");
+      });
+      host.appendChild(btn);
+    } catch (err) {}
+  }
+
+  function scan(node) {
+    try {
+      if (!node || node.nodeType !== 1) return;
+      if (node.matches && node.matches("pre")) enhance(node);
+      if (node.querySelectorAll) {
+        var pres = node.querySelectorAll("pre");
+        for (var i = 0; i < pres.length; i++) enhance(pres[i]);
+      }
+    } catch (err) {}
+  }
+
+  function boot() {
+    scan(document.body);
+    try {
+      var mo = new MutationObserver(function (muts) {
+        for (var i = 0; i < muts.length; i++) {
+          var a = muts[i].addedNodes;
+          for (var j = 0; j < a.length; j++) scan(a[j]);
+        }
+      });
+      mo.observe(document.body, { childList: true, subtree: true });
+    } catch (err) {}
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+
+    // ===== 快捷問題列：每 agent 3 條，點擊即插入輸入框（不送出） by 病毒引擎 20261001 =====
+    let _quickQMap = null, _quickQLoading = false;
+    function _loadQuickQuestions() {
+        if (_quickQMap) return Promise.resolve(_quickQMap);
+        if (_quickQLoading) return Promise.resolve(_quickQMap || {});
+        _quickQLoading = true;
+        return fetch("/static/quick_questions.json?v=" + Date.now(), { credentials: "same-origin" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { _quickQMap = d || {}; _quickQLoading = false; return _quickQMap; })
+            .catch(function () { _quickQMap = {}; _quickQLoading = false; return _quickQMap; });
+    }
+    function renderQuickQuestions(agentName, _retry) {
+        var bar = document.getElementById("quickQuestionsBar");
+        if (!bar) { if ((_retry || 0) < 8) setTimeout(function () { renderQuickQuestions(agentName, (_retry || 0) + 1); }, 300); return; }
+        _loadQuickQuestions().then(function (map) {
+            map = map || {};
+            var list = (map.agents && map.agents[agentName]) || map["default"] || [];
+            list = (list || []).filter(function (q) { return q && String(q).trim(); }).slice(0, 6);
+            bar.innerHTML = "";
+            if (!list.length) { bar.style.display = "none"; return; }
+            var lead = document.createElement("span");
+            lead.className = "qq-lead";
+            lead.textContent = "💡";
+            bar.appendChild(lead);
+            list.forEach(function (q) {
+                var b = document.createElement("button");
+                b.type = "button";
+                b.className = "qq-chip";
+                b.textContent = q;
+                b.title = "快捷問題：點擊＝插入輸入框（" + q + "）";
+                b.addEventListener("click", function (e) {
+                    e.stopPropagation();
+                    try { insertQuoteToken(q, "快捷問題"); } catch (err) { console.warn(err); }
+                });
+                bar.appendChild(b);
+            });
+            bar.style.display = "";
+        });
+    }
+    window.MOK_renderQuickQuestions = renderQuickQuestions;
+    // 🔧20261001：activateAgent() 在 IIFE 外呼叫不到 renderQuickQuestions，改由 agent_switched 事件驅動，確保點側欄切 agent 時快捷問題列即時更新
+    try { window.addEventListener("agent_switched", function (ev) { try { renderQuickQuestions(ev && ev.detail && ev.detail.agent); } catch (e) {} }); } catch (e) {}
+
+    (function _qqInit(){
+        function _kick(){ try { renderQuickQuestions((typeof currentAgent !== "undefined" && currentAgent) ? currentAgent : null); } catch (e) {} }
+        if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(_kick, 400); });
+        else setTimeout(_kick, 400);
+        window.addEventListener("load", function () { setTimeout(_kick, 900); });
+    })();
+})();
+
+/* ===== 工具鍵等級權限閘 v1 by 凜 2026-10-01 =====
+   資料來源：/static/tools_perm.json（後台設定頁 /admin/tools）
+   作用：非 admin 依身分等級（guest / free / pro / vip）決定右側面板
+        （.tools-header-buttons、#toolsMoreDropdown）各鍵是否顯示。
+        admin 一律全開，本模組不介入 admin 既有邏輯。
+   與 index.html 內的既有「機密閘」並存：本模組是最後一層，
+   矩陣內列出的鍵一律以矩陣為準（可覆蓋既有白名單造成的隱藏）。
+   注意：隱藏一律使用 mok-hidden class，
+        這樣 updateToolsHeaderOverflow 的 ⋯ 溢位邏輯才會忽略這些鍵（不會漏進下拉）。
+*/
+(function () {
+  if (window.__MOK_UI_PERM_LOADED__) return;
+  window.__MOK_UI_PERM_LOADED__ = 1;
+
+  var LEVELS = ['guest', 'free', 'pro', 'vip'];
+  var HIDE = 'mok-hidden';
+  var MARK = 'data-mok-perm';
+  var CONTAINERS = '#toolsPanel .tools-header-buttons, #toolsPanel2 .tools-header-buttons, #toolsMoreDropdown';
+
+  var PERM = null;
+  var LEVEL = 'guest';
+  var IS_ADMIN = false;
+  var READY = false;
+  var _applying = false;
+
+  function keyOf(b) {
+    if (!b || b.tagName !== 'BUTTON') return '';
+    return b.getAttribute('data-tool') || b.id || '';
+  }
+  function applyOnce() {
+    if (!READY || IS_ADMIN || !PERM || _applying) return;
+    _applying = true;
+    try {
+      var _pv = PERM['__panel__'];
+      if (_pv) {
+        var _tp = document.getElementById('toolsPanel');
+        if (_tp) {
+          if (_pv[LEVEL]) { _tp.classList.remove(HIDE); }
+          else { _tp.classList.add(HIDE); }
+        }
+      }
+      var boxes = document.querySelectorAll(CONTAINERS);
+      for (var c = 0; c < boxes.length; c++) {
+        var btns = boxes[c].getElementsByTagName('button');
+        for (var i = 0; i < btns.length; i++) {
+          var btn = btns[i];
+          var key = keyOf(btn);
+          if (!key) continue;
+          var p = PERM[key];
+          if (!p) continue;
+          var allowed = !!p[LEVEL];
+          if (allowed) {
+            if (btn.classList.contains(HIDE) || btn.classList.contains('mok-mh') || btn.hasAttribute(MARK)) {
+              btn.classList.remove(HIDE);
+              btn.classList.remove('mok-mh');
+              btn.setAttribute(MARK, '1');
+            }
+          } else {
+            if (!btn.classList.contains(HIDE) || !btn.hasAttribute(MARK)) {
+              btn.classList.add(HIDE);
+              btn.setAttribute(MARK, LEVEL);
+            }
+          }
+        }
+      }
+    } catch (e) {
+    } finally { _applying = false; }
+  }
+
+  var _t = null;
+  function schedule(d) {
+    if (_t) clearTimeout(_t);
+    _t = setTimeout(function () { _t = null; applyOnce(); }, (typeof d === 'number') ? d : 150);
+  }
+  function identity() {
+    return fetch('/api/whoami', { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        d = d || {};
+        IS_ADMIN = !!d.is_admin;
+        var role = d.logged_in ? (d.role || d.plan || 'free') : 'guest';
+        if (role === 'anon' || role === 'guest' || !role) role = 'guest';
+        if (LEVELS.indexOf(role) >= 0) LEVEL = role;
+        else LEVEL = d.logged_in ? 'free' : 'guest';
+      })
+      .catch(function () { LEVEL = 'guest'; });
+  }
+
+  function loadPerm() {
+    return fetch('/static/tools_perm.json?t=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (doc) { if (doc && doc.perms) PERM = doc.perms; })
+      .catch(function () {});
+  }
+  function boot() {
+    Promise.all([loadPerm(), identity()]).then(function () {
+      if (!PERM) return;
+      READY = true;
+      applyOnce();
+      [200, 600, 1200, 2500, 5000, 9000].forEach(function (n) { setTimeout(applyOnce, n); });
+      if (!IS_ADMIN) {
+        try {
+          var mo = new MutationObserver(function () { schedule(120); });
+          var ids = ['toolsPanel', 'toolsPanel2'];
+          ids.forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) mo.observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+          });
+          window.__MOK_UI_PERM_MO = mo;
+        } catch (e) {}
+        window.addEventListener('resize', function () { schedule(180); });
+        document.addEventListener('click', function (e) {
+          var t = e.target;
+          if (t && t.closest && t.closest('#toolsMoreBtn, #openToolsPanel2, #toggleToolsPanel')) schedule(200);
+        }, true);
+      }
+    });
+  }
+  window.MOK_APPLY_TOOLPERM = applyOnce;
+  window.MOK_UI_PERM_INFO = function () {
+    return { level: LEVEL, is_admin: IS_ADMIN, ready: READY, keys: PERM ? Object.keys(PERM).length : 0 };
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+
+/* ===== 頂端會員 Token 能量條 · idx 2026-10-09 (HK) =====
+   資料源＝ /api/member/header（與 headerTokenBalance 同一支 API，多租戶各會員各自算）。
+   寬度＝Token 剩餘額度百分比；高度/顏色/閃爍＝健康度分級。
+   邊界：無限方案（admin）＝滿格綠；無有效額度資訊＝隱藏。純顯示層，不攔點擊、不改既有流程。 */
+(function () {
+    var BAR_ID = 'tokenEnergyBar', FILL_ID = 'tokenEnergyFill';
+    var LEVELS = [[0.8, 'lv-ok'], [0.5, 'lv-warn'], [0.1, 'lv-mid']];   // 由上而下比對，皆未達＝lv-low（<10%）
+    var bar = null, fill = null, last = null;
+
+    // 剩餘比例（口徑＝會員中心「本月已用」）：剩餘 = 本月額度 − 本月已用。
+    // idx 2026-10-08 1927 (HK) 修正：舊版拿 d.remaining（＝balance_tokens 充值餘額）除以 monthly_quota，
+    // 付費會員的餘額常大於月額度（例 a01：2,418,986 / 2,000,000）→ 永遠被 clamp 成 100%，
+    // 於是頂端能量條「不跟 % 減」，與會員中心的 80% 對不上。改用同一個口徑即可對齊。
+    // 無限方案回 1（滿格）；無有效額度資訊回 null（隱藏）。
+    function ratioOf(d) {
+        if (!d || d.success === false) return null;
+        if (d.unlimited) return 1;
+        var q = Number(d.monthly_quota != null ? d.monthly_quota : d.quota);
+        if (!isFinite(q) || q <= 0) return null;
+        var used = Number(d.used || 0);
+        if (!isFinite(used) || used < 0) used = 0;
+        return Math.max(0, Math.min(1, (q - used) / q));
+    }
+    function render(r) {
+        if (r == null) { bar.classList.remove('is-on'); return; }
+        var pct = Math.round(r * 100), lv = 'lv-low', i;
+        for (i = 0; i < LEVELS.length; i++) { if (r >= LEVELS[i][0]) { lv = LEVELS[i][1]; break; } }
+        bar.classList.remove('lv-ok', 'lv-warn', 'lv-mid', 'lv-low');
+        bar.classList.add('is-on', lv);
+        // idx 2026-10-08 1927 (HK)：由左右兩端同時向中間收縮，色塊永遠置中。
+        //   兩端各留 (100−pct)/2 %：100% → 左右各 0% 貼齊畫面兩邊；10% → 中間 10% 長、左右各 45% 留白。
+        var inset = (100 - pct) / 2;
+        fill.style.left = inset + '%';
+        fill.style.right = inset + '%';
+        fill.title = 'Token 剩餘 ' + pct + '%　· 點擊前往充值';
+    }
+    function tick() {
+        fetch('/api/member/header', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var r = ratioOf(d), key = (r == null) ? 'off' : String(Math.round(r * 1000));
+                if (key === last) return;
+                last = key;
+                render(r);
+            })
+            .catch(function () {});
+    }
+    function start() {
+        bar = document.getElementById(BAR_ID);
+        fill = document.getElementById(FILL_ID);
+        if (!bar || !fill) return;
+        // ★ idx 2026-10-09 (HK)：點血條 → 充值頁（沿用會員浮動面板，保留對話不跳頁）
+        fill.setAttribute('role', 'button');
+        fill.setAttribute('tabindex', '0');
+        fill.setAttribute('aria-label', '前往充值');
+        var goRecharge = function () {
+            if (window.MOK_openMemberPanel) window.MOK_openMemberPanel('/recharge');
+            else location.href = '/recharge';
+        };
+        fill.addEventListener('click', goRecharge);
+        fill.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goRecharge(); } });
+        tick();
+        setInterval(tick, 30000);                                        // 每 30 秒與後端對齊
+        document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+})();
+  } else {
+    boot();
+  }
 })();

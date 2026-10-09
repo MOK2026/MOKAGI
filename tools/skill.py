@@ -14,7 +14,7 @@ PLUGIN_INFO = {
     ],
     "tool_schema": {
         "name": "skill",
-        "description": "管理技能文件系統。每個技能一個資料夾，技能說明為 .mok/skill/<技能名>/README.md。支援五個動作：list, view, search, create, delete。",
+        "description": "管理技能文件系統（.mok/skill/<技能名>/README.md）。\n【何時用】① 系統提示的「技能索引」有命中 → 直接 skill view <name> outline；② 索引沒命中、find() 也沒結果 → skill search <關鍵詞>；③ 要新建技能 → create / delete。\n【何時不用】已知有哪個技能就直接 view，不要一輪輪 list 亂翻；技能正文很長，不要一開始就 full。\n【漸進披露】先 outline 看大綱 → section N 只讀需要的那節 → 真的必要才 full。\n【例子】skill view pollinations outline / skill view pollinations section 3。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -34,6 +34,15 @@ PLUGIN_INFO = {
                 "content": {
                     "type": "string",
                     "description": "技能文件內容（用於 create）。支援 Markdown 格式。"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["outline", "section", "full"],
+                    "description": "view 的模式：outline=只回標題大綱（最快，預設先用這個）, section=只回某一節, full=整份 README（很長，非必要不用）"
+                },
+                "section": {
+                    "type": "integer",
+                    "description": "view + mode=section 時的節號（先 outline 看有哪幾節）"
                 }
             },
             "required": ["action"]
@@ -71,11 +80,49 @@ def _list_skills():
             skills.append({"name": entry, "legacy": True, "size": os.path.getsize(path)})
     if not skills:
         return json.dumps({"skills": [], "message": "技能目錄為空", "dir": SKILL_DIR}, ensure_ascii=False)
+    # P0：補上 description / triggers（取自 ~/.mok/skill/_index.json），失敗不影響主流程
+    try:
+        import skill_index as _si
+        dmap = {x.get("name"): x for x in _si.load_index().get("skills", [])}
+        for info in skills:
+            x = dmap.get(info.get("name")) or {}
+            if x.get("description"):
+                info["description"] = x["description"]
+            if x.get("triggers"):
+                info["triggers"] = x["triggers"]
+            if x.get("stub"):
+                info["stub"] = True
+    except Exception as e:
+        import logging
+        logging.warning("skill list 補 description 失敗: %s" % e)
     return json.dumps({"skills": skills, "dir": SKILL_DIR, "total": len(skills)}, ensure_ascii=False)
 
-def _view_skill(filename):
+def _parse_view_arg(rest):
+    """把 'pollinations outline' / 'pollinations section 3' 拆成 (name, mode, section)。"""
+    rest = (rest or "").strip()
+    mode, section = "full", None
+    if not rest:
+        return "", mode, section
+    parts = rest.split()
+    low = parts[-1].lower()
+    if low in ("outline", "full"):
+        mode = low
+        parts = parts[:-1]
+    elif len(parts) >= 2 and parts[0].lower() == "section":
+        mode, section, parts = "section", parts[1], parts[2:]
+    elif len(parts) >= 3 and parts[-2].lower() == "section":
+        mode, section, parts = "section", parts[-1], parts[:-2]
+    return " ".join(parts), mode, section
+
+
+def _view_skill(filename, mode="full", section=None):
+    with __import__("contextlib").suppress(Exception): __import__("route_feedback").record_use(str(filename).strip().split(" ")[0].replace(".md", ""))
     if not filename:
         return json.dumps({"error": "缺少技能名稱"})
+    if mode == "full":
+        nm, md, sec = _parse_view_arg(filename)
+        if md != "full":
+            filename, mode, section = nm, md, sec
     name, d = _skill_dir(filename)
     path = os.path.join(d, "README.md")
     if not os.path.isdir(d) or not os.path.isfile(path):
@@ -84,6 +131,20 @@ def _view_skill(filename):
             path = legacy
         else:
             return json.dumps({"error": f"技能不存在: {name}（應為 {name}/README.md）"})
+    mode = (mode or "full").lower()
+    if mode in ("outline", "section"):
+        try:
+            import skill_index as _si
+            if mode == "outline":
+                return _si.outline_str(name)
+            try:
+                secn = int(section) if section is not None else 1
+            except Exception:
+                secn = 1
+            return _si.section_str(name, secn)
+        except Exception as e:
+            import logging
+            logging.warning("skill_index 不可用，退回全文: %s" % e)
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -167,7 +228,8 @@ async def handle_skill(args, mode="command", user_id=None, agent_name=None, **kw
         if action == "list":
             return _list_skills()
         elif action == "view":
-            return _view_skill(rest)
+            nm, md, sec = _parse_view_arg(rest)
+            return _view_skill(nm, md, sec)
         elif action == "search":
             return _search_skills(rest)
         elif action == "create":
@@ -179,7 +241,9 @@ async def handle_skill(args, mode="command", user_id=None, agent_name=None, **kw
     if action == "list":
         return _list_skills()
     elif action == "view":
-        return _view_skill(filename)
+        return _view_skill(filename,
+                           args.get("mode", "full") if isinstance(args, dict) else "full",
+                           args.get("section") if isinstance(args, dict) else None)
     elif action == "search":
         return _search_skills(query)
     elif action == "create":

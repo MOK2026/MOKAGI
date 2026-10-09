@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>右側工具鍵權限設定｜MOKAGI Admin</title>
+<style>
+:root{--bg:#0b0e1c;--panel:#171b2e;--line:#262c48;--txt:#e8e8f0;--dim:#8b90a5;--acc:#7aa2ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:22px 16px 80px}
+h1{font-size:22px;margin:0 0 4px}
+.sub{color:var(--dim);font-size:13px;margin-bottom:16px;line-height:1.7}
+.nav{display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:#141a29;border:1px solid #27324a;border-radius:14px;padding:10px 14px;margin-bottom:16px;font-size:13px}
+.nav a{color:#a9bcff;text-decoration:none;padding:4px 10px;border-radius:8px}
+.nav a:hover{background:#1b2438;color:#fff}
+.nav .sp{flex:1}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:14px;position:sticky;top:0;z-index:20}
+button{cursor:pointer;border:1px solid #2a3050;background:#101528;color:var(--txt);border-radius:9px;padding:8px 12px;font-size:13px}
+button:hover{background:#1b2438}
+button.primary{background:#1e3a8a;border-color:#2f4fa8;color:#fff;font-weight:600}
+button.ghost{background:transparent}
+.msg{margin-left:auto;font-size:13px}
+.msg.ok{color:#9ae6b4}.msg.err{color:#ffb3c1}
+table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+th,td{padding:9px 10px;border-bottom:1px solid #20263f;font-size:13px;text-align:left;vertical-align:middle}
+th{background:#141a29;color:#cdd3e8;font-weight:600;white-space:nowrap;position:sticky;top:64px;z-index:10}
+th.lv{text-align:center;width:96px}
+td.lv{text-align:center}
+tr:hover td{background:#1a2036}
+.k{font-weight:600;white-space:nowrap}
+.k .ic{font-size:16px;margin-right:5px}
+.d{color:#9aa0b8;font-size:12px;line-height:1.5}
+.tag{display:inline-block;font-size:10px;padding:1px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
+.tag.adm{background:#581c87;color:#e9d5ff}
+.tag.p2{background:#1e3a8a;color:#93c5fd}
+.tag.keep{background:#14532d;color:#bbf7d0}
+input[type=checkbox]{width:18px;height:18px;accent-color:#5b8def;cursor:pointer}
+.lock{color:#6b7280;font-size:16px}
+.colh{display:flex;flex-direction:column;gap:4px;align-items:center}
+.colh button{padding:2px 6px;font-size:11px;border-radius:6px}
+.gate{display:none;background:#3b1220;border:1px solid #7f1d3a;color:#ffd7e0;padding:16px;border-radius:12px;font-size:14px}
+.hint{color:var(--dim);font-size:12px;margin:10px 0 0;line-height:1.7}
+code{background:#101528;border:1px solid #2a3050;border-radius:6px;padding:1px 6px;font-size:12px}
+
+/* ===== 手機版響應式 by 春 2026-10-02 ===== */
+@media (max-width:680px){
+  .wrap{padding:14px 12px 96px}
+  h1{font-size:19px}
+  .sub{font-size:12.5px;margin-bottom:12px}
+  /* 手機版：導航與工具列單行橫向滑動，不再換行吃高度 by 春 2026-10-05 */
+  .nav{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:4px;padding:7px 10px;border-radius:10px;margin-bottom:8px;font-size:12.5px;line-height:1.2;white-space:nowrap}
+  .nav::-webkit-scrollbar{display:none}
+  .nav a{padding:3px 6px;flex:0 0 auto}
+  .nav .sp{display:none}
+  .bar{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:6px;padding:7px 8px;border-radius:10px;margin-bottom:10px;align-items:center}
+  .bar::-webkit-scrollbar{display:none}
+  .bar button{width:auto;flex:0 0 auto;margin:0;padding:7px 10px;font-size:12.5px;white-space:nowrap;border-radius:8px}
+  .msg{flex:0 0 auto;margin:0;text-align:left;font-size:12px;white-space:nowrap}
+  .msg:not(:empty){position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:999;max-width:88vw;padding:9px 16px;border-radius:999px;background:#1e3a8a;border:1px solid #2f4fa8;color:#eaf0ff;text-align:center}
+  .msg.ok:not(:empty){background:#14532d;border-color:#166534;color:#bbf7d0}
+  .msg.err:not(:empty){background:#4c1120;border-color:#7f1d3a;color:#ffd7e0}
+  table{display:block;border:0;background:transparent;overflow:visible}
+  thead{display:none}
+  tbody{display:block}
+  tr{display:grid;grid-template-columns:1fr 1fr;gap:8px;
+      background:var(--panel);border:1px solid var(--line);border-radius:14px;
+      padding:12px;margin:0 0 12px}
+  td{border:0;padding:0;font-size:13px}
+  tr>td:first-child{grid-column:1 / -1;border-bottom:1px dashed #2a3050;
+      padding-bottom:9px;margin-bottom:2px}
+  td .k{white-space:normal;line-height:1.5;font-size:14.5px}
+  td .d{margin-top:5px;font-size:12.5px}
+  td.lv{display:flex;align-items:center;justify-content:space-between;gap:8px;
+      background:#101528;border:1px solid #2a3050;border-radius:10px;
+      padding:10px 12px;text-align:left}
+  td.lv::before{font-size:13px;color:#c3cade;font-weight:600;white-space:nowrap}
+  td.lv[data-lv="guest"]::before{content:"👤 訪客"}
+  td.lv[data-lv="free"]::before{content:"free 免費"}
+  td.lv[data-lv="pro"]::before{content:"pro 進階"}
+  td.lv[data-lv="vip"]::before{content:"vip 尊榮"}
+  td.lv[data-lv="admin"]::before{content:"admin 管理"}
+  td.lv[data-lv="admin"]{background:#1a1230;border-color:#3b2a5a;justify-content:space-between}
+  td.lv[data-lv="admin"] .lock{font-size:12px}
+  input[type=checkbox]{width:26px;height:26px;flex:0 0 auto}
+  .hint{font-size:12px}
+}
+
+/* ===== 頁面白名單一致性提示 by 凜 2026-10-03 ===== */
+.pp{margin-top:7px;font-size:12px;color:#9aa0b8;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pp code{background:#0d1220;border:1px solid #2a3050;border-radius:6px;padding:1px 6px;color:#cdd3e8}
+.pgb{display:inline-block;font-size:11px;padding:1px 8px;border-radius:20px;border:1px solid #2a3050;background:#161a2b;color:#8891a8;white-space:nowrap}
+.pgb.ok{background:#0f2e1c;color:#86efac;border-color:#1e5b38}
+.pgb.no{background:#2a1620;color:#fda4af;border-color:#5b2536}
+.pgb.na{background:#141826;color:#7c879e;border-color:#232a44}
+.warnsum{font-size:12px;margin-left:8px}
+.warnsum.ok{color:#86efac}.warnsum.bad{color:#fca5a5;font-weight:600}
+td.lv.warn{background:#3a2410!important;box-shadow:inset 0 0 0 1.5px #b45309;border-radius:8px}
+.warnmark{color:#fbbf24;font-size:13px;margin-left:5px;font-weight:700}
+@media (max-width:680px){
+  .pp{font-size:11.5px;gap:5px}
+  .pgb{font-size:10.5px;padding:1px 6px}
+  .warnsum{width:auto;flex:0 0 auto;white-space:nowrap;font-size:11.5px;margin:0;text-align:left}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🧩 右側工具鍵權限設定</h1>
+  <div class="sub">調整 index.html 右側面板（<code>class="tools-header"</code>）與 <code>#toolsMoreDropdown</code> 每個鍵，各會員等級可否使用。<br>
+  資料檔：<code>/static/tools_perm.json</code>（改完立即生效，前端重新整理即套用；<b>admin 一律全開</b>）。</div>
+
+  <div class="gate" id="gate">⛔ 只有管理員（admin）可以編輯此頁。請先以 admin 登入。</div>
+
+  <div id="main" style="display:none">
+    <div class="nav">
+      <a href="/admin/member">← Admin 會員管理後台</a>｜
+      <a href="/admin/plans">方案設定</a>｜
+      <a href="/member">會員中心</a>｜
+      <a href="/">聊天首頁</a><span class="sp"></span>
+      <span style="color:#8b90a5">工具鍵權限</span>
+    </div>
+
+    <div class="bar">
+      <button class="primary" id="btnSave">💾 儲存</button>
+      <button id="btnReload">↻ 重新載入</button>
+      <button id="btnAll">✅ 全部開放</button>
+      <button id="btnNone">🚫 全部關閉</button>
+      <span class="warnsum" id="warnsum"></span>
+      <span class="msg" id="msg"></span>
+    </div>
+
+    <table id="tbl">
+      <thead><tr>
+        <th>鍵 / 功能</th>
+        <th class="lv">訪客<br><span style="font-weight:400;color:#8b90a5">未登入</span></th>
+        <th class="lv">free</th>
+        <th class="lv">pro</th>
+        <th class="lv">vip</th>
+        <th class="lv">admin</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <p class="hint">
+      • 「已開啟」只影響<b>前端顯示與可操作性</b>；後端仍以各 API 自身的權限為主（例如 admin-only 端點仍會擋非 admin）。<br>
+      • 標記 <span class="tag keep">建議恆開</span> 的鍵（如 <code>⋯ 更多</code>）關掉後，窄版面被折疊的鍵會打不開。<br>
+      • 儲存走既有 <code>/api/create_file</code>（僅管理員可寫），不需重啟後端。<br>
+      • <b>對應頁面／pages 放行</b>：每列顯示該鍵開啟的站內頁路徑，以及訪客/free/pro/vip 的「可瀏覽頁面」白名單是否含此頁（資料源 <code>/static/plans_pages.json</code>）。<b>工具已開、白名單未含</b>時該格標 <span class="warnmark">⚠</span> 供人工校正。
+      • <span class="warnmark">⚠</span> 僅依「白名單是否明列」比對，供人工校正；實際是否被擋以後端 <code>_path_allowed</code> 為準（現行白名單含 <code>/index.html</code>，其同層展開會讓多數路徑實務上仍放行）。
+    </p>
+  </div>
+</div>
+
+<script>
+(function(){
+  var LEVELS=["guest","free","pro","vip"];
+  var PATH=".mok/html/static/tools_perm.json";
+  var DOC=null;
+  function $(id){return document.getElementById(id)}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+  function msg(t,ok){var m=$("msg");m.textContent=t;m.className="msg "+(ok?"ok":"err");if(t){setTimeout(function(){if(m.textContent===t){m.textContent="";}},4000);}}
+
+  function rows(){ return DOC.keys || []; }
+
+  /* ===== 頁面白名單一致性提示 by 凜 2026-10-03 ===== */
+  var PLANS={};
+  var LVSHORT={guest:"訪客",free:"free",pro:"pro",vip:"vip",admin:"admin"};
+  var EXEMPT=["/api/","/static","/login","/register","/logout","/admin/","/plans","/member","/favicon"];
+  function normPage(p){
+    p=String(p==null?"":p).trim().split("?")[0].split("#")[0];
+    if(!p) return "";
+    return "/"+p.replace(/^\/+/,"");
+  }
+  function isExempt(page){
+    if(!page) return true;
+    var low=String(page).toLowerCase();
+    for(var i=0;i<EXEMPT.length;i++){ if(low.indexOf(EXEMPT[i])===0) return true; }
+    return false;
+  }
+  function levelPages(lv){ return ((PLANS.levels||{})[lv])||null; }
+  function covered(page,pages){
+    if(pages && pages.indexOf("*")>=0) return true;
+    if(!pages || !pages.length) return false;
+    var np=normPage(page); if(!np) return false;
+    for(var i=0;i<pages.length;i++){
+      var e=normPage(pages[i]); if(!e||e==="/") continue;
+      if(np===e) return true;
+      if(np===(e.charAt(e.length-1)==="/"?e:e+"/")) return true;
+      if(e.charAt(e.length-1)==="/" && (np+"/"===e || np.indexOf(e)===0)) return true;
+    }
+    return false;
+  }
+  function pageState(page,lv){
+    if(!page) return "na";
+    if(lv==="admin") return "ok";
+    if(isExempt(page)) return "na";
+    return covered(page,levelPages(lv)) ? "ok" : "no";
+  }
+  function ppLine(k){
+    if(!k.page) return '<div class="pp"><span class="pgb na">非站內頁／純前端面板，不受 pages 白名單管</span></div>';
+    var h='<div class="pp"><span>🔗 對應頁面 <code>'+esc(k.page)+'</code></span>';
+    LEVELS.forEach(function(lv){
+      var st=pageState(k.page,lv);
+      var title = st==="ok" ? (LVSHORT[lv]+"：pages 白名單放行")
+                : st==="no" ? (LVSHORT[lv]+"：pages 白名單【未含】此頁")
+                : (LVSHORT[lv]+"：不受 pages 白名單管");
+      h+='<span class="pgb '+st+'" title="'+title+'">'+LVSHORT[lv]+(st==="ok"?" ✅":(st==="no"?" ⬜":" —"))+'</span>';
+    });
+    return h+'</div>';
+  }
+  function recomputeWarnings(){
+    var n=0;
+    rows().forEach(function(k){
+      if(!k.page || isExempt(k.page)) return;
+      LEVELS.forEach(function(lv){
+        var cb=box(k.key,lv); if(!cb) return;
+        var td=cb.closest("td"); if(!td) return;
+        var bad = cb.checked && !covered(k.page, levelPages(lv));
+        if(bad){
+          td.classList.add("warn");
+          if(!td.querySelector(".warnmark")) td.insertAdjacentHTML("beforeend",
+            '<span class="warnmark" title="本等級『工具鍵已開』但 pages 白名單未含此頁 → 點開可能被頁面權限閘擋">⚠</span>');
+          n++;
+        } else {
+          td.classList.remove("warn");
+          var w=td.querySelector(".warnmark"); if(w) w.parentNode.removeChild(w);
+        }
+      });
+    });
+    var s=$("warnsum");
+    if(s){
+      if(n){ s.textContent="⚠ "+n+" 處不一致（工具已開、頁面白名單未含）"; s.className="warnsum bad"; }
+      else { s.textContent="✅ 工具鍵與頁面白名單目前一致"; s.className="warnsum ok"; }
+    }
+    return n;
+  }
+
+  function render(){
+    var tb=$("tbl").querySelector("tbody"); tb.innerHTML="";
+    rows().forEach(function(k){
+      var tr=document.createElement("tr");
+      var tags="";
+      if(k.admin_only) tags+='<span class="tag adm">後台原設 admin</span>';
+      if(k.panel===2) tags+='<span class="tag p2">面板2</span>';
+      if(k.key==="toolsMoreBtn"||k.key==="agentInfoBtn") tags+='<span class="tag keep">建議恆開</span>';
+      if(k.special==="panel") tags+='<span class="tag p2">整塊面板</span>';
+      var td=document.createElement("td");
+      td.innerHTML='<div class="k"><span class="ic">'+esc(k.icon)+'</span>'+esc(k.label)+
+        ' <span style="color:#6b7280;font-size:11px">('+esc(k.key)+')</span>'+tags+'</div>'+
+        '<div class="d">'+esc(k.desc)+'</div>'+ppLine(k);
+      tr.appendChild(td);
+      LEVELS.forEach(function(lv){
+        var c=document.createElement("td"); c.className="lv"; c.dataset.lv=lv;
+        var cb=document.createElement("input"); cb.type="checkbox";
+        cb.checked=!!((DOC.perms[k.key]||{})[lv]);
+        cb.dataset.key=k.key; cb.dataset.lv=lv;
+        cb.addEventListener("change",recomputeWarnings);
+        c.appendChild(cb); tr.appendChild(c);
+      });
+      var c2=document.createElement("td"); c2.className="lv"; c2.dataset.lv="admin";
+      c2.innerHTML='<span class="lock" title="admin 一律全開">🔒 全開</span>';
+      tr.appendChild(c2);
+      tb.appendChild(tr);
+    });
+  }
+
+  function box(key,lv){
+    return $("tbl").querySelector('input[type=checkbox][data-key="'+CSS.escape(key)+'"][data-lv="'+lv+'"]');
+  }
+  function collect(){
+    rows().forEach(function(k){
+      DOC.perms[k.key]=DOC.perms[k.key]||{};
+      LEVELS.forEach(function(lv){ var b=box(k.key,lv); if(b) DOC.perms[k.key][lv]=b.checked?1:0; });
+    });
+  }
+  function setAll(v,onlyLevels){
+    rows().forEach(function(k){
+      (onlyLevels||LEVELS).forEach(function(lv){ var b=box(k.key,lv); if(b) b.checked=v; });
+    });
+  }
+  function copyLevel(from,to){
+    rows().forEach(function(k){
+      var b1=box(k.key,from),b2=box(k.key,to);
+      if(b1&&b2) b2.checked=b1.checked;
+    });
+  }
+
+  function save(){
+    collect();
+    DOC.updated=new Date().toLocaleString("sv");
+    var content=JSON.stringify(DOC,null,2)+"\n";
+    $("btnSave").disabled=true; msg("儲存中…",true);
+    fetch("/api/create_file",{method:"POST",credentials:"same-origin",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({path:PATH,content:content})})
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+      .then(function(x){
+        $("btnSave").disabled=false;
+        if(x.j&&x.j.status==="ok"){ msg("✅ 已儲存，前端重新整理即生效",true); }
+        else { msg("❌ 儲存失敗："+((x.j&&(x.j.error||x.j.status))||("HTTP "+x.j)),false); }
+      })
+      .catch(function(e){ $("btnSave").disabled=false; msg("❌ 儲存失敗："+e,false); });
+  }
+
+  function loadPlans(cb){
+    fetch("/static/plans_pages.json?t="+Date.now(),{cache:"no-store"})
+      .then(function(r){return r.json()})
+      .then(function(d){ PLANS=d||{}; })
+      .catch(function(){ PLANS={}; })
+      .then(function(){ if(typeof cb==="function") cb(); });
+  }
+  function load(){
+    loadPlans(function(){
+      fetch("/static/tools_perm.json?t="+Date.now(),{cache:"no-store"})
+        .then(function(r){return r.json()})
+        .then(function(d){ DOC=d; if(!DOC.perms)DOC.perms={}; if(!DOC.keys)DOC.keys=[]; render(); recomputeWarnings();
+          var _u=(PLANS&&PLANS.updated)?("；頁面白名單快照 "+PLANS.updated):"";
+          msg("已載入 "+DOC.keys.length+" 個鍵"+_u,true); })
+        .catch(function(e){ msg("❌ 讀取 tools_perm.json 失敗："+e,false); });
+    });
+  }
+
+  $("btnSave").addEventListener("click",save);
+  $("btnReload").addEventListener("click",load);
+  $("btnAll").addEventListener("click",function(){setAll(true);recomputeWarnings();});
+  $("btnNone").addEventListener("click",function(){setAll(false);recomputeWarnings();});
+
+  fetch("/api/whoami",{credentials:"same-origin"}).then(function(r){return r.json()}).then(function(d){
+    if(d&&d.is_admin){ $("main").style.display="block"; load(); }
+    else { $("gate").style.display="block"; }
+  }).catch(function(){ $("gate").style.display="block"; });
+})();
+</script>
+</body>
+</html>

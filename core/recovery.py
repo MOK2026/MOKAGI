@@ -140,6 +140,7 @@ async def ask_clarification(user_text: str, agent_config: Optional[Dict] = None)
             stream=False,
             temperature=0.5,
             num_predict=2000,
+            disable_thinking=True,
             agent_config=agent_config
         )
 
@@ -147,7 +148,7 @@ async def ask_clarification(user_text: str, agent_config: Optional[Dict] = None)
         if reply.startswith("❌"):
             # 失敗時嘗試簡化 prompt
             simple_prompt = f"{owner}說：「{user_text}」。請用一句話直接問{owner}需要什麼幫助。"
-            reply2 = await mokagi.call_llm(simple_prompt, stream=False, temperature=0.3, num_predict=50, agent_config=agent_config)
+            reply2 = await mokagi.call_llm(simple_prompt, stream=False, temperature=0.3, num_predict=50, disable_thinking=True, agent_config=agent_config)
             if reply2.startswith("❌"):
                 return default_question
             reply = reply2.strip()
@@ -209,7 +210,7 @@ async def merge_and_reunderstand(user_id: str, original: str, question: str, ans
 只輸出 JSON，不要有任何解釋。"""
 
     try:
-        response = await mokagi.call_llm(prompt, stream=False, temperature=0.2, num_predict=2000, agent_config=agent_config)
+        response = await mokagi.call_llm(prompt, stream=False, temperature=0.2, num_predict=2000, disable_thinking=True, agent_config=agent_config)
         response = response.strip()
         start = response.find('{')
         end = response.rfind('}') + 1
@@ -284,7 +285,9 @@ async def handle_llm_error(error: Exception, context: dict = None, agent_config:
                 #system_prompt=agent_body,
                 stream=False,
                 temperature=0.3,
-                num_predict=100, agent_config=agent_config
+                num_predict=100,
+                disable_thinking=True,
+                agent_config=agent_config
             )
 
             return reply.strip() if reply else f"❌ 生成失敗：{error_type}"
@@ -335,7 +338,7 @@ async def naturalize_tool_result_fallback(user_text: str, tool_name: str, raw_re
 
 請用一句簡短、專業的告訴{owner}這個結果的核心信息。不要提及“根據結果”，直接說結論。"""
     try:
-        reply = await mokagi.call_llm(prompt, stream=False, temperature=0.3, num_predict=1000, agent_config=agent_config, include_soul=False)
+        reply = await mokagi.call_llm(prompt, stream=False, temperature=0.3, num_predict=1000, disable_thinking=True, agent_config=agent_config, include_soul=False)
         if reply and not reply.startswith("❌"):
             return reply.strip()
     except Exception:

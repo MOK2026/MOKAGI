@@ -33,6 +33,7 @@ CLI
 import json
 import os
 import sqlite3
+from db_conn import connect
 import sys
 import time
 import urllib.error
@@ -161,7 +162,7 @@ def db_path(maid):
 def _connect(maid):
     p = db_path(maid)
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    conn = sqlite3.connect(p, timeout=30)
+    conn = connect(p)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_SQL)
     conn.commit()
