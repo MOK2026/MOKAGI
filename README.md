@@ -180,6 +180,14 @@ MOKAGI 是一套**自託管的 AI Agent 平台**。它不是一個 bot，是一�
 
 ---
 
+## 📺 開發日常
+
+[![MOKAGI 開發日常](https://img.youtube.com/vi/k89e-dwZV7k/maxresdefault.jpg)](https://youtu.be/k89e-dwZV7k)
+
+我們把開發過程公開 —— 功能怎麼長出來、踩了哪些坑，都在影片裡。
+
+---
+
 ## 📄 授權與聯絡
 
 商業授權 / 導入咨詢請開 Issue 或來信。
