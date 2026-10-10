@@ -11,6 +11,16 @@
 ![frontends](https://img.shields.io/badge/frontends-Web%20%7C%20Telegram%20%7C%20WhatsApp-green)
 ![license](https://img.shields.io/badge/license-Commercial-lightgrey)
 
+**🌐 線上入口**
+
+| 入口 | 網址 | 說明 |
+|---|---|---|
+| 🏠 **介紹頁** | <https://64071181.xyz/> | 這是什麼、給誰用、怎麼跑起來 —— **先看這頁** |
+| 💬 **使用頁** | **<https://64071181.xyz/chat>** | **真的要聊天、要用系統，走這裡**（註冊／登入後直接對 agent 說話） |
+| 🎮 公開遊戲頁 | <https://64071181.xyz/game> | 訪客免登入就能玩 |
+
+> ⚠️ 別搞混：<https://64071181.xyz/> 只是**介紹頁**，本身不能對話；**使用頁是 <https://64071181.xyz/chat>**。
+
 > **她不是聊天機器人。** 她有人格檔、有長期記憶、有手，而且整個住進你的機器。
 > 而你不是只有一個她 —— 是一整排。
 
@@ -20,7 +30,9 @@
 
 ![MOKAGI Web Console](docs/images/web-console.png)
 
-上面這張是**主控台**（你自己的管理視角）。下面這張是**對外入口**——訪客免登入就能玩，同一個引擎換一層皮（<https://64071181.xyz/game>）：
+上面這張是**主控台**（你自己的管理視角）。下面這張是**對外入口**——訪客免登入就能玩，同一個引擎換一層皮（<https://64071181.xyz/game>）。
+
+> 🔗 **入口懶人包**：介紹頁 <https://64071181.xyz/> ｜ 使用頁（真的能聊）**<https://64071181.xyz/chat>**
 
 ![MOKAGI 公開遊戲頁（訪客視角）](docs/images/public-game.png)
 
@@ -114,7 +126,7 @@ MOKAGI 是一套**自託管的 AI Agent 平台**。它不是一個 bot，是一�
 
 | 前端 | 說明 |
 |---|---|
-| 🖥 **Web** | 瀏覽器直接聊，含 agent 清單／房間檔案檢視／工作區預覽 |
+| 🖥 **Web** | 瀏覽器直接聊，含 agent 清單／房間檔案檢視／工作區預覽（線上使用頁：**<https://64071181.xyz/chat>**） |
 | 📱 **Telegram** | 手機隨時找她，支援語音訊息 |
 | 💬 **WhatsApp** | 商用客服／個人助理場景 |
 
