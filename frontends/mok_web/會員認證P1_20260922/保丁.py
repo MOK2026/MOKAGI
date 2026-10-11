@@ -16,7 +16,7 @@ P1 範圍：
  4. 與 P0 共用 users / auth_audit；登入成功沿用同一 session（member_user）
 依賴：webauthn 3.0.0（py_webauthn，開源免費、純 Python）
 環境變數（可選）：
- MOK_WEB_RP_ID    預設 64071181.xyz     WebAuthn Relying Party ID（= 對外網域）
+ MOK_WEB_RP_ID    預設 mokagi.com     WebAuthn Relying Party ID（= 對外網域）
  MOK_WEB_ORIGINS  預設 https://<rp_id>  允許來源，逗號分隔
 """
 import os
@@ -53,7 +53,7 @@ except Exception as _e:
     _WA_ERR = repr(_e)
 
 MOK_ROOT = Path('/home/ubuntu/.mok')
-RP_ID = os.environ.get('MOK_WEB_RP_ID', '64071181.xyz')
+RP_ID = os.environ.get('MOK_WEB_RP_ID', 'mokagi.com')
 ORIGIN_ALLOW = [x.strip().rstrip('/') for x in
                 os.environ.get('MOK_WEB_ORIGINS', 'https://%s' % RP_ID).split(',') if x.strip()]
 CHALLENGE_TTL = 300

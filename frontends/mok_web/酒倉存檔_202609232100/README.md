@@ -4,7 +4,7 @@
 目的：修復「酒倉貨位記錄，網頁刷新後紀錄消失」
 
 ## 問題根因
-1. 網頁以 https://64071181.xyz/report/春/酒倉/index.html 開啟。
+1. 網頁以 https://mokagi.com/report/春/酒倉/index.html 開啟。
 2. 該路徑由 mok_web.py 的 /report/<agent>/<path:filename> 提供，只支援 GET（唯讀靜態服務）。
 3. 前端 syncToFile() 用 POST 寫 save.json，伺服器回 405 Method Not Allowed，永遠寫唔入檔。
 4. 前端載入邏輯原本是「save.json 有內容就以檔案為準，忽略 localStorage」，

@@ -5,7 +5,7 @@
 
 背景:
   直播房3 後台 admin.html 由 jobs/直播房3/_admin.py 服務, 只綁 127.0.0.1:8945。
-  公網 (https://64071181.xyz -> mok_web:5000) 開 admin.html 時:
+  公網 (https://mokagi.com -> mok_web:5000) 開 admin.html 時:
     (1) 頁面相對 fetch 的 /api/* 打到 mok_web  => "Page not found" 404;
     (2) 127.0.0.1:8945 係「瀏覽器自己部機」 => net::ERR_CONNECTION_REFUSED。
   結果後台「冇數據」, 連加主播都 TypeError (reading 'allowed_agents')。

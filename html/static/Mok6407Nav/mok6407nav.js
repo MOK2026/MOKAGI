@@ -3,12 +3,12 @@
 // ============================================================
 // 🚀 用法（在新網頁加入這一句）：
 //
-//   <script src="https://64071181.xyz/static/Mok6407Nav/mok6407nav.js"></script>
+//   <script src="https://mokagi.com/static/Mok6407Nav/mok6407nav.js"></script>
 //
 // 再設定「佔位」（預設查詢文字，會自動帶入 WhatsApp 聯絡連結）：
 //
 //   <script>window.MOK6407NAV = { placeholder: '莫生我要查詢頭髮鑽石散熱' };</script>
-//   或 <script src="https://64071181.xyz/static/Mok6407Nav/mok6407nav.js"
+//   或 <script src="https://mokagi.com/static/Mok6407Nav/mok6407nav.js"
 //              data-placeholder="莫生我要查詢頭髮鑽石散熱"></script>
 //
 // 插件會自動幫你注入：右上角多語言切換器、AI客服視窗(api.js)、
@@ -33,7 +33,7 @@
   var CONFIG = {
     placeholder: dataPH || cfg.placeholder || window.MOK6407NAV_PLACEHOLDER || existingPH || '莫生我要查詢頭髮鑽石散熱',
     agent: cfg.agent || window.MOKAGI_AGENT || '客服',
-    server: cfg.server || window.MOKAGI_SERVER || 'https://64071181.xyz',
+    server: cfg.server || window.MOKAGI_SERVER || 'https://mokagi.com',
     position: cfg.position || window.position || 'bottom-right',
     contact: cfg.contact || window.contact || 'https://wa.me/85264071181/?text=',
     quickLinks: cfg.quickLinks || window.quickLinks || [

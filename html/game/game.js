@@ -112,7 +112,7 @@ function recordZoneClick(zone,btn){
 
 function getSmartShortcutInfo(){
   if(!smartShortcutData) return null;
-  const urls = {start:'https://64071181.xyz/game',business:'https://64071181.github.io/',pay:'https://64071181.github.io/PayAki/'};
+  const urls = {start:'https://mokagi.com/game',business:'https://64071181.github.io/',pay:'https://64071181.github.io/PayAki/'};
   const labels = {start:'⚔️ 開始遊戲',business:'🏢 商業',pay:'💎 充值'};
   return {zone:smartShortcutData.zone, btn:smartShortcutData.btn, url:urls[smartShortcutData.btn], label:labels[smartShortcutData.btn]};
 }

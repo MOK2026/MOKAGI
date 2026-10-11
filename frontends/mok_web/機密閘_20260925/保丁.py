@@ -484,8 +484,8 @@ def _v22_config_pages():
                 hf = it.get('href')
                 if hf:
                     s = str(hf)
-                    if '64071181.xyz' in s:
-                        s = s.split('64071181.xyz', 1)[1]
+                    if 'mokagi.com' in s:
+                        s = s.split('mokagi.com', 1)[1]
                     if s.startswith('/report'):
                         out.append(s)
     except Exception as e:
@@ -586,8 +586,8 @@ def _v24_static_dir():
 
 def _v24_norm_href(h):
     s = str(h or '').strip()
-    if '64071181.xyz' in s:
-        s = s.split('64071181.xyz', 1)[1]
+    if 'mokagi.com' in s:
+        s = s.split('mokagi.com', 1)[1]
     if s.startswith('report/'):
         s = '/' + s
     return s

@@ -5,10 +5,10 @@
 Windows Hello、實體安全金鑰。生物特徵留在使用者裝置，伺服器只存公開金鑰。
 
 ## 生效條件（重要）
-WebAuthn **只在 HTTPS 或 localhost 可用**。本站對外為 `https://64071181.xyz`
+WebAuthn **只在 HTTPS 或 localhost 可用**。本站對外為 `https://mokagi.com`
 （Cloudflare tunnel → 127.0.0.1:5000）。若換網域，需同步調整：
-- 環境變數 `MOK_WEB_RP_ID`（預設 64071181.xyz）
-- 環境變數 `MOK_WEB_ORIGINS`（預設 https://64071181.xyz，逗號分隔多個）
+- 環境變數 `MOK_WEB_RP_ID`（預設 mokagi.com）
+- 環境變數 `MOK_WEB_ORIGINS`（預設 https://mokagi.com，逗號分隔多個）
 
 ## 新增路由
 | 方法 | 路徑 | 說明 |

@@ -781,7 +781,7 @@
                 <span>透明度</span>
                 <input type="range" id="mokagi-opacity-slider" min="20" max="100" value="${Math.round(CONFIG.mobileOpacity*100)}" style="width:50px;accent-color:#fff;" />
             </span>
-            <a href="https://64071181.xyz/project/api/" target="_blank" style="color:#fff;text-decoration:none;font-size:11px;">MOKAGI</a>
+            <a href="https://mokagi.com/project/api/" target="_blank" style="color:#fff;text-decoration:none;font-size:11px;">MOKAGI</a>
             <span style="font-size:16px;cursor:pointer;" id="mokagi-close-btn">&times;</span>
         </span>`;
         header.querySelector('#mokagi-close-btn').addEventListener('click', toggleChat);

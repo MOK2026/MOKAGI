@@ -8,7 +8,7 @@
  *        支援瀑布式（cascade）依序出現、逐字／逐詞漸入。
  *
  *  一行引入（任何網站皆可用）：
- *      <script src="https://64071181.xyz/static/scroll-reveal.js"></script>
+ *      <script src="https://mokagi.com/static/scroll-reveal.js"></script>
  *
  *  用法：
  *      <div data-reveal="fade-up">從下往上淡入</div>

@@ -5,7 +5,7 @@
 > **設計目標**：最精簡但詳細，給 LLM 看的完整使用說明  
 > **版本**：2026-07-30  
 > **倉庫**：https://github.com/MOK2026/MOKAGI/  
-> **api.js**：https://64071181.xyz/static/api.js
+> **api.js**：https://mokagi.com/static/api.js
 
 ---
 
@@ -14,7 +14,7 @@
 在 HTML 的 `</body>` 前加入：
 
 ```html
-<script src="https://64071181.xyz/static/api.js"></script>
+<script src="https://mokagi.com/static/api.js"></script>
 ```
 
 完成。頁面右下角出現 AI 客服氣泡。
@@ -54,7 +54,7 @@ window.quickLinks = [
     { text: "📞 聯絡客服", query: "我要聯絡客服人員" },
 ];
 </script>
-<script src="https://64071181.xyz/static/api.js"></script>
+<script src="https://mokagi.com/static/api.js"></script>
 ```
 
 **技術實現**（api.js 第 146-155 行）：事件代理監聽 `.mokagi-quick-link` 點擊：
@@ -84,7 +84,7 @@ messagesDiv.addEventListener("click", (e) => {
 
   <script>
     window.MOKAGI_AGENT      = "客服";
-    window.MOKAGI_SERVER     = "https://64071181.xyz";
+    window.MOKAGI_SERVER     = "https://mokagi.com";
     window.MOKAGI_AGENT_ICON = "💬";
     window.agent_soul       = "你是一位熱情的網店客服，語氣親切。";
     window.contact          = "客服專線：0800-123-456";
@@ -94,7 +94,7 @@ messagesDiv.addEventListener("click", (e) => {
     ];
   </script>
 
-  <script src="https://64071181.xyz/static/api.js"></script>
+  <script src="https://mokagi.com/static/api.js"></script>
 </body>
 </html>
 ```
@@ -149,7 +149,7 @@ def handle_chat_message(data):
 
 當用戶問「如何嵌入 MOKAGI 聊天」時：
 
-1. 在 `</body>` 前加入 `<script src="https://64071181.xyz/static/api.js"></script>`
+1. 在 `</body>` 前加入 `<script src="https://mokagi.com/static/api.js"></script>`
 2. （可選）在 api.js 之前設定 `window.MOKAGI_AGENT` 指定 Agent
 3. （可選）設定 `window.quickLinks` 加入快速查詢按鈕
 4. 後端需運行 Socket.IO 伺服器，監聽 `chat_message` 事件
@@ -223,7 +223,7 @@ window.agent_soul +
       window.MOKAGI_AGENT = '小美';
       window.MOKAGI_USER_ID = localStorage.getItem('mokagi_user_id') || undefined;
       window.contact = 'https://wa.me/85264071181/?text=莫生我要查詢人力資源/' // ai無法回答的緊急聯絡
-      window.MOKAGI_SERVER = 'https://64071181.xyz';
+      window.MOKAGI_SERVER = 'https://mokagi.com';
       
 
 
@@ -240,7 +240,7 @@ window.agent_soul +
 
       
     </script>
-    <script src="https://64071181.xyz/static/api.js"></script>
+    <script src="https://mokagi.com/static/api.js"></script>
 
 
 
@@ -259,15 +259,15 @@ window.agent_soul +
 # 🎬 scroll-reveal.js — 滾動顯現動畫接口
 
 > **效果名稱**：Scroll Reveal（滾動觸發動畫），又名 AOS / ScrollReveal / 流水式加載 / 文字漸入。
-> **文件**：https://64071181.xyz/static/scroll-reveal.js
-> **演示**：https://64071181.xyz/scroll-reveal-demo
+> **文件**：https://mokagi.com/static/scroll-reveal.js
+> **演示**：https://mokagi.com/scroll-reveal-demo
 
 ## 🚀 一行嵌入
 
 在任何網站的 `</body>` 前加入：
 
 ```html
-<script src="https://64071181.xyz/static/scroll-reveal.js"></script>
+<script src="https://mokagi.com/static/scroll-reveal.js"></script>
 ```
 
 然後給任意元素加 `data-reveal` 屬性即可：

@@ -6,7 +6,7 @@
 
 背景:
   酒倉貨位記錄頁 (agent/春/jobs/酒倉/index.html) 經
-    https://64071181.xyz/report/春/酒倉/index.html
+    https://mokagi.com/report/春/酒倉/index.html
   開啟時，頁面 POST save.json 會打到 mok_web 的 /report/<agent>/<path> 路由，
   該路由只支援 GET → 405 Method Not Allowed，
   記錄永遠寫唔入 save.json；刷新時又用舊 save.json 覆蓋本機記錄 → 「記錄消失」。
