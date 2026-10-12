@@ -170,7 +170,7 @@ def _strip_boilerplate(text: str) -> str:
         "隱私權政策", "隱私政策", "服務條款", "使用條款", "免責聲明",
         "語言", "lang", "language", "switch language", "選擇語言",
         "follow us", "關注我們", "社群", "cookie", "回到頂部", "back to top",
-        "powered by", "mok group", "莫氏集團有限公司",
+        "powered by",
     )
     out, blank = [], False
     for raw in text.splitlines():

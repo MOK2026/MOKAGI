@@ -49,7 +49,7 @@
     const CONFIG = {
         
         // 後端必須配置
-        agent: window.MOKAGI_AGENT || '客服',                    // 默認使用莫氏 Agent
+        agent: window.MOKAGI_AGENT || '客服',                    // 默認使用MOKAGI Agent
         user_id: resolveWidgetUserId(),
         server: window.MOKAGI_SERVER || window.location.origin, // 後端服務器地址
 

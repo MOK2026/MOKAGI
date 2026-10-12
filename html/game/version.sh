@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# 莫氏村莊遊戲 - 資源時間戳自動版本化（cache busting）
+# MOKAGI村莊遊戲 - 資源時間戳自動版本化（cache busting）
 # 用 sed 實現，僅依賴 coreutils（宿主機/容器皆可執行）。
 # 當 game.js / set.js / style.css 異動，把最新 mtime 寫入
 # index.html 的 ?v= 查詢參數，讓瀏覽器每次開啟都抓最新版。

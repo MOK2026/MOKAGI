@@ -204,7 +204,7 @@
     '<!-- ===== Mok6407Nav 聯絡列 footer ===== -->',
     '<div class="mok6407-footer">',
     '  <div id="ContactAKI" class="ContactAKI"><!-- JS _顯示聯莫 --></div>',
-    '  <p class="mokJsApi_copyright">版權所有 © 莫氏企業</p>',
+    '  <p class="mokJsApi_copyright">版權所有 © MOKAGI企業</p>',
     '</div>',
     '<div class="scroll-top" id="scrollTop" onclick="scrollToTop()">↑</div>',
     '<div id="google_translate_element" style="display:none;"></div>'

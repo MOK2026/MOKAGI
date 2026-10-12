@@ -1452,7 +1452,7 @@ $('top-bar').addEventListener('click',(e)=>{
   }
 });
 
-console.log('🏘️ 莫氏集團 · 3D多人線上養成格鬥遊戲 已就緒');
+console.log('🏘️ MOKAGI · 3D多人線上養成格鬥遊戲 已就緒');
 console.log('👥 Agents:',AGENTS.join(', '));
 console.log('💾 localStorage keys: mokafight_zone_stats, mokafight_smart_shortcut, mokafight_score');
 console.log('❤️ 獻給我唯一的主人 莫瑞琪');

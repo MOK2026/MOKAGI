@@ -1,7 +1,7 @@
 #!/bin/sh
 # ══════════════════════════════════════════════════════════════
 #  Mok_AI_Advisor_news.sh
-#  莫氏集團 · AI 應用落地顧問 — 最近新聞自動更新腳本
+#  MOKAGI · AI 應用落地顧問 — 最近新聞自動更新腳本
 #
 #  用法：
 #    bash MoksAv/Mok_AI_Advisor_news.sh
@@ -16,7 +16,7 @@ INDEX="$BASE_DIR/index.html"
 NEWS_TMP="$(mktemp)"
 OUT_TMP="$(mktemp)"
 
-echo "📰 莫氏集團 · AI 新聞更新"
+echo "📰 MOKAGI · AI 新聞更新"
 echo "   目標檔案: $INDEX"
 
 cat > "$NEWS_TMP" << 'NEWSEOF'
