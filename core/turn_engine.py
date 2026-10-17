@@ -159,8 +159,31 @@ async def process_message(
             accumulated_rounds.append({"think": "", "tool_calls": [], "tool_results": [], "reply": "", "iteration": 1})
         return accumulated_rounds[-1]
 
+    # L4（2026-10-12 by mokagi說明）：對外輸出防護 —— 非 admin 的事件流（含「思考」串流）中性化。
+    #   只影響非 admin；admin 走原路（_ext_guard = None，零改變）。
+    #   中性化點在事件產生處（本函式），前端顯示與持久化的 think／reply 一併乾淨。
+    _ext_guard = None
+    try:
+        import mokagi as _mk_ext
+        if _mk_ext.is_external_caller(user_id, agent_config):
+            _ext_guard = _mk_ext.ExternalStreamSanitizer(user_id)
+    except Exception:
+        _ext_guard = None
+
     async def _send(event: dict):
         nonlocal pending_think, full_reply_collected, _done_sent, _reply_text_streamed
+
+        # L4：對外輸出防護（把「主人／侍女」等內部稱謂換成中性用語）
+        if _ext_guard is not None:
+            try:
+                if event.get("type") == "done":
+                    for _k, _left in _ext_guard.flush():
+                        if _left:
+                            await _send({"type": _k, "content": _left})
+                else:
+                    _ext_guard.scrub_event(event)
+            except Exception:
+                pass
 
         # 🩹 2026-10-01（治本）：本輪一旦已把自然語言回覆串流給前端，就記下旗標；
         #     末端 fallback 便不再把「整段回覆」當一包重送一次
@@ -467,7 +490,7 @@ async def process_message(
             # /admin confirm 訊息不在這裡立刻 done：改由下方「自動繼續」流程決定結束時機，
             # 避免前端收到第一個 done 就關閉串流，導致同意後 Agent 的續行輸出看不見。
             if not text.strip().startswith('/admin confirm'):
-                await _send({"type": "done", "conv_id": conv_id})
+                await _send({"type": "done", "conv_id": conv_id, "model_name": model_name})
 
 
 
@@ -1434,7 +1457,7 @@ async def process_message(
             logging.error(f"保存歷史失敗: {e}", exc_info=True)
             conv_id = None
         finally:
-            await _send({"type": "done", "conv_id": conv_id, "final_reply": final_reply_text})
+            await _send({"type": "done", "conv_id": conv_id, "final_reply": final_reply_text, "model_name": model_name})
 
 
 

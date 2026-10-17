@@ -52,7 +52,7 @@ MAX_AGE = 1800.0      # 只接回 30 分鐘內中斷的回合
 START_DELAY = 8.0     # 開機後等待秒數（等 web 就緒、前端重連）
 _IDLE_WAIT = 45.0     # 逾時未看到任何上游事件就放棄（避免卡死）
 # 2026-10-08 三修（稚）：
-_TOTAL_WAIT = 240.0   # 止血：續寫總時限（wall-clock 秒），逾時即停、誠實收尾
+_TOTAL_WAIT = 900.0   # 2026-10-09(A)（稚）：240->900s。thinking 模式單輪思考常達數萬字，240s 不夠、續寫必逾時中斷（無上游事件仍有 _IDLE_WAIT=45s 兜底）
 _FAKE_TOOL_HOLD = 400 # 治本：疑似工具 JSON/DSML 的最長緩衝字數（超過即放行）
 CONTINUE_HINT = (
     '（系統訊息）你上一則回覆寫到一半時，服務因為重啟而中斷了。'
@@ -527,7 +527,7 @@ async def _gen(sid, rec):
     except Exception:
         owner_time = 0
     try:
-        sysctx = mokagi.get_system_context(agent, owner, owner_time)
+        sysctx = mokagi.get_system_context(agent, owner, owner_time, current_user=uid)
     except Exception as e:
         print('[接回] 取系統提示失敗（改用空提示）', e)
         sysctx = ''
@@ -865,8 +865,10 @@ def _run_one(rec):
     _write_rec(rec)
     partial = partial.strip()
     if not partial:
-        print('[接回] %s 尚無正文 -> 不自動續寫' % sid)
-        _finalize(sid, agent, FALLBACK_NO_TEXT)
+        # 2026-10-09(B)（稚）：thinking 模式常在中斷時還沒吐正文；舊版直接誠實收尾＝等於沒接回。
+        # 改為走主迴圈（帶完整工具）自動接手，等同主人親手打「繼續」，把中斷的回合跑完。
+        print('[接回] %s 尚無正文 -> 改走主迴圈（帶完整工具）接手' % sid)
+        _continue_via_main_loop(sid, rec, agent)
         return
     print('[接回] %s 開始自動續寫（已有 %d 字）' % (sid, len(partial)))
     try:

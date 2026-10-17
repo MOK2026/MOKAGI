@@ -215,7 +215,15 @@
       "label": "短劇王",
       "panel": 1,
       "type": "iframe",
-      "page": "/jobs/短劇王/index.html"
+      "page": "/report/影片女/短劇王/index.html"
+    },
+    {
+      "id": "短劇王Veo",
+      "icon": "🎥",
+      "label": "短劇王Veo",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/veodrama/"
     },
     {
       "id": "p3a-wallet",
@@ -253,6 +261,24 @@
       "label": "成員",
       "panel": 1,
       "type": "action"
+    },
+    {
+      "id": "侍女辦公桌",
+      "icon": "🪑",
+      "label": "侍女辦公桌",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/report/衍/侍女辦公桌/index.html",
+      "adminOnly": true
+    },
+    {
+      "id": "自助頁原型",
+      "icon": "🧪",
+      "label": "自助頁原型",
+      "panel": 1,
+      "type": "iframe",
+      "page": "/report/命/20261014-0110_自助頁原型/index.html",
+      "adminOnly": true
     }
   ]
 }

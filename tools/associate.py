@@ -36,7 +36,6 @@ PLUGIN_INFO = {
     "intent_keywords": [
         ("/聯想", "/associate")
     ],
-    "naturalize_func": "naturalize_admin_result",
 
 
 
@@ -145,6 +144,24 @@ from typing import Optional, Dict
 
 
 
+
+
+async def naturalize_associate_result(user_text: str = "", raw_result: str = "",
+                                      ollama_api: str = "", model_name: str = "",
+                                      temp_msg=None, context=None) -> str:
+    """把 /associate 的 JSON 結果轉成自然語句（core 以關鍵字參數呼叫）。"""
+    try:
+        data = json.loads(raw_result)
+    except Exception:
+        return raw_result
+    if isinstance(data, dict):
+        if data.get("error"):
+            return "❌ 聯想詞生成失敗：" + str(data["error"])
+        kws = data.get("keywords") or []
+        if kws:
+            original = data.get("original") or user_text or ""
+            return "「%s」的聯想詞：%s" % (original, "、".join(str(k) for k in kws))
+    return raw_result
 
 
 async def handle_associate(args, user_id: str = None, agent_config: Optional[Dict] = None) -> str:

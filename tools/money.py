@@ -445,7 +445,7 @@ def _balance_blocked(tool_name):
 
 async def handle_money(args, user_id: str = None, agent_config: Optional[Dict] = None) -> str:
     if _balance_blocked("money_video"):
-        return json.dumps({"success": False, "error": "DeepSeek 餘額不足，已暫停非必要高耗工具（短影音生成）；請主人補值後再試。"}, ensure_ascii=False)
+        return json.dumps({"success": False, "error": "DeepSeek 餘額不足，已暫停非必要高耗工具（短影音生成）；請管理員補值後再試。"}, ensure_ascii=False)
     try:
         # 硬性前置檢查：沒有 MOK_OUTPUT_DIR（無落點／無身分）＝整個 money 功能停用，拒絕生成。
         # 不做向後相容：不退回 mpt 原路徑，也不產出任何檔案。
@@ -648,6 +648,18 @@ def _summarize(subject: str, stop_at: str, log_text: str) -> str:
     if errors:
         result["warnings"] = errors
     result = _route_outputs(result)
+    # 9:16 成品自動接 MOKAGI 動態片尾（Reels 片尾卡）；任何失敗都不影響主流程
+    try:
+        if isinstance(result, dict) and result.get('videos') and stop_at == 'video':
+            import sys as _sys_outro
+            _tools_dir = os.path.dirname(os.path.abspath(__file__))
+            if _tools_dir not in _sys_outro.path:
+                _sys_outro.path.insert(0, _tools_dir)
+            import reels_outro
+            result = reels_outro.apply_to_result(result)
+    except Exception:
+        logger.exception('[money] 片尾接合失敗（保留原影片）')
+
     return json.dumps(result, ensure_ascii=False)
 
 

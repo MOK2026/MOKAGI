@@ -207,7 +207,7 @@ def _log_remote_tool_usage(model_name, api_url, usage, agent_name=None, user_id=
         pass
 
 
-def _call_llm(cfg, user_prompt, system_prompt=None, timeout=120):
+def _call_llm(cfg, user_prompt, system_prompt=None, timeout=120, agent_name=None, user_id=None):
     model, url, token = _get_llm_config(cfg)
     if not token:
         raise RuntimeError(f"模型 {model} 未設定 token")
@@ -224,7 +224,7 @@ def _call_llm(cfg, user_prompt, system_prompt=None, timeout=120):
     if r.status_code != 200:
         raise RuntimeError(f"LLM {r.status_code}: {r.text[:300]}")
     data = r.json()
-    _log_remote_tool_usage(model, base, (data or {}).get("usage"))
+    _log_remote_tool_usage(model, base, (data or {}).get("usage"), agent_name=agent_name, user_id=user_id)
     try:
         return data["choices"][0]["message"]["content"]
     except Exception:
@@ -247,10 +247,10 @@ def _extract_json(text):
             raise RuntimeError(f"JSON 解析失敗: {e} | 內容: {text[:300]}")
 
 
-def _gen_drama_script(cfg, subject, style, panels=6):
+def _gen_drama_script(cfg, subject, style, panels=6, agent_name=None, user_id=None):
     user_prompt = (f"主題：{subject}\n指定畫風：{style}\n分鏡數：{panels} 幕。\n"
                    "請寫出動態漫畫短劇劇本（嚴格輸出 JSON）。")
-    content = _call_llm(cfg, user_prompt, DRAMA_SYSTEM_PROMPT)
+    content = _call_llm(cfg, user_prompt, DRAMA_SYSTEM_PROMPT, agent_name=agent_name, user_id=user_id)
     script = _extract_json(content)
     if "scenes" not in script or not script.get("scenes"):
         if "panels" in script:
@@ -288,7 +288,7 @@ def _build_image_prompt(script, scene, style_zh, aspect="9:16"):
     return " ".join(parts)
 
 
-def _gen_gemini(prompt, key, aspect="9:16", timeout=90, retries=2):
+def _gen_gemini(prompt, key, aspect="9:16", timeout=90, retries=2, agent_name=None, user_id=None):
     import requests
     model = "gemini-2.5-flash-image"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -306,6 +306,9 @@ def _gen_gemini(prompt, key, aspect="9:16", timeout=90, retries=2):
                 time.sleep(3)
                 continue
             data = r.json()
+            _um = data.get("usageMetadata") or {}
+            if _um:
+                _log_remote_tool_usage(model, url, {"prompt_tokens": _um.get("promptTokenCount", 0), "completion_tokens": _um.get("candidatesTokenCount", 0), "total_tokens": _um.get("totalTokenCount", 0)}, agent_name=agent_name, user_id=user_id)
             img_b64 = None
             for part in data.get("candidates", [{}])[0].get("content", {}).get("parts", []):
                 if "inlineData" in part and part["inlineData"].get("data"):
@@ -551,7 +554,9 @@ def _balance_blocked(tool_name):
 
 async def handle_comic(args, user_id: str = None, agent_config: Optional[Dict] = None) -> str:
     if _balance_blocked("comic"):
-        return json.dumps({"success": False, "error": "DeepSeek 餘額不足，已暫停非必要高耗工具（漫劇生成）；請主人補值後再試。"}, ensure_ascii=False)
+        return json.dumps({"success": False, "error": "DeepSeek 餘額不足，已暫停非必要高耗工具（漫劇生成）；請管理員補值後再試。"}, ensure_ascii=False)
+    _agent_name = (agent_config or {}).get("MOK_AGENT_NAME") if isinstance(agent_config, dict) else None
+    _agent_name = _agent_name or os.environ.get("MOK_AGENT_NAME") or None
     try:
         p = _parse_args(args)
         subject = (p.get("subject") or "").strip()
@@ -581,7 +586,7 @@ async def handle_comic(args, user_id: str = None, agent_config: Optional[Dict] =
         if mode not in ("video", "comic"):
             mode = "video"
         if mode == "comic":
-            return await _handle_comic_static(p, subject, style, backend, stop_at, agent_config)
+            return await _handle_comic_static(p, subject, style, backend, stop_at, agent_config, user_id=user_id, agent_name=_agent_name)
         cfg = _load_config(agent_config)
         font_path = _find_font()
         if not font_path:
@@ -602,7 +607,7 @@ async def handle_comic(args, user_id: str = None, agent_config: Optional[Dict] =
         script_json_path = os.path.join(OUTPUT_DIR, f"{safe_title}_{ts}_script.json")
 
         # 1. LLM 寫短劇分鏡劇本
-        script = _gen_drama_script(cfg, subject, style, panels)
+        script = _gen_drama_script(cfg, subject, style, panels, agent_name=_agent_name, user_id=user_id)
         with open(script_json_path, "w", encoding="utf-8") as f:
             json.dump(script, f, ensure_ascii=False, indent=2)
         title = script.get("title", subject)
@@ -637,7 +642,7 @@ async def handle_comic(args, user_id: str = None, agent_config: Optional[Dict] =
                     if bname == "gemini":
                         if not key:
                             raise RuntimeError("未設定 MOK_Gemini")
-                        img = _gen_gemini(prompt, key, aspect)
+                        img = _gen_gemini(prompt, key, aspect, agent_name=_agent_name, user_id=user_id)
                     elif bname == "zhipu":
                         if not key:
                             raise RuntimeError("未設定 ZHIPU_API_KEY")
@@ -759,9 +764,9 @@ def _make_placeholder(prompt, panel_no):
     d.text((w // 2, h - 30), "⚠ 佔位圖（出圖後端失敗）", font=f_small, fill=(180, 60, 60), anchor="mm")
     return img
 
-async def _handle_comic_static(p, subject, style, backend, stop_at, agent_config):
+async def _handle_comic_static(p, subject, style, backend, stop_at, agent_config, user_id=None, agent_name=None):
     cfg = _load_config(agent_config)
-    script = _gen_drama_script(cfg, subject, style, 4)
+    script = _gen_drama_script(cfg, subject, style, 4, agent_name=agent_name, user_id=user_id)
     scenes = script["scenes"][:4]
     gemini_key = cfg.get("MOK_Gemini", "") or os.environ.get("MOK_Gemini", "")
     zhipu_key = cfg.get("ZHIPU_API_KEY", "") or os.environ.get("ZHIPU_API_KEY", "")
@@ -787,7 +792,7 @@ async def _handle_comic_static(p, subject, style, backend, stop_at, agent_config
                 if bname == "gemini":
                     if not key:
                         raise RuntimeError("未設定 MOK_Gemini")
-                    img = _gen_gemini(prompt, key, "1:1")
+                    img = _gen_gemini(prompt, key, "1:1", agent_name=agent_name, user_id=user_id)
                 elif bname == "zhipu":
                     if not key:
                         raise RuntimeError("未設定 ZHIPU_API_KEY")

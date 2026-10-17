@@ -1,5 +1,5 @@
     // ===== Monaco Editor 配置與輔助函數 =====
-    const MOK_WEB_BUILD = 'input-tap3-workspace-20260921-01';
+    const MOK_WEB_BUILD = 'input-tap3-workspace-20260921-01+dotfile-save-20261017';
     // 輸入框提示（唯一來源）：手勢（右滑/左滑/點3下輸入框）+ 長按送出鍵錄音  indexPage|placeholder改點3下開工作區|20260921
     const MOK_INPUT_HINT = '輸入訊息⋯（Enter換行 · Shift+Enter送出 · Ctrl+V貼截圖）\n手勢：右滑→對話歷史 · 左滑→水晶盤 · 點3下輸入框→工作區 · 長按送出鍵→錄音';
     console.log('[MOK_BUILD]', MOK_WEB_BUILD, 'host=', location.hostname);
@@ -1282,18 +1282,36 @@ function renderAgentList() {
     container.innerHTML = '';
 
     // ----- 先依分組排序，再按 lastActive 降序 -----
+    // ★ idx 2026-10-14：加 🔍 搜尋過濾；分組由「組名字典序」改為「依最近使用排序」
+    //   （用過的組浮上面；全組都沒用過才退回組名字典序；未分組永遠最後）
+    const _q = mokAgentQuery();
+    const _hit = function(ag) {
+        if (!_q) return true;
+        return (String(ag.name || '') + ' ' + String(ag.post || '') + ' ' + String(agentIcons[ag.name] || '')).toLowerCase().indexOf(_q) >= 0;
+    };
     const groupOf = (name) => (agentGroups[name] || '').trim() || '未分組';
-    const sortedAgents = [...agentList].sort((a, b) => {
+    const _timeOfAg = (ag) => {
+        const s = agentStates[ag.name];
+        const t = (s && typeof s.lastActive === 'number') ? s.lastActive : 0;
+        return t || ag.last_active || 0;
+    };
+    const _groupRank = {};
+    agentList.forEach(ag => {
+        const g = groupOf(ag.name);
+        const t = _timeOfAg(ag);
+        if (!(g in _groupRank) || t > _groupRank[g]) _groupRank[g] = t;
+    });
+    const sortedAgents = agentList.filter(_hit).sort((a, b) => {
         const ga = groupOf(a.name);
         const gb = groupOf(b.name);
         if (ga !== gb) {
             if (ga === '未分組') return 1;
             if (gb === '未分組') return -1;
+            const ra = _groupRank[ga] || 0, rb = _groupRank[gb] || 0;
+            if (ra !== rb) return rb - ra;
             return ga.localeCompare(gb, 'zh-Hant');
         }
-        const aTime = agentStates[a.name]?.lastActive || 0;
-        const bTime = agentStates[b.name]?.lastActive || 0;
-        return bTime - aTime;
+        return _timeOfAg(b) - _timeOfAg(a);
     });
 
     let lastGroup = null;
@@ -1305,6 +1323,41 @@ function renderAgentList() {
     const saveGroupState = () => {
         try { localStorage.setItem(GROUP_STORE_KEY, JSON.stringify(collapsedGroups)); } catch(e) {}
     };
+    // ====== ⓪ ⭐ 常用（前端點擊計數，最多 PIN_LIMIT 個；用得多的自然浮上來）======
+    const PIN_LIMIT = 6;
+    const PIN_KEY = 'agentPinCollapsed_v1';
+    const _use = mokAgentUseRead();
+    let pinCollapsed = false;
+    try { pinCollapsed = localStorage.getItem(PIN_KEY) === '1'; } catch (e) {}
+    const pinAgents = agentList.filter(a => _hit(a) && _use[a.name] && _use[a.name].n > 0)
+        .sort((a, b) => ((_use[b.name].n || 0) - (_use[a.name].n || 0)) || ((_use[b.name].t || 0) - (_use[a.name].t || 0)))
+        .slice(0, PIN_LIMIT);
+    if (pinAgents.length) {
+        const pWrap = document.createElement('div');
+        pWrap.className = 'agent-group agent-group--pin' + ((pinCollapsed && !_q) ? ' collapsed' : '');
+        pWrap.dataset.group = '__pin__';
+        const pHeader = document.createElement('div');
+        pHeader.className = 'agent-group-header';
+        pHeader.innerHTML = '<span class="agent-group-arrow">' + ((pinCollapsed && !_q) ? '▶' : '▼') + '</span> <span class="agent-group-name">⭐ 常用</span> <span class="agent-group-count">' + pinAgents.length + '</span>';
+        pHeader.title = '常用（依點擊次數自動置頂，最多 ' + PIN_LIMIT + ' 個）';
+        pHeader.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            const wrap = this.parentElement;
+            const isCollapsed = wrap.classList.toggle('collapsed');
+            try { localStorage.setItem(PIN_KEY, isCollapsed ? '1' : '0'); } catch (e) {}
+            this.querySelector('.agent-group-arrow').textContent = isCollapsed ? '▶' : '▼';
+            const b = wrap.querySelector('.agent-group-body');
+            if (b) b.style.display = isCollapsed ? 'none' : '';
+        });
+        const pBody = document.createElement('div');
+        pBody.className = 'agent-group-body';
+        if (pinCollapsed && !_q) pBody.style.display = 'none';
+        pWrap.appendChild(pHeader);
+        pWrap.appendChild(pBody);
+        container.appendChild(pWrap);
+        pinAgents.forEach(ag => pBody.appendChild(makeCard(ag)));
+    }
+
     // ====== ① 最近對話：不分組，只按「最後對話時間」排序（最新在最上）======
     const RECENT_LIMIT = 8;
     const RECENT_KEY = 'agentRecentCollapsed_v1';
@@ -1316,17 +1369,17 @@ function renderAgentList() {
     let recentCollapsed = false;
     try { recentCollapsed = localStorage.getItem(RECENT_KEY) === '1'; } catch (e) {}
     const recentAgents = [...agentList]
-        .filter(a => timeOf(a) > 0)
+        .filter(a => timeOf(a) > 0 && _hit(a))
         .sort((a, b) => timeOf(b) - timeOf(a))
         .slice(0, RECENT_LIMIT);
     if (recentAgents.length) {
         const rWrap = document.createElement('div');
-        rWrap.className = 'agent-group agent-group--recent' + (recentCollapsed ? ' collapsed' : '');
+        rWrap.className = 'agent-group agent-group--recent' + ((recentCollapsed && !_q) ? ' collapsed' : '');
         rWrap.dataset.group = '__recent__';
 
         const rHeader = document.createElement('div');
         rHeader.className = 'agent-group-header';
-        rHeader.innerHTML = '<span class="agent-group-arrow">' + (recentCollapsed ? '▶' : '▼') + '</span> <span class="agent-group-name">🕘 最近對話</span> <span class="agent-group-count">' + recentAgents.length + '</span>';
+        rHeader.innerHTML = '<span class="agent-group-arrow">' + ((recentCollapsed && !_q) ? '▶' : '▼') + '</span> <span class="agent-group-name">🕘 最近對話</span> <span class="agent-group-count">' + recentAgents.length + '</span>';
         rHeader.title = '最近對話（不分組，依最後對話時間排序）';
         rHeader.addEventListener('click', function(ev) {
             ev.stopPropagation();
@@ -1340,7 +1393,7 @@ function renderAgentList() {
 
         const rBody = document.createElement('div');
         rBody.className = 'agent-group-body';
-        if (recentCollapsed) rBody.style.display = 'none';
+        if (recentCollapsed && !_q) rBody.style.display = 'none';
 
         rWrap.appendChild(rHeader);
         rWrap.appendChild(rBody);
@@ -1378,7 +1431,7 @@ function renderAgentList() {
 
             const body = document.createElement('div');
             body.className = 'agent-group-body';
-            if (collapsedGroups[g]) body.style.display = 'none';
+            if (collapsedGroups[g] && !_q) body.style.display = 'none';
 
             groupWrap.appendChild(header);
             groupWrap.appendChild(body);
@@ -1388,6 +1441,14 @@ function renderAgentList() {
         const targetBody = groupWrap ? groupWrap.querySelector('.agent-group-body') : container;
         targetBody.appendChild(makeCard(agent));
     });
+
+    // ★ idx 2026-10-14：搜尋無結果時的空狀態
+    if (_q && !container.querySelector('.agent-item')) {
+        const _e = document.createElement('div');
+        _e.className = 'agent-empty';
+        _e.textContent = '🔍 找不到符合的 Agent';
+        container.appendChild(_e);
+    }
 
     /** 建立單張名片（供「最近對話」與分組列表共用） */
     function makeCard(agent) {
@@ -1432,6 +1493,7 @@ function renderAgentList() {
         }
         // 內聯點擊監聽（★ 2026-10-08：點進該 agent 即清除未讀，後端同步）
         div.addEventListener('click', function() {
+            try { mokAgentUseMark(agent.name); } catch (e) {}   // ★ idx 2026-10-14：⭐常用計數（localStorage）
             clearUnreadOnOpen(agent.name);
             if (currentAgent !== agent.name) {
                 activateAgent(agent.name);
@@ -2299,6 +2361,47 @@ function _setMetaConvId(metaEl, convId, addIfMissing) {
     if (!hit && !qb && addIfMissing) metaEl.insertBefore(document.createTextNode(label + ' '), metaEl.firstChild);
 }
 
+
+// 🔧 20261016（indexPage）：訊息 meta 共用建構器 ——「歷史訊息」與「即時串流完成(done)」共用同一份內容規格。
+// 緣由：串流結束時原本只把 meta 寫成純文字 '[ID:?] 侍女 · 時間'，完整的 📋 🧠 模型 [ID] 💰 👍 🔖
+// 要 F5 或切換侍女（=重讀歷史）才長出來。現改為 done 當下就用同一建構器重畫 → 立即顯示、內容一致。
+// 設計：欄位全部由呼叫方傳入（含「這一則實際使用的模型名」），不讀全域狀態 → 歷史回放與即時顯示不會分歧。
+function buildMessageMetaHtml(opt) {
+    opt = opt || {};
+    var S = function (v) { return String(v === undefined || v === null ? '' : v); };
+    var esc = (typeof escapeHtml === 'function') ? escapeHtml : function (x) { return S(x); };
+    var convId = (opt.convId === undefined || opt.convId === null || opt.convId === '') ? '?' : opt.convId;
+    var msgId = (opt.msgId === undefined || opt.msgId === null || opt.msgId === '') ? '?' : opt.msgId;
+    var price = (typeof MokAgi_Token_Price_HK === 'number' && MokAgi_Token_Price_HK) ? MokAgi_Token_Price_HK : 0;
+    var cost = (opt.estimatedCost === undefined || opt.estimatedCost === null) ? '0.000000' : opt.estimatedCost;
+    var toks = (opt.estimatedTokens === undefined || opt.estimatedTokens === null) ? 0 : opt.estimatedTokens;
+    var copyAttr = S(opt.copyText).replace(/"/g, '&quot;');
+    var boxStyle = 'background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;';
+    var plainStyle = 'background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;';
+    return '<button class="copy-msg-btn" data-msg="' + copyAttr + '" style="' + plainStyle + '" title="複製訊息">📋</button> '
+        + '🧠 : ' + esc(S(opt.modelName) || '模型名') + ' '
+        + '<button class="quote-id-btn" data-conv-id="' + esc(S(convId)) + '" data-msg-id="' + esc(S(msgId)) + '" style="' + boxStyle + '" title="引用對話：點擊＝插入 [ID:] 上下文（可連點累積多條）；Shift+點擊＝精準錨點 [MID:]；Ctrl/Alt+點擊＝複製">[ID:' + esc(S(convId)) + ']</button> '
+        + esc(S(opt.agentName)) + ' · ' + esc(S(opt.timeText || new Date().toLocaleString())) + ' · '
+        + '<button style="' + boxStyle + '" onclick="renderTokenStats()" title="HK$' + (price * 1000000) + ' 每百萬詞元 · MOKAGI">~💰$' + S(cost) + '/' + S(toks) + '🧮~</button> '
+        + '<button class="like-msg-btn" style="' + plainStyle + '" title="贊好">👍</button> '
+        + '<button class="bookmark-msg-btn" data-conv-id="' + esc(S(convId)) + '" style="' + plainStyle + '" title="加入書籤">🔖</button>';
+}
+
+// 🔧 20261016（indexPage）：取「這一則回覆實際使用的模型名」——優先讀回覆內文的 🧠 標記（真實），
+// 讀不到才退回目前選單選中的模型（沿舊行為），避免歷史訊息被一律標成當前模型。
+function _mokMsgModelName(text, knownModel) {
+    if (knownModel) return knownModel;
+    var m = String(text || '').match(/🧠\s*:\s*[^\n\r]+/g);
+    if (m && m.length) {
+        var last = m[m.length - 1].replace(/^🧠\s*:\s*/, '').trim();
+        if (last) return last;
+    }
+    return '未知（舊訊息）';
+}
+function _mokCurrentModelName() {
+    try { return (modelsList[currentModelIndex] && modelsList[currentModelIndex].name) || '模型名'; } catch (e) { return '模型名'; }
+}
+
 function renderChatMessages(messages) { chatMessagesDiv = document.getElementById('chatMessages') || chatMessagesDiv; /* 🔧20260922修復：不可把 chatMessagesDiv 指向 #message-list，否則切換 agent 後 scrollToBottom 與滾動按鈕狀態全算錯 → 畫面停在最舊訊息、按鈕不顯示 */
     const listEl = document.getElementById('message-list') || document.getElementById('chatMessages');
     if (!listEl) return;
@@ -2403,6 +2506,9 @@ function renderChatMessages(messages) { chatMessagesDiv = document.getElementByI
             // 助手消息
             const div = document.createElement('div');
             div.className = 'message assistant';
+            // [衍 2026-10-16] 補上 id／conv_id，供右側「搜尋」面板「跳到該對話」定位
+            div.dataset.id = msg.id || '';
+            div.dataset.conv_id = msg.conv_id || '';
             const content = escapeHtml(rawContent);
             const time = new Date(msg.timestamp).toLocaleString();
 
@@ -2474,7 +2580,7 @@ function renderChatMessages(messages) { chatMessagesDiv = document.getElementByI
                 <div class="round-blocks-container">
                     ${bodyHtml}
                 </div>
-                <div class="message-meta"><button class="copy-msg-btn" data-msg="${content.replace(/"/g, '&quot;')}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="複製訊息">📋</button> 🧠 : ${(modelsList[currentModelIndex] && modelsList[currentModelIndex].name) || '模型名'} <button class="quote-id-btn" data-conv-id="${msg.conv_id || msg.id || '?'}" data-msg-id="${msg.id || '?'}" style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;" title="引用對話：點擊＝插入 [ID:] 上下文（可連點累積多條）；Shift+點擊＝精準錨點 [MID:]；Ctrl/Alt+點擊＝複製">[ID:${msg.conv_id || msg.id || '?'}]</button> ${currentAgent} · ${time} · <button style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;"  onclick="renderTokenStats()" title="HK$${(MokAgi_Token_Price_HK*1000000)} 每百萬詞元 · MOKAGI">~💰$${estimatedCost}/${estimatedTokens}🧮~</button> <button class="like-msg-btn" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="贊好">👍</button> <button class="bookmark-msg-btn" data-conv-id="${msg.conv_id || '?'}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="加入書籤">🔖</button></div>
+                <div class="message-meta"><button class="copy-msg-btn" data-msg="${content.replace(/"/g, '&quot;')}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="複製訊息">📋</button> 🧠 : ${_mokMsgModelName(rawContent, msg.model)} <button class="quote-id-btn" data-conv-id="${msg.conv_id || msg.id || '?'}" data-msg-id="${msg.id || '?'}" style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;" title="引用對話：點擊＝插入 [ID:] 上下文（可連點累積多條）；Shift+點擊＝精準錨點 [MID:]；Ctrl/Alt+點擊＝複製">[ID:${msg.conv_id || msg.id || '?'}]</button> ${currentAgent} · ${time} · <button style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; cursor:pointer; font-size:inherit; padding:0 4px;"  onclick="renderTokenStats()" title="HK$${(MokAgi_Token_Price_HK*1000000)} 每百萬詞元 · MOKAGI">~💰$${estimatedCost}/${estimatedTokens}🧮~</button> <button class="like-msg-btn" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="贊好">👍</button> <button class="bookmark-msg-btn" data-conv-id="${msg.conv_id || '?'}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 3px;" title="加入書籤">🔖</button></div>
             `;
             listEl.appendChild(div);
         }
@@ -3838,12 +3944,7 @@ async function createNewFile() {
     const dir = currentDirectory || '';
     const fullPath = dir ? dir + '/' + name : name;
     try {
-        const res = await fetch('/api/create_file', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: fullPath, content: '' })
-        });
-        const data = await res.json();
+        const { res, data } = await mokSaveFileRequest(fullPath, '');
         if (data.status === 'ok') {
             // 重新整理樹
             fetchTree();
@@ -3933,6 +4034,39 @@ async function loadEditorState() {
 
 // ===== 2026-10-08 凜：存檔 JSON 防呆（前端先驗，壞 JSON 不送出請求）=====
 // 回傳 null = 通過；回傳字串 = 錯誤訊息（呼叫端負責提示，且不送出請求）
+// ===== 存檔端點選擇器（indexPage|2026-10-17|點段檔（各房間憑證，如 .衍）存檔被 /api/create_file 硬閘 403，統一改走 admin 憑證通道；非點段檔行為完全不變|新增 mokIsDotPath / mokSaveFileRequest，並改 5 處存檔呼叫改用它|20261017011049(HK)）=====
+// 背景：後端 2026-10-11b「A案」把寫入端閘死（/api/create_file、/api/save_file 永不傳 privileged），
+//       點開頭憑證檔一律 403（刻意設計，不鬆綁）；主人核可的正式通道是 /api/admin/write_credential
+//       （僅 admin、寫前自動備份、逐筆記審計）。此處只把前端的「存哪個端點」補上，不改任何閘門語意。
+// 判定規則與後端 _is_dot_path() 完全一致：除第一段外，任一段以「.」開頭即視為點段。
+function mokIsDotPath(path) {
+    var segs = String(path || '').replace(/\\/g, '/').split('/').filter(function (s) { return s && s !== '.'; });
+    if (segs.length <= 1) return false;
+    for (var i = 1; i < segs.length; i++) { if (segs[i].charAt(0) === '.') return true; }
+    return false;
+}
+// 統一存檔入口：自動挑端點，回傳 {res, data}，呼叫端沿用原本的 data.status / res.status 寫法。
+async function mokSaveFileRequest(path, content) {
+    var endpoint = mokIsDotPath(path) ? '/api/admin/write_credential' : '/api/create_file';
+    var res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: path, content: content })
+    });
+    var data = {};
+    try { data = await res.json(); } catch (e) { data = {}; }
+    if (data.status !== 'ok') {
+        var raw = String(data.error || '');
+        if (/forbidden/i.test(raw)) {
+            data.error = '🔒 這是憑證檔（點段檔），僅管理員可修改';
+        } else if (!data.error) {
+            data.error = 'HTTP ' + res.status;
+        }
+    }
+    return { res: res, data: data };
+}
+
+
 function mokValidateJsonForSave(path, content) {
     if (!path || !/\.json$/i.test(path)) return null;
     if (content === null || content === undefined) return null;
@@ -3992,12 +4126,7 @@ saveFileContent = async function(silent = false, expectedPath = null) {
         // 先嘗試儲存（若檔案不存在，後端會自動建立？我們統一用 save_file 但它不會建立，所以先檢查）
         // 我們改為先呼叫 /api/create_file 確保存在，再呼叫 /api/save_file
         // 但為了簡化，我們直接使用 create_file 並帶入內容（upsert）
-        const res = await fetch('/api/create_file', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: path, content: content })
-        });
-        const data = await res.json();
+        const { res, data } = await mokSaveFileRequest(path, content);
         if (data.status === 'ok') {
             if (!silent) alert('✅ 檔案已儲存');
             // 更新狀態（時間戳等）
@@ -4498,12 +4627,7 @@ async function saveAgentConfig() {
     const newContent = newLines.join('\n');
 
     try {
-        const res = await fetch('/api/create_file', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: window.currentAgentFile, content: newContent })
-        });
-        const data = await res.json();
+        const { res, data } = await mokSaveFileRequest(window.currentAgentFile, newContent);
         if (data.status === 'ok') {
             statusEl.textContent = '✅ 儲存成功';
             statusEl.style.color = '#69db7c';
@@ -4677,12 +4801,7 @@ async function createFromPath() {
                 alert('❌ 建立資料夾失敗：' + (data.error || '未知錯誤'));
             }
         } else {
-            const res = await fetch('/api/create_file', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: path, content: content })
-            });
-            const data = await res.json();
+            const { res, data } = await mokSaveFileRequest(path, content);
             if (data.status === 'ok') {
                 fetchTree();
                 loadFile(path, path.split('/').pop());
@@ -5034,6 +5153,12 @@ async function createFromPath() {
     }
 
     // 🔧 L3 結構化媒體（20261008 indexPage）：統一渲染圖/影/音卡片，各前端共用同一份 media 資料
+    // 雙保險第2層（indexPage|202610092325(HK)）：判斷網址是否帶圖片副檔名（去 query/hash、不分大小寫）
+    var _IMG_EXT_RE = new RegExp("\\.(png|jpe?g|gif|webp|bmp|svg|avif)$", "i");
+    function _hasImageExt(u) {
+        if (typeof u !== 'string' || !u) return false;
+        return _IMG_EXT_RE.test(u.split('?')[0].split('#')[0]);
+    }
     function _buildRoundMediaHtml(mediaArr) {
         if (!mediaArr || !mediaArr.length) return '';
         var html = '<div class="mok-media-wrap">';
@@ -5041,8 +5166,11 @@ async function createFromPath() {
             var m = mediaArr[i] || {};
             var url = m.url;
             if (!url) continue;
+            var t = (m.type ? String(m.type) : 'image').toLowerCase();
+            // 雙保險第2層（indexPage|202610092325(HK)）：媒體型別為圖片、但網址無圖片副檔名 → 不渲染，避免死圖示。
+            //    第1層在後端媒體協議（泛用 url 鍵須有媒體副檔名），此為前端最後一道防線。
+            if (t !== 'video' && t !== 'audio' && !_hasImageExt(url)) continue;
             var safeUrl = escapeHtml(url);
-            var t = m.type || 'image';
             var alt = m.alt ? escapeHtml(m.alt) : '';
             var posterAttr = m.poster ? ' poster="' + escapeHtml(m.poster) + '"' : '';
             if (t === 'video') {
@@ -5064,6 +5192,7 @@ async function createFromPath() {
                      + '</div>';
             }
         }
+        if (html === '<div class="mok-media-wrap">') return '';  // 全部項目皆被過濾 → 不留空容器
         html += '</div>';
         return html;
     }
@@ -5572,13 +5701,26 @@ function _onChatStream(data, channel) {
                     }
                 }
 
-                // 4) 更新 meta（工作中/回應中 → 完成時間）
+                // 4) 更新 meta：工作中/回應中 → 完整訊息列（📋 🧠 模型 [ID] 💰 👍 🔖）；20261016 起 done 當下即顯示，不必再重載
                 if (currentAssistantDiv[agent] && document.contains(currentAssistantDiv[agent])) {
                     const meta = currentAssistantDiv[agent].querySelector('.message-meta');
                     if (meta) {
-                        const finalMeta = agent + ' · ' + new Date().toLocaleTimeString();
-                        // 🔧 20260927：也改成節點安全寫法（textContent），避免任何情況下洗掉 meta 內的按鈕監聽器
-                        meta.textContent = '[ID:?] ' + finalMeta;
+                        // 🔧 20261016（indexPage）：done 當下就補上完整訊息列（📋 🧠 模型 [ID] 💰 👍 🔖），
+                        // 不再只寫純文字——否則主人要 F5 或切換侍女（=重讀歷史）才看得到那一行。
+                        // 本輪 token／費用：與歷史訊息同一套估算法（(思考+回覆) 字數 ÷ 4）
+                        var _metaTokens = Math.ceil((think + reply).length / 4);
+                        var _metaPrice = (typeof MokAgi_Token_Price_HK === 'number' && MokAgi_Token_Price_HK) ? MokAgi_Token_Price_HK : 0;
+                        meta.innerHTML = buildMessageMetaHtml({
+                            copyText: reply,
+                            modelName: _mokMsgModelName(reply, data.model_name),
+                            convId: data.conv_id || '?',
+                            agentName: agent,
+                            timeText: new Date().toLocaleString(),
+                            estimatedTokens: _metaTokens,
+                            estimatedCost: (_metaTokens * _metaPrice).toFixed(6)
+                        });
+                        // innerHTML 會重建按鈕節點 → 立即重綁事件（下方 MutationObserver 保底也會補綁）
+                        try { bindMessageActionButtons(); } catch (eBindMeta) {}
                     }
                 }
 
@@ -5782,6 +5924,42 @@ socket.on('log_line', function(data) {
 
     socket.on('stream_stopped', () => console.log('已停止生成'));
 
+    // ===== 輸入框草稿自動保存 | indexPage|新增：重新整理 / 重啟 / 瀏覽器崩潰後仍保留未送出的輸入內容|20261010(HK) =====
+    // 全站共用同一個輸入框，故只存單一 key；key 帶 user id，避免同機不同會員互相看到草稿。
+    var _DRAFT_MAX = 200000;   // 超過此長度不存，避免撐爆 localStorage 配額
+    var _draftTimer = null;
+    function _chatDraftKey() {
+        var uid = '';
+        try { uid = localStorage.getItem('mokagi_user_id') || localStorage.getItem('web_user_id') || ''; } catch (e) {}
+        return 'mok_chat_draft::' + (uid || 'guest');
+    }
+    function _doSaveChatDraft() {
+        try {
+            var ta = document.getElementById('chatInput');
+            if (!ta) return;
+            var v = ta.value;
+            if (v && v.trim().length && v.length <= _DRAFT_MAX) localStorage.setItem(_chatDraftKey(), v);
+            else localStorage.removeItem(_chatDraftKey());
+        } catch (e) { /* 配額不足等：靜默忽略，絕不影響輸入 */ }
+    }
+    // immediate=true 立即寫入（失焦 / 關頁）；否則 400ms 防抖，打字期間不反覆寫入
+    function saveChatDraft(immediate) {
+        if (_draftTimer) { clearTimeout(_draftTimer); _draftTimer = null; }
+        if (immediate) return _doSaveChatDraft();
+        _draftTimer = setTimeout(_doSaveChatDraft, 400);
+    }
+    function restoreChatDraft() {
+        try {
+            var ta = document.getElementById('chatInput');
+            if (!ta) return;
+            var v = localStorage.getItem(_chatDraftKey());
+            if (!v || v === ta.value) return;   // 無草稿 / 內容相同 → 不動，避免蓋掉正在打的字
+            ta.value = v;
+            try { ta.selectionStart = ta.selectionEnd = v.length; } catch (e) {}
+            try { ta.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+        } catch (e) {}
+    }
+
     function initChatInput() {
         const textarea = document.getElementById('chatInput');
         const sendBtn = document.getElementById('sendBtn');
@@ -5804,6 +5982,7 @@ socket.on('log_line', function(data) {
             sendUserMessage(msg || autoMsg);
             textarea.value = '';
             textarea.style.height = 'auto';
+            saveChatDraft(true);   // 送出後清掉草稿 | indexPage 20261010
         };
         // ===== 批次B 第7條：sendBtn 短按＝送出訊息；長按(≥0.5s)＝開始錄音，放開＝停止錄音 =====
         // （recordBtn 已在批次A隱藏，其錄音功能整併到 sendBtn 長按）
@@ -6050,7 +6229,13 @@ socket.on('log_line', function(data) {
         }
         textarea.oninput = function() {
             fitInputHeight();
+            saveChatDraft();   // 打字即排程存草稿（含中文輸入法組字）
         };
+        // 離焦 / 關頁 / 進背景：立即落地草稿，網頁卡死或瀏覽器崩潰也不丟 | indexPage 20261010
+        textarea.addEventListener('blur', function() { saveChatDraft(true); });
+        window.addEventListener('pagehide', function() { saveChatDraft(true); });
+        window.addEventListener('beforeunload', function() { saveChatDraft(true); });
+        restoreChatDraft();   // 開啟 / 刷新時還原上次未送出的內容
 
         // ===== Ctrl+V 貼上截圖／圖片 =====
         textarea.addEventListener('paste', (e) => {
@@ -6143,6 +6328,7 @@ socket.on('log_line', function(data) {
 
 
     // ===== 引用插入：點擊訊息上的 [ID:] 直接把引用片段插入輸入框（不送出），可連點累積上下文 =====
+    try { window.insertQuoteToken = insertQuoteToken; } catch (e) {}   // [衍 2026-10-16] 供右側「搜尋」面板一鍵引用
     function insertQuoteToken(text, optLabel) { const _lbl = optLabel || "引用";
         const ta = document.getElementById('chatInput');
         if (!ta) {
@@ -6301,8 +6487,78 @@ function unsubscribeLogs() {
 
 
 // ========== 🔍 全域對話搜尋 ==========
+// [衍 2026-10-16] 搜尋面板輔助：關鍵詞高亮（後端 _search_snippet 已把 snippet 對準關鍵詞）
+function _mokEscRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function highlightSearchQuery(text, q) {
+    const safe = escapeHtml(text);
+    if (!q) return safe;
+    try {
+        return safe.replace(new RegExp(_mokEscRe(escapeHtml(q)), 'gi'),
+            m => '<mark style="background:#4ec9b0; color:#1e1e1e; border-radius:3px; padding:0 2px;">' + m + '</mark>');
+    } catch (e) { return safe; }
+}
+
+// [衍 2026-10-16] 跳到該對話：同 Agent 直接捲到該訊息；不同 Agent 先確認（切 Agent 是全機設定）
+async function jumpToConversation(btn) {
+    var toast = (typeof showQuoteToast === 'function') ? showQuoteToast : function () {};
+    var agent = (btn.getAttribute('data-agent') || '').trim();
+    var convId = (btn.getAttribute('data-conv-id') || '').trim();
+    var msgId = (btn.getAttribute('data-msg-id') || '').trim();
+    var label = convId ? ('[ID:' + convId + ']') : ('[MID:' + msgId + ']');
+    if (!convId && !msgId) { toast('⚠️ 這筆沒有可跳轉的對話 id'); return; }
+    var cur = (typeof currentAgent !== 'undefined') ? currentAgent : null;
+    var go = function () { _mokScrollToConversation(agent, convId, msgId, label, toast); };
+    if (agent && agent !== cur) {
+        // 切換 Agent 走 /api/set_env，改的是伺服器全域「目前 Agent」，可能影響其他正在對話的人 → 先問
+        if (typeof showMokConfirm === 'function') {
+            showMokConfirm('「跳到該對話」要切換到 Agent「' + agent + '」，\n這會切換全機目前 Agent（可能影響其他正在對話的人）。\n要繼續嗎？', go, { okText: '切換並跳轉' });
+        } else { go(); }
+        return;
+    }
+    go();
+}
+
+// [衍 2026-10-16] 實際跳轉：必要時載入更多歷史，把聊天區捲到目標訊息並閃一下
+async function _mokScrollToConversation(agent, convId, msgId, label, toast) {
+    if (!toast) { toast = (typeof showQuoteToast === 'function') ? showQuoteToast : function () {}; }
+    var cur = (typeof currentAgent !== 'undefined') ? currentAgent : null;
+    if (agent && agent !== cur && typeof activateAgent === 'function') {
+        toast('🔗 切換到 ' + agent + ' …');
+        try { await activateAgent(agent); } catch (err) { console.warn('jumpToConversation: activateAgent 失敗', err); }
+    }
+    // chat_history 以訊息 id 定位；conversation_history 以 conv_id 定位
+    var key = convId ? 'conv_id' : 'id';
+    var val = convId || msgId;
+    var sel = '[data-' + key + '="' + val + '"]';
+    var find = function () {
+        return document.querySelector('#message-list ' + sel) || document.querySelector('#chatMessages ' + sel);
+    };
+    var el = find();
+    var guard = 0;
+    while (!el && typeof chatHistoryHasMore !== 'undefined' && chatHistoryHasMore && typeof loadMoreChatHistory === 'function' && guard < 20) {
+        await loadMoreChatHistory();
+        el = find();
+        guard++;
+    }
+    if (!el) { toast('⚠️ 聊天區找不到 ' + label + '（可能太舊或非網頁對話）'); return; }
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    try {
+        el.style.transition = 'box-shadow 0.25s';
+        el.style.boxShadow = '0 0 0 3px #e0a800';
+        setTimeout(function () { el.style.boxShadow = ''; }, 1500);
+    } catch (e2) {}
+    toast('🔗 已跳到 ' + (agent ? ('@' + agent + ' ') : '') + label);
+}
+
 function renderSearchContent() {
     const container = document.getElementById("toolsContent");
+    // [衍 2026-10-16] placeholder 加亮：原本與 #2d2d30 底太接近，輸入框看起來像空的
+    if (!document.getElementById('mokSearchStyle')) {
+        const _st = document.createElement('style');
+        _st.id = 'mokSearchStyle';
+        _st.textContent = '#searchQueryInput::placeholder{color:#9d9d9d;opacity:1;}#searchQueryInput:focus{border-color:#4ec9b0;}';
+        document.head.appendChild(_st);
+    }
     container.innerHTML = '' +
         '<div style="height:100%; display:flex; flex-direction:column;">' +
             '<div style="padding:8px; flex-shrink:0; border-bottom:1px solid #3e3e42;">' +
@@ -6347,11 +6603,25 @@ function renderSearchContent() {
                     var roleIcon = r.role === "user" ? "👤" : r.role === "assistant" ? "🤖" : "💬";
                     var sourceLabel = r.source === "chat_history" ? "💬Web" : "📝完整";
                     var agentLabel = r.agent ? " @" + r.agent : "";
+                    // [衍 2026-10-16] 一鍵引用：chat_history 用 [MID:message_id]；conversation_history 用 [ID:conv_id]
+                    var qid = (r.source === "chat_history") ? "[MID:" + r.id + "]" : "[ID:" + r.id + "]";
+                    var quoteText = "<引用對話: " + qid + ">";
+                    // [衍 2026-10-16] 跳到該對話：chat_history 以訊息 id 定位；conversation_history 以 conv_id 定位
+                    var _isChatRow = (r.source === "chat_history");
+                    var jumpMsgId = _isChatRow ? String(r.id) : "";
+                    var jumpConvId = _isChatRow ? "" : String(r.id);
+                    var jumpAgent = _isChatRow ? (r.agent || "") : String(r.agent || "").split("_").pop();
                     html += '<div style="margin-bottom:10px; padding:8px; background:#252526; border-radius:8px; border-left:3px solid #4ec9b0;">' +
                         '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">' +
                         '<span style="font-size:0.75rem; color:#4ec9b0;">' + roleIcon + sourceLabel + agentLabel + '</span>' +
                         '<span style="font-size:0.7rem; color:#888;">' + ts + '</span></div>' +
-                        '<div style="font-size:0.8rem; color:#d4d4d4; white-space:pre-wrap; word-break:break-word; line-height:1.5;">' + escapeHtml(r.snippet) + '</div></div>';
+                        '<div style="font-size:0.8rem; color:#d4d4d4; white-space:pre-wrap; word-break:break-word; line-height:1.5;">' + highlightSearchQuery(r.snippet, data.query) + '</div>' +
+                        '<div style="margin-top:6px;">' +
+                            '<button class="search-quote-btn" data-quote="' + escapeHtml(quoteText) + '" title="一鍵引用：把 ' + qid + ' 插入輸入框（送出後我用 memory 讀回該對話全文）" ' +
+                                'style="background:#333; color:#4ec9b0; border:1px solid #4ec9b0; border-radius:4px; padding:2px 8px; font-size:0.72rem; cursor:pointer;">📌 引用 ' + qid + '</button>' +
+                            '<button class="search-jump-btn" data-agent="' + escapeHtml(jumpAgent) + '" data-conv-id="' + escapeHtml(jumpConvId) + '" data-msg-id="' + escapeHtml(jumpMsgId) + '" title="跳到該對話：切到該 Agent 並把對話捲到這一則" ' +
+                                'style="background:#333; color:#e0a800; border:1px solid #e0a800; border-radius:4px; padding:2px 8px; font-size:0.72rem; cursor:pointer; margin-left:6px;">🔗 跳到該對話</button>' +
+                        '</div></div>';
                 });
                 resultsDiv.innerHTML = html;
             })
@@ -6359,6 +6629,25 @@ function renderSearchContent() {
                 resultsDiv.innerHTML = '<div style="color:#f44747; text-align:center; margin-top:40px;">❌ 搜尋失敗：' + err.message + '</div>';
             });
     }
+
+    // [衍 2026-10-16] 一鍵引用鍵：結果區每次重繪，故用容器事件委派（綁在剛建好的 #searchResults）
+    document.getElementById("searchResults").onclick = function(e) {
+        if (!e.target || !e.target.closest) return;
+        const jbtn = e.target.closest(".search-jump-btn");
+        if (jbtn) { e.stopPropagation(); jumpToConversation(jbtn); return; }
+        const btn = e.target.closest(".search-quote-btn");
+        if (!btn) return;
+        e.stopPropagation();
+        const tok = btn.getAttribute("data-quote") || "";
+        if (!tok) return;
+        const ins = (typeof insertQuoteToken === "function") ? insertQuoteToken : window.insertQuoteToken;
+        if (typeof ins === "function") {
+            ins(tok, "引用");
+        } else {
+            try { navigator.clipboard.writeText(tok); } catch (err) {}
+            showQuoteToast && showQuoteToast("ℹ️ 已複製引用: " + tok);
+        }
+    };
 
     document.getElementById("searchDoBtn").addEventListener("click", doSearch);
     document.getElementById("searchQueryInput").addEventListener("keydown", function(e) {
@@ -8342,12 +8631,7 @@ async function renderRoomContent() {
         edStatus.textContent = '⏳ 儲存中…';
         edStatus.style.color = '#ffd479';
         try {
-            const res = await fetch('/api/create_file', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: curRoomPath, content: newText })
-            });
-            const data = await res.json();
+            const { res, data } = await mokSaveFileRequest(curRoomPath, newText);
             if (data.status !== 'ok') throw new Error(data.error || ('HTTP ' + res.status));
             curRoomText = newText;
             roomShowPreview();
@@ -9192,4 +9476,291 @@ function addRoomNode(node, agent, parentUl, depth) {
   } else {
     boot();
   }
+})();
+
+/* ★ 護眼模式 by idx 2026-10-10 (HK)｜低藍光暖色覆蓋層開關（聊天頂列 #eyeCareBtn）＋強度滑桿 #eyeCareLevel；狀態存 localStorage，重整/重啟後保留；僅切換 body.eye-care class 與 --eye-care-level 變數，不動既有功能 */
+(function(){
+  var KEY = "mok_eye_care", KEY_LV = "mok_eye_care_level";
+  var LV_MIN = 10, LV_MAX = 80, LV_DEF = 51;   // 強度百分比；預設 51% ＝ 比初版 34% 再暗約 50%
+  function clampLv(v){
+    v = parseInt(v, 10);
+    if(isNaN(v)) return LV_DEF;
+    return Math.min(LV_MAX, Math.max(LV_MIN, v));
+  }
+  function readLv(){
+    try { return clampLv(localStorage.getItem(KEY_LV)); } catch(e){ return LV_DEF; }
+  }
+  function applyLv(v, save){
+    v = clampLv(v);
+    document.documentElement.style.setProperty("--eye-care-level", (v / 100).toFixed(2));
+    var s = document.getElementById("eyeCareLevel");
+    if(s && parseInt(s.value, 10) !== v) s.value = v;
+    if(save){ try { localStorage.setItem(KEY_LV, String(v)); } catch(e){} }
+    var b = document.getElementById("eyeCareBtn");
+    if(b && document.body.classList.contains("eye-care")) b.title = "護眼模式：已開啟（點擊關閉）｜強度 " + v + "%";
+    return v;
+  }
+  function ensureLayer(){
+    var el = document.getElementById("eyeCareLayer");
+    if(!el){ el = document.createElement("div"); el.id = "eyeCareLayer"; el.setAttribute("aria-hidden","true"); document.body.appendChild(el); }
+    return el;
+  }
+  function apply(on){
+    ensureLayer();
+    document.body.classList.toggle("eye-care", !!on);
+    var b = document.getElementById("eyeCareBtn");
+    if(on){
+      applyLv(readLv(), false);   // 每次開啟都用已存強度（未存過＝預設 51%）
+    } else if(b){
+      b.title = "護眼模式（低藍光暖色，適合關燈使用）";
+    }
+    if(b){
+      b.classList.toggle("mok-active", !!on);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      b.textContent = on ? "☀️ 護眼" : "🌙 護眼";
+    }
+  }
+  function init(){
+    var on = false;
+    try { on = localStorage.getItem(KEY) === "1"; } catch(e){}
+    var s = document.getElementById("eyeCareLevel");
+    if(s){
+      s.value = readLv();
+      if(!s.dataset.bound){
+        s.dataset.bound = "1";
+        // 拖動即時生效（localStorage 只在放開時寫，避免拖動中頻繁寫入）
+        s.addEventListener("input", function(){ applyLv(s.value, false); });
+        s.addEventListener("change", function(){ applyLv(s.value, true); });
+      }
+    }
+    apply(on);
+    var b = document.getElementById("eyeCareBtn");
+    if(b && !b.dataset.bound){
+      b.dataset.bound = "1";
+      b.addEventListener("click", function(){
+        var next = !document.body.classList.contains("eye-care");
+        try { localStorage.setItem(KEY, next ? "1" : "0"); } catch(e){}
+        apply(next);
+      });
+    }
+  }
+  window.mokEyeCare = {
+    set: apply,
+    isOn: function(){ return document.body.classList.contains("eye-care"); },
+    setLevel: function(v){ var r = applyLv(v, true); try { localStorage.setItem(KEY, "1"); } catch(e){} apply(true); return r; },
+    getLevel: readLv
+  };
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
+})();
+
+/* == 頻道盤模組 idx 2026-10-14 ==
+ * idx|主人指示「最小版」：📡 頻道下拉加 🔍 搜尋框、⭐ 常用置頂（localStorage 點擊計數）、
+ *     分組改依最近使用排序|僅接管 #channelDropdown 的呈現；頻道資料一律即時讀
+ *     /static/channels.json（不寫死任何頻道）；使用紀錄存 localStorage，重整/重啟後仍在；
+ *     20261014_2337(HK)
+ */
+(function(){
+  var DD = "channelDropdown", BTN = "channelBtn";
+  var USE_KEY = "mok_channel_use_v1";
+  var MAX_PIN = 6;
+  var _list = null, _q = "", _lastWrite = 0, _fetching = false, _waiters = [];
+
+  function keyOf(it){ return String((it && (it.id || it.label || it.href)) || ""); }
+  function readUse(){
+    try { var j = JSON.parse(localStorage.getItem(USE_KEY) || "{}"); return (j && typeof j === "object") ? j : {}; }
+    catch(e){ return {}; }
+  }
+  function writeUse(o){ try { localStorage.setItem(USE_KEY, JSON.stringify(o)); } catch(e){} }
+  function markUse(k){
+    if(!k) return;
+    var u = readUse(), r = u[k] || {n:0, t:0};
+    r.n = (r.n || 0) + 1; r.t = Date.now(); u[k] = r; writeUse(u);
+  }
+  function rankOf(k){ var r = readUse()[k]; return r ? {n: r.n || 0, t: r.t || 0} : {n:0, t:0}; }
+  function put(el, html){ _lastWrite = Date.now(); el.innerHTML = html; }
+
+  function esc(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+  function rowHtml(it, star){
+    var tone = it.tone || "#4ec9b0", icon = it.icon || "", label = it.label || it.href || "";
+    return '<button class="header-dropdown-item ch-item" data-ch="' + esc(keyOf(it)) + '"'
+      + ' data-href="' + esc(it.href) + '" style="--tone:' + esc(tone) + ';" title="' + esc(label) + '">'
+      + '<span class="ch-ico">' + esc(icon) + '</span>'
+      + '<span class="ch-label">' + esc(label) + '</span>'
+      + (star ? '<span class="ch-star" title="常用（依點擊次數自動置頂）">⭐</span>' : '')
+      + '</button>';
+  }
+  function renderList(){
+    var d = document.getElementById(DD); if(!d) return;
+    var box = d.querySelector(".ch-list"); if(!box || !_list) return;
+    var q = _q.trim().toLowerCase(), used = [], fresh = [], i;
+    for(i = 0; i < _list.length; i++){
+      var it = _list[i]; if(!it || !it.href) continue;
+      if(q && (String(it.label || "") + " " + String(it.id || "") + " " + String(it.href || "")).toLowerCase().indexOf(q) < 0) continue;
+      var r = rankOf(keyOf(it));
+      (r.n > 0 ? used : fresh).push({it: it, n: r.n, t: r.t, i: i});
+    }
+    used.sort(function(a, b){ return (b.n - a.n) || (b.t - a.t) || (a.i - b.i); });
+    var pin = used.slice(0, MAX_PIN);
+    var rest = used.slice(MAX_PIN).sort(function(a, b){ return (b.t - a.t) || (a.i - b.i); }).concat(fresh);
+    var h = "";
+    if(pin.length){
+      h += '<div class="ch-group-label">⭐ 常用</div>';
+      for(i = 0; i < pin.length; i++) h += rowHtml(pin[i].it, true);
+      if(rest.length) h += '<div class="ch-group-label">全部</div>';
+    }
+    for(i = 0; i < rest.length; i++) h += rowHtml(rest[i].it, false);
+    if(!h) h = '<div class="ch-empty">🔍 沒有符合的頻道</div>';
+    put(box, h);
+  }
+  function bindOnce(d){
+    var inp = d.querySelector(".ch-search");
+    if(inp){
+      inp.value = _q;
+      inp.addEventListener("input", function(){ _q = inp.value; renderList(); });
+      inp.addEventListener("keydown", function(e){
+        if(e.key === "Escape" && inp.value){ _q = ""; inp.value = ""; renderList(); e.stopPropagation(); return; }
+        if(e.key === "Enter"){ var f = d.querySelector(".ch-item"); if(f) f.click(); }
+      });
+    }
+    if(!d.dataset.chBoardBound){
+      d.dataset.chBoardBound = "1";
+      d.addEventListener("click", function(e){
+        var t = e.target, b = (t && t.closest) ? t.closest(".ch-item") : null;
+        if(!b) return;
+        markUse(b.getAttribute("data-ch"));
+        var href = b.getAttribute("data-href");
+        if(href) location.href = href;
+      });
+    }
+  }
+
+  function mount(focus){
+    var d = document.getElementById(DD); if(!d) return;
+    if(!d.querySelector(".ch-list")) build(d);
+    renderList();
+    if(focus){
+      var inp = d.querySelector(".ch-search");
+      if(inp && document.activeElement !== inp){ try { inp.focus(); } catch(e){} }
+    }
+  }
+
+  function bind(){
+    var d = document.getElementById(DD); if(!d) return;
+    var btn = document.getElementById(BTN);
+    if(btn && !btn.dataset.chBoardBound){
+      btn.dataset.chBoardBound = "1";
+      btn.addEventListener("click", function(){ load(function(){ mount(true); }); });
+    }
+    if(window.MutationObserver && !d.dataset.chBoardObserved){
+      d.dataset.chBoardObserved = "1";
+      new MutationObserver(function(){
+        if(Date.now() - _lastWrite < 60) return;
+        mount(false);
+      }).observe(d, {childList: true});
+    }
+    load(function(){ mount(false); });
+  }
+  function build(d){
+    put(d, '<div class="ch-search-wrap">'
+      + '<span class="ch-search-ico">🔍</span>'
+      + '<input class="ch-search" type="text" placeholder="搜尋頻道…" autocomplete="off" spellcheck="false">'
+      + '</div><div class="ch-list"></div>');
+    bindOnce(d);
+  }
+
+  function load(cb){
+    if(_list){ cb(); return; }
+    _waiters.push(cb);
+    if(_fetching) return;
+    _fetching = true;
+    fetch("/static/channels.json?t=" + Date.now(), {cache: "no-store"})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){ if(j && j.channels) _list = j.channels; })
+      .catch(function(){})
+      .then(function(){
+        _fetching = false;
+        var ws = _waiters; _waiters = [];
+        for(var i = 0; i < ws.length; i++){ try { ws[i](); } catch(e){} }
+      });
+  }
+
+  /* 測試／除錯掛鉤（與 mokEyeCare 同風格；不影響正式流程）*/
+  window.mokChannelBoard = {
+    mount: function(){ mount(false); },
+    reload: function(cb){ _list = null; load(cb || function(){}); },
+    clearUsage: function(){ writeUse({}); mount(false); }
+  };
+
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);
+  else bind();
+})();
+
+/* == Agent 盤模組 idx 2026-10-14 ==
+ * idx|主人指示「最小版」：左側 Agent 列表加 🔍 搜尋框、⭐ 常用置頂（localStorage 點擊計數）、
+ *     分組改依最近使用排序|策略：搜尋字串放 window.__mokAgentQuery（單一真實來源），
+ *     renderAgentList() 讀它做過濾；本模組只負責「搜尋框 UI ＋ 計數存取 ＋ 掛鉤」，
+ *     不重寫列表渲染，故與既有分組／未讀／執行中樣式完全相容|20261014_2345(HK)
+ * 說明：搜尋框插在 #agentList 之前（#agentList 每次渲染會 innerHTML=''，不能放裡面）。
+ * 掛鉤：window.mokAgentBoard.refresh() / clearUsage()
+ */
+var MOK_AGENT_USE_KEY = 'mok_agent_use_v1';   // {"<agent>": {"n": 點擊次數, "t": 最後使用時間(ms)}}
+
+function mokAgentUseRead() {
+    try {
+        var j = JSON.parse(localStorage.getItem(MOK_AGENT_USE_KEY) || '{}');
+        return (j && typeof j === 'object') ? j : {};
+    } catch (e) { return {}; }
+}
+function mokAgentUseWrite(o) {
+    try { localStorage.setItem(MOK_AGENT_USE_KEY, JSON.stringify(o)); } catch (e) {}
+}
+function mokAgentUseMark(name) {
+    if (!name) return;
+    var u = mokAgentUseRead(), r = u[name] || { n: 0, t: 0 };
+    r.n = (r.n || 0) + 1; r.t = Date.now(); u[name] = r; mokAgentUseWrite(u);
+}
+function mokAgentQuery() { return String(window.__mokAgentQuery || '').trim().toLowerCase(); }
+
+(function () {
+    var _timer = null;
+    function apply() { try { renderAgentList(); } catch (e) {} }
+    function build() {
+        if (document.getElementById('agentSearchWrap')) return;
+        var list = document.getElementById('agentList');
+        if (!list || !list.parentNode) return;
+        var w = document.createElement('div');
+        w.id = 'agentSearchWrap';
+        w.className = 'agent-search-wrap';
+        w.innerHTML = '<span class="agent-search-ico">🔍</span>'
+            + '<input id="agentSearchInput" class="agent-search" type="text" placeholder="搜尋 Agent…" autocomplete="off" spellcheck="false">';
+        list.parentNode.insertBefore(w, list);
+        var inp = w.querySelector('.agent-search');
+        if (!inp) return;
+        inp.value = window.__mokAgentQuery || '';
+        inp.addEventListener('input', function () {
+            window.__mokAgentQuery = inp.value;
+            if (_timer) clearTimeout(_timer);
+            _timer = setTimeout(apply, 120);          // 輕度防抖，避免每鍵重繪整個列表
+        });
+        inp.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && inp.value) {
+                inp.value = ''; window.__mokAgentQuery = ''; apply(); e.stopPropagation(); return;
+            }
+            if (e.key === 'Enter') {
+                var f = document.querySelector('#agentList .agent-item');
+                if (f) f.click();
+            }
+        });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build);
+    else build();
+    window.mokAgentBoard = {
+        refresh: function () { build(); apply(); },
+        clearUsage: function () { mokAgentUseWrite({}); apply(); }
+    };
 })();

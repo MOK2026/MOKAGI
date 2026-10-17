@@ -438,6 +438,15 @@ def handle_instagram(args, chat_id=None, agent_config=None):
     agent_config: 當前 agent 的配置 dict（含 MOK_AGENT_NAME），
                   用於動態定位 ~/.mok/agent/<agent>/ 並讀取 MOK_instagram_ac / MOK_instagram_pw。
     """
+    # 非 admin 禁用（政策唯一真相：tools/tool_policy.py）— 2026-10-17 衍
+    try:
+        from tool_policy import gate as _tp_gate
+        _deny = _tp_gate("instagram", chat_id, agent_config)
+    except Exception:
+        _deny = '{"success": false, "error": "工具「instagram」僅限管理員使用（安全閘門判定失敗，預設拒絕）。", "denied_by": "tool_policy_failclosed"}'
+    if _deny:
+        return _deny
+
     global _AGENT_CONFIG
     if agent_config:
         _AGENT_CONFIG = agent_config

@@ -17,7 +17,7 @@
 
 流程（單一 agent）
   權限 → 節流 ＋ 新 logs 檢查 → 分批讀（soul 全部 .md，排除 EXP.md，加新 logs）
-  → LLM 生成 3 段式 → 鎖 start → append soul/EXP.md → 鎖 done
+  → LLM 生成 4 段式 → 鎖 start → append soul/EXP.md → 鎖 done
   → 更新 soul/.dream.json（last_log / last_dream_at）
   → 整理：讀新 EXP.md → LLM 濃縮 → 鎖 → 覆寫
   → 若超過上限行數 → 歸檔到 soul/EXP_archive/EXP_<YYYY-MM>.md
@@ -343,12 +343,17 @@ async def _llm(prompt, agent_config, system=None, **opts):
 def _prompt_extract(agent_name, idx, total, body):
     return (
         "以下是 agent「%s」的部分日誌與靈魂檔（第 %d/%d 批）。\n"
-        "請歸納成 3 段（每段一到三則 bullet）：\n"
+        "請歸納成 4 段：\n"
         "1) 學到什麼：可複用的做法、關鍵指令、API、流程\n"
         "2) 踩了什麼坑：錯誤、限制、環境陷阱\n"
         "3) 下次怎麼做：具體、可執行\n"
+        "4) 通用教訓（可跨 agent 共享）：只放「別的 agent 也可能用得上」的通則，\n"
+        "   例如全域工具、系統路徑、API、通用流程、環境陷阱、並行保護、刪檔先進回收筒等；\n"
+        "   純個人私事、只關本 agent 身份或單一任務細節的，放回 1)2)3)，不要放這裡。\n"
+        "   每則一行，格式：`【類別】內容`（例如 `【找檔】找檔一律用 code_index，勿對 .mok 全樹 grep`）；\n"
+        "   若沒有就寫「（無）」。\n"
         "規定：只寫有根據的內容；某段無內容就寫「（無）」；不要重述任務、不要客套；"
-        "不要用 # 或 ## 標題，直接用 1) 2) 3) 三段輸出。\n\n"
+        "不要用 # 或 ## 標題，直接用 1) 2) 3) 4) 四段輸出。\n\n"
         "---- 內容開始 ----\n%s\n---- 內容結束 ----" % (agent_name, idx, total, body)
     )
 
@@ -380,7 +385,72 @@ def _format_entry(agent_name, sections, log_paths):
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _extract_universal(text):
+    """從做夢輸出抽出「4) 通用教訓」區塊的 bullet。回傳 [(類別, 教訓), ...]。
+
+    解析策略：以行首 `N)` 分段（1~4），取第 4 段；分不出則退回抓最後一個 `4)` 標記。
+    每則教訓一行，可選 `【類別】` 前綴（預設「通用」）；空行與「（無）」會略過。
+    """
+    if not text:
+        return []
+    body = ""
+    parts = re.split(r"(?m)^\s*[1234]\s*[)）:：、]\s*", text or "")
+    if len(parts) >= 5:
+        body = parts[4]
+    else:
+        m = re.search(r"(?m)^\s*4\s*[)）:：、]\s*(.*)$", text or "", re.S)
+        if not m:
+            return []
+        body = m.group(1)
+    lines = body.splitlines()
+    if lines:
+        h = lines[0].strip()
+        if "通用" in h and len(h) <= 30 and re.search(r"[:：]\s*$|教訓\s*$", h):
+            lines = lines[1:]
+    out = []
+    for raw in lines:
+        line = raw.strip()
+        line = re.sub(r"^[-*•·‣◦▪◆◇●]\s*", "", line)
+        line = re.sub(r"^\d+[.)、]\s*", "", line)
+        line = line.strip()
+        if not line or line in ("（無）", "無", "（none）", "none", "N/A", "（不適用）", "—", "---"):
+            continue
+        cat = "通用"
+        m2 = re.match(r"^[\[【]([^\]】]{1,24})[\]】]\s*[:：]?\s*", line)
+        if m2:
+            cat = m2.group(1).strip()
+            line = line[m2.end():].strip()
+        if line:
+            out.append((cat, line))
+    return out
+
+
+def _share_lessons(agent_name, sections, agent_config):
+    """把做夢產出的「通用教訓」寫入跨 agent 經驗池（orchestrator.lesson_add）。
+
+    回傳 [{category, lesson, msg | error}, ...] 供 res["shared"] 追蹤；任何失敗都不影響做夢主流程。
+    """
+    flag = str((agent_config or {}).get("MOK_dream_share_lessons", "1")).strip().lower()
+    if flag in ("0", "false", "no", "off"):
+        return []
+    try:
+        from orchestrator import lesson_add
+    except Exception as e:
+        return [{"error": "無法載入 orchestrator：%s" % e}]
+    added = []
+    for s in sections:
+        for cat, lesson in _extract_universal(s):
+            try:
+                ok, msg = lesson_add(agent_name, cat, lesson, source="dream")
+            except Exception as e:
+                added.append({"error": str(e)})
+                continue
+            added.append({"category": cat, "lesson": lesson[:80], "msg": msg})
+    return added
+
+
 # ------------------------------------------------------------------- 歸檔
+
 def _archive_if_needed(exp_path, agent_name, max_lines, agent_config):
     txt = _read_text(exp_path)
     lines = txt.splitlines()
@@ -501,6 +571,8 @@ async def dream_one(agent_name, agent_config=None, dry_run=False, force=False,
     _moved = _lp_consume(os.path.join(agent_dir, "logs"), log_paths)
     res["logs_trashed"] = len(_moved)
     res["logs_trash_failed"] = len(log_paths) - len(_moved)
+    # 通用教訓 → 跨 agent 經驗池（orchestrator lesson_add），讓共享真正串起來
+    res["shared"] = _share_lessons(agent_name, sections, agent_config)
 
     cursor = os.path.basename(log_paths[-1]) if log_paths else latest
     st.update({"last_log": cursor,

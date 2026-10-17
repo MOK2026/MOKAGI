@@ -2508,9 +2508,91 @@ body.font-xl #chatMessages .round-reply-text pre code {
 .token-energy-bar.lv-mid  .token-energy-fill{ height:15px; background:linear-gradient(90deg,rgba(217,138,74,.55),rgba(240,171,109,.85)); box-shadow:0 0 10px rgba(240,171,109,.30); }
 .token-energy-bar.lv-low  .token-energy-fill{ height:20px; background:linear-gradient(90deg,rgba(192,80,92,.45),rgba(232,139,147,.80));  box-shadow:0 0 12px rgba(232,139,147,.40); animation:tokenEnergyPulse 2.8s ease-in-out infinite; }
 @keyframes tokenEnergyPulse{ 0%,100%{ opacity:.30; } 50%{ opacity:.85; } }
+
+/* ★ 護眼模式 by idx 2026-10-10 (HK)｜低藍光暖色覆蓋層；開關＝聊天頂列 #eyeCareBtn，強度滑桿＝#eyeCareLevel；狀態存 localStorage("mok_eye_care" / "mok_eye_care_level") */
+:root{ --eye-care-level:.51; }  /* 護眼強度（可調）：.10~.80，預設 .51 ＝ 比初版 .34 再暗約 50% */
+#eyeCareLayer{
+    position:fixed; inset:0; z-index:2147483000; pointer-events:none;
+    background:#ff9f43; mix-blend-mode:multiply; opacity:0;
+    transition:opacity .15s ease;
+}
+body.eye-care #eyeCareLayer{ opacity:var(--eye-care-level,.51); }
+
+/* ★ 護眼強度滑桿 by idx 2026-10-10 (HK)｜僅護眼開啟時出現；拖動即時調整覆蓋層濃度（越右越暗） */
+#eyeCareLevel{
+    display:none; flex:0 1 74px; min-width:46px; height:16px; margin-left:2px;
+    -webkit-appearance:none; appearance:none; background:transparent; cursor:pointer; vertical-align:middle;
+}
+body.eye-care #eyeCareLevel{ display:inline-block; }
+#eyeCareLevel::-webkit-slider-runnable-track{ height:4px; border-radius:999px; background:linear-gradient(90deg,rgba(255,159,67,.20),rgba(255,159,67,.95)); }
+#eyeCareLevel::-webkit-slider-thumb{ -webkit-appearance:none; width:13px; height:13px; margin-top:-4.5px; border-radius:50%; background:#ffd7a0; border:1px solid rgba(0,0,0,.4); box-shadow:0 0 6px rgba(255,170,80,.65); }
+#eyeCareLevel::-moz-range-track{ height:4px; border-radius:999px; background:rgba(255,159,67,.7); }
+#eyeCareLevel::-moz-range-thumb{ width:13px; height:13px; border-radius:50%; background:#ffd7a0; border:1px solid rgba(0,0,0,.4); }
+@media (max-width:640px){ #eyeCareLevel{ flex-basis:56px; } }
+/* ★ 護眼鍵組搬入會員框 by idx 2026-10-10 (HK)：下拉為 column 佈局，滑桿改滿寬區塊、僅護眼開啟時顯示 */ .header-btns-dropdown .header-more-static #eyeCareLevel{ width:100%; flex:0 0 auto; height:18px; margin:4px 0 2px; box-sizing:border-box; } body.eye-care .header-btns-dropdown .header-more-static #eyeCareLevel{ display:block; } #eyeCareBtn.mok-active{
+    box-shadow:0 0 0 1px rgba(255,196,128,.85) inset, 0 0 8px rgba(255,170,80,.35);
+}
 @media (prefers-reduced-motion: reduce){
     .token-energy-bar.lv-low .token-energy-fill{ animation:none; opacity:.65; }
 }
 @media (max-width:640px){
   .mok-media-image img,.mok-media-video video{max-width:100%;max-height:60vh;}
 }
+
+/* == 頻道盤樣式 idx 2026-10-14 ==
+ * idx|頻道盤最小版：🔍 搜尋框、⭐ 常用置頂、分組標題|20261014_2337(HK)
+ * 選擇器全部以 #channelDropdown 開頭、class 用 ch- 前綴，不外溢影響其他頁面 */
+#channelDropdown { min-width: 232px; }
+#channelDropdown .ch-search-wrap {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; align-items: center; gap: 6px;
+    padding: 2px 4px 8px; margin-bottom: 2px;
+    background: #2d2d30; border-bottom: 1px solid #3e3e42;
+}
+#channelDropdown .ch-search-ico { font-size: .75rem; opacity: .6; margin-left: 4px; }
+#channelDropdown .ch-search {
+    flex: 1 1 auto; min-width: 0;
+    background: #3a3a3d; border: 1px solid #4a4a4f; border-radius: 7px;
+    color: #eee; font-size: .8rem; font-family: inherit;
+    padding: 5px 8px; outline: none;
+}
+#channelDropdown .ch-search::placeholder { color: #8a8a90; }
+#channelDropdown .ch-search:focus { border-color: #4ec9b0; box-shadow: 0 0 0 2px rgba(78,201,176,.18); }
+#channelDropdown .ch-group-label {
+    font-size: 10px; letter-spacing: 1px; opacity: .5;
+    padding: 8px 12px 3px;
+}
+#channelDropdown .header-dropdown-item.ch-item { display: flex; align-items: center; gap: 6px; }
+#channelDropdown .ch-item .ch-label {
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#channelDropdown .ch-item .ch-star { margin-left: auto; font-size: .68rem; opacity: .85; }
+#channelDropdown .ch-empty { padding: 10px 12px; opacity: .55; font-size: .8rem; }
+
+/* == Agent 盤樣式 idx 2026-10-14 ==
+ * idx|左側 Agent 列表最小版：🔍 搜尋框（sticky）、⭐ 常用分組、搜尋空狀態|20261014_2345(HK)
+ * 選擇器全部以 #agentSidebar 開頭、class 用 agent-search- 前綴，不外溢影響其他頁面 */
+#agentSidebar .agent-search-wrap {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px 8px;
+    background: rgba(37, 37, 40, .96);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-bottom: 1px solid #3e3e42;
+}
+#agentSidebar .agent-search-ico { font-size: .75rem; opacity: .55; margin-left: 4px; }
+#agentSidebar .agent-search {
+    flex: 1 1 auto; min-width: 0;
+    background: #1e1e20; border: 1px solid #3e3e42; border-radius: 8px;
+    color: #e8e8ea; font-size: .78rem; font-family: inherit;
+    padding: 6px 8px; outline: none;
+}
+#agentSidebar .agent-search::placeholder { color: #7a7a80; }
+#agentSidebar .agent-search:focus { border-color: #4ec9b0; box-shadow: 0 0 0 2px rgba(78,201,176,.16); }
+#agentSidebar .agent-group--pin > .agent-group-header { color: #ffd68a; }
+#agentSidebar .agent-group--pin { border-left: 2px solid rgba(255,214,138,.45); }
+#agentSidebar .agent-group--recent { border-left: 2px solid rgba(78,201,176,.35); }
+#agentSidebar .agent-empty { padding: 14px 12px; opacity: .55; font-size: .8rem; text-align: center; }
+#agentSidebar.collapsed .agent-search-wrap { display: none; }

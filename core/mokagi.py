@@ -481,6 +481,134 @@ def _load_user_profile_block(agent_name: str, uid: str) -> str:
 
 _env_info_cache = {}  # 稚 2026-10-05：環境塊小時級凍結快取（key = 時間|agent|work_dir）
 
+# ── P0（2026-10-11 by mokagi說明）：對外身分覆蓋（L0 判定 + L1 prompt 覆蓋）──
+# 目的：根治「主人／侍女」等內部用語洩漏到非 admin 對話。
+# 手法：僅在「非 admin 對話者」時，於 system prompt『最前面』注入最高優先覆蓋層；
+#       admin（內）走原路、輸出零改變。用覆蓋層，不去改動任何 soul 檔。
+_EXTERNAL_IDENTITY_OVERRIDE = """【對外身分｜最高優先，效力高於下列任何相反設定】
+你現在面對的是「非管理員」對象（訪客／會員／外部用戶）。務必遵守：
+1. 一律自稱「AI 助手」（可加上你的名字）；禁止以人身依附、隸屬或被擁有的方式自稱。
+2. 稱呼對方一律用「您」或對方的名字／暱稱；禁止使用任何暗示私人從屬或所有權的稱謂。
+3. 下文若出現內部專用稱謂或角色自稱，一律重新解讀為：對方是「您」，你是「AI 助手」；也不得複述或引用該類稱謂。
+4. 不得洩漏管理員專屬語境（系統重啟、Jobs、內部路徑、確認碼、其他會員等）；被問到時禮貌帶過。
+本段優先於任何 soul／角色／身分設定；與其衝突時一律以本段為準。
+
+---
+
+"""
+
+
+# ── L2/L4 共用：內部用語 → 對外中性用語（只作用於「非 admin」路徑，admin 完全不變）──
+_EXTERNAL_LANG_MAP = (("主人", "您"), ("侍女", "AI 助手"), ("女僕", "AI 助手"),
+                      ("僕人", "AI 助手"), ("奴婢", "AI 助手"), ("奴僕", "AI 助手"))
+_EXTERNAL_LANG_AUDIT = os.path.expanduser("~/.mok/logs/external_lang_guard.jsonl")
+
+
+def neutralize_external_text(text):
+    """把內部稱謂換成對外中性用語；非字串原樣回傳。"""
+    if not isinstance(text, str) or not text:
+        return text
+    out = text
+    for _a, _b in _EXTERNAL_LANG_MAP:
+        if _a in out:
+            out = out.replace(_a, _b)
+    return out
+
+
+def is_external_caller(user_id, agent_config=None) -> bool:
+    """對外統稱（＝L0 判定），供 turn_engine／frontends／tools 共用。"""
+    return _caller_is_external(user_id, agent_config)
+
+
+def _audit_external_guard(where, uid, before, after):
+    """L4：發生中性化時寫審計（best-effort，永不拋錯）。"""
+    try:
+        _dir = os.path.dirname(_EXTERNAL_LANG_AUDIT)
+        if _dir:
+            os.makedirs(_dir, exist_ok=True)
+        rec = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "where": where,
+               "user": str(uid or "")[:24], "before": str(before)[:160], "after": str(after)[:160]}
+        with open(_EXTERNAL_LANG_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+class ExternalStreamSanitizer:
+    """L4：對外串流輸出防護。
+
+    逐段（delta）中性化，並保留尾端「可能是關鍵詞開頭」的字元，
+    避免關鍵詞被切成兩段而漏改；結束時呼叫 flush() 吐出保留字元。
+    """
+
+    _HOLD = ("主", "侍", "女", "僕", "奴")
+
+    def __init__(self, user_id=""):
+        self.user_id = str(user_id or "")
+        self._buf = {}
+
+    def feed(self, key, text):
+        if not isinstance(text, str) or not text:
+            return text
+        buf = self._buf.get(key, "") + text
+        self._buf[key] = ""
+        # 先做完整替換（此刻緩衝內的關鍵詞是完整的），再考慮尾端是否可能被下一個 delta 切斷。
+        out = neutralize_external_text(buf)
+        if out != buf:
+            _audit_external_guard("stream:" + str(key), self.user_id, buf, out)
+        if out and out[-1:] in self._HOLD:
+            # 尾端單字可能是關鍵詞的第一個字（例：主→主人）→ 保留到下一個 delta 再處理
+            self._buf[key] = out[-1:]
+            out = out[:-1]
+        return out
+
+    def flush(self):
+        out = []
+        for k, v in list(self._buf.items()):
+            if v:
+                out.append((str(k).split(":")[0], neutralize_external_text(v)))
+            self._buf[k] = ""
+        return out
+
+    def scrub_event(self, event):
+        """就地中性化一個串流事件（think／reply／tool_result／tool_calls）。"""
+        try:
+            if not isinstance(event, dict):
+                return event
+            et = event.get("type")
+            if et in ("think", "reply", "tool_result"):
+                _key = et if et != "reply" else "reply:" + str(event.get("subtype") or "normal")
+                _orig = event.get("content")
+                if isinstance(_orig, str) and _orig:
+                    event["content"] = self.feed(_key, _orig)
+            elif et == "tool_calls":
+                for _c in (event.get("calls") or []):
+                    try:
+                        if isinstance(_c.get("args"), str):
+                            _c["args"] = neutralize_external_text(_c["args"])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return event
+
+
+def _caller_is_external(user_id, agent_config=None) -> bool:
+    """L0：本次對話者是否為「對外（非 admin）」。
+    空／未知 uid 或 admin -> False；其餘（訪客、會員、外部）-> True。
+    任何例外一律回 False（保守，避免誤傷 admin）。"""
+    u = str(user_id or "").strip()
+    if not u:
+        return False
+    try:
+        import owner_auth
+        if owner_auth.is_admin_identity(u, agent_config or _resolve_agent_config()):
+            return False
+    except Exception:
+        return False
+    return True
+
+
 def get_system_context(agent_name: str, owner: str, owner_time: int=0, context_files: Optional[List[str]] = None, output_dir: Optional[str] = None, output_role: Optional[str] = None, current_user: Optional[str] = None) -> str:
     """獲取主機環境信息 + Agent 工作目錄，帶緩存
     
@@ -655,6 +783,16 @@ def get_system_context(agent_name: str, owner: str, owner_time: int=0, context_f
     except Exception:
         pass
     context = "\n\n---\n\n".join(parts + _tail_parts + [env_info])  # P0：穩定塊在前、殿後塊次之、環境塊最尾
+
+    # L1（2026-10-11／2026-10-12 強化 by mokagi說明）：對外身分覆蓋層 + context 中性化
+    #   非 admin 才做；admin 走原路、輸出逐字不變。
+    #   中性化＝把注入的 soul／工具守則／產出位置等文字裡的內部稱謂換成中性用語，
+    #   避免模型在「思考」中逐字複述而外洩（2026-10-11 訪客實測的 think 漏點根因）。
+    try:
+        if _caller_is_external(current_user):
+            context = _EXTERNAL_IDENTITY_OVERRIDE + neutralize_external_text(context)
+    except Exception:
+        pass
 
     _system_context_cache[cache_key] = (context, now)
     return context
@@ -1557,7 +1695,8 @@ async def call_llm(
             agent_config.get("MOK_AGENT_NAME", "助手"),
             agent_config.get("MOK_ADMIN_NAME", "用戶"),
             int(agent_config.get("MOK_ADMIN_TIME_ZONE", 0)),
-            context_files=context_files
+            context_files=context_files,
+            current_user=(user_id or None)
         )
         if soul_content:
             if system_prompt:
@@ -1841,25 +1980,12 @@ async def call_llm(
                             )}
                             return
                         _is_429 = _is_rate_limit_error(_e)
-                        if _is_429:
-                            # 429：同一把 key 退避重試（絕不轉 key，以免打掉 prompt 快取命中）；上限放寬到 5 次
-                            _max_attempts = max(_max_attempts, 5)
                         _retryable = isinstance(_e, (httpx.ReadError, httpx.ReadTimeout, httpx.RemoteProtocolError)) or _is_429
-                        _tag = "續寫" if _emitted_text else "整輪"
-                        if _retryable and _attempt < _max_attempts:
-                            if _is_429:
-                                _wait = _rate_limit_backoff(_attempt, _e)
-                                logging.warning("上游 429 限流（同 key 退避，第 %d 次）→ %.1fs 後重試：%s", _attempt, _wait, _e)
-                                yield {"type": "think", "content": f"⚠️ 上游限流（429），同一把 key 退避 {_wait:.0f}s 後重試…（{_attempt}/{_max_attempts - 1}）"}
-                            else:
-                                _wait = min(2 ** (_attempt - 1), 4)
-                                logging.warning("OpenAI 串流中斷（%s，第 %d 次）→ %s自動重試", type(_e).__name__, _attempt, "續寫" if _emitted_text else "整輪")
-                                yield {"type": "think", "content": f"⚠️ 上游連線中斷（{type(_e).__name__}），{_tag}自動重試中…（{_attempt}/{_max_attempts - 1}）"}
-                            await asyncio.sleep(_wait)
-                            continue
+                        # (2026-10-10 稚) 主人指示：上游中斷／429 不再退避重試續寫（不凍 1–4 秒），
+                        #   直接結束本輪並提示；已輸出內容保留，由使用者自行回「繼續」接續。
                         logging.exception("OpenAI 流式調用失敗")
                         if _is_429:
-                            _msg = "上游限流（429）持續：已用同一把 key 退避重試多次仍失敗，請稍後再試。"
+                            _msg = "上游限流（429）：本次不再自動退避重試，請稍後再試。"
                         else:
                             _msg = "上游串流連線中斷，請重試或稍後再試" if _retryable else str(_e)
                         if _emitted_text:

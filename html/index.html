@@ -3,8 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>MOK</title>
+    <title>MOKAGI｜AI Agent 作業系統</title>
+    <meta name="description" content="MOKAGI 自託管多 Agent AI 作業系統：100+ 個 AI Agent 分工協作，替你完成對話、資料整理、自動化與內容創作。">
     <link rel="canonical" href="/chat">
+
+    <!-- ★ MOKAGI 品牌 Icon（節點漸變版）加回網頁 · idx 2026-10-12 01:36 (HK)｜素材來源：agent/吸睛女/jobs/mokagi_icon｜深底亮線為主版 → 瀏覽器分頁 favicon / iOS 主畫面；實體檔 static/mokagi/ -->
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ asset_url('mokagi/mokagi-icon-32.png') }}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ asset_url('mokagi/mokagi-icon-16.png') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ asset_url('mokagi/mokagi-icon-180.png') }}">
 
     <!-- ═══════════ 第三方前端庫 ═══════════ -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
@@ -58,6 +64,7 @@
                     <span id="agentHeaderDisplay"></span>
                     <div class="agent-header-btns" id="agentHeaderBtns">
                         <button id="unreadBtn" class="header-tool-btn mok-pill" style="--tone:#8a6d9c; display:inline-block;" title="切換左側名片未讀標示">📭 未讀</button>
+                        <!-- ★ 2026-10-10：🌙 護眼鍵組已搬入「會員框」（#headerMoreStatic，通知下方）by idx -->
                         <button id="showPendingBtn" class="header-tool-btn mok-pill" data-foldable="1" style="--tone:#4ec9b0; display:none;">📋 未完成工作</button>
                     </div>
                 </div>
@@ -69,6 +76,9 @@
                         <!-- ★ 2026-09-27：會籍鍵已移除，改由下方 Token 餘額鍵開啟會員面板 -->
                         <div class="header-token-balance header-dropdown-item" id="headerTokenBalance" data-src="/member" title="每月 Token 額度 - 已用 = 剩餘（點擊開會員面板）">🧮 —</div>
                         <button id="notifyToggleBtn" class="header-dropdown-item notify-toggle-btn" title="完成提示">🔔 通知</button>
+                        <!-- ★ 護眼鍵組搬入會員框 by idx 2026-10-10 (HK)：原在聊天頂列 #agentHeaderBtns，主人指示移入會員下拉；id 與事件綁定不變，main.js 護眼模組免改 -->
+                        <button id="eyeCareBtn" class="header-dropdown-item" style="--tone:#e0a458;" aria-pressed="false" title="護眼模式（低藍光暖色，適合關燈使用）">🌙 護眼</button>
+                        <input id="eyeCareLevel" type="range" min="10" max="80" step="1" value="51" aria-label="護眼強度" title="護眼強度：越右越暗（10%~80%）">
                         <div class="header-dropdown-gap" aria-hidden="true"></div>
                         <button id="stopBtn" data-admin-only class="mok-pill mok-pill--danger header-stop-btn header-dropdown-item mok-hidden" style="--tone:#e05561;" title="主人重啟（完整重啟 mokagi：重載所有程式碼與補丁；admin 專用）">🔒 <span class="btn-label">主人重啟</span></button>
                     </div>
@@ -163,8 +173,11 @@
                     <button data-tool="coldcall" title="冷呼控制台">📞 冷呼控制台</button>
                     <button data-tool="傳單王" title="網上傳單系統">📨 傳單王</button>
                     <button data-tool="短劇王" title="短劇王操作台（漫劇／短劇出片）">🎬 短劇王</button>
+                    <button data-tool="短劇王Veo" title="短劇王Veo 操作台（逐鏡接力・自動抽尾幀）">🎥 短劇王Veo</button>
                     <button data-tool="game">🎮 game</button>
                     <button data-tool="ascii">🎨 ASCII</button>
+                    <button data-tool="侍女辦公桌" title="侍女辦公桌看板（需登入）">🪑 侍女辦公桌</button>
+                    <button data-tool="自助頁原型" data-admin-only class="mok-hidden" title="自助頁原型（痛點 → AI demo → 三段定價）">🧪 自助頁原型</button>
                     <button id="openToolsPanel2" title="再開一組工具面板">🧰 面板2</button>
                 </div>
                 <button id="toolsMoreBtn" class="tools-more-btn" title="更多工具" style="display:none;">⋯</button>

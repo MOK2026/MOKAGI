@@ -288,7 +288,9 @@ async def _call_vision_model(
     mime_type: str,
     question: str,
     model_config: dict,
-    extra_images: list = None
+    extra_images: list = None,
+    agent_name: str = None,
+    user_id: str = None
 ) -> str:
     """調用多模態模型分析圖片"""
     if not HAS_HTTPX:
@@ -366,7 +368,7 @@ async def _call_vision_model(
                 }, ensure_ascii=False)
             
             data = response.json()
-            _log_remote_tool_usage(model_name, api_url, (data or {}).get("usage"))
+            _log_remote_tool_usage(model_name, api_url, (data or {}).get("usage"), agent_name=agent_name, user_id=user_id)
             if "choices" in data and len(data["choices"]) > 0:
                 content = data["choices"][0].get("message", {}).get("content", "")
                 return content
@@ -410,6 +412,12 @@ async def handle_vision(args, chat_id="web", agent_config=None):
         except Exception:
             pass
     
+    # 2026-10-09 記帳歸屬：解析 agent 名，供 vision 記帳使用（避免黑數/unknown）
+    try:
+        _agent_name = (agent_config or {}).get("MOK_AGENT_NAME") if isinstance(agent_config, dict) else None
+    except Exception:
+        _agent_name = None
+    _agent_name = _agent_name or os.environ.get("MOK_AGENT_NAME") or None
     # --- 解析參數 ---
     file_path = None
     url = None
@@ -493,7 +501,7 @@ async def handle_vision(args, chat_id="web", agent_config=None):
         if is_image:
             # 圖片分析
             img_b64, mime_type = _get_image_base64(file_path)
-            result = await _call_vision_model(img_b64, mime_type, question, model_config)
+            result = await _call_vision_model(img_b64, mime_type, question, model_config, agent_name=_agent_name)
 
             # ---- 內容審核拒答偵測：結果為空或含拒答關鍵字時，自動輪換其他模型重試 ----
             REFUSAL_KEYWORDS = (
@@ -521,7 +529,7 @@ async def handle_vision(args, chat_id="web", agent_config=None):
                     if not _alt or _alt.get("model") in _tried:
                         continue
                     _tried.add(_alt.get("model"))
-                    _r = await _call_vision_model(img_b64, mime_type, question, _alt)
+                    _r = await _call_vision_model(img_b64, mime_type, question, _alt, agent_name=_agent_name)
                     if isinstance(_r, str) and _r.lstrip().startswith('{"success": false'):
                         continue
                     _rl = (_r if isinstance(_r, str) else "").strip().lower()
@@ -581,7 +589,7 @@ async def handle_vision(args, chat_id="web", agent_config=None):
             extra = [(b64, mime) for b64, mime, _ in frame_data[1:]]
             
             video_question = f"{question}\n\n（這是從影片中提取的 {len(frame_data)} 個關鍵幀，請綜合分析影片內容。）"
-            result = await _call_vision_model(first[0], first[1], video_question, model_config, extra)
+            result = await _call_vision_model(first[0], first[1], video_question, model_config, extra, agent_name=_agent_name)
             
             # 清理暫存幀
             if frames:

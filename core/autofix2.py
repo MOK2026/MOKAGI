@@ -506,7 +506,7 @@ async def generate_fix(
 
     if tool_name:
         # 工具調用參數修正場景
-        prompt = f"""你是一個專業的 AI 助手。{MOK_ADMIN_NAME} 調用工具 `{tool_name}` 時發生錯誤。
+        prompt = f"""你是一個專業的 AI 助手。使用者調用工具 `{tool_name}` 時發生錯誤。
 原始參數：{original_args}
 錯誤訊息：{error_msg}
 {f"額外上下文：{context}" if context else ""}

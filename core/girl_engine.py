@@ -12,7 +12,7 @@ import json, os, subprocess, sys, time, urllib.request, urllib.error
 
 GIRL_MODEL = "girl:qwen-Claude"
 OLLAMA_URL = "http://127.0.0.1:11435"
-AGENT = "稚"
+AGENT = "gup"
 HOME = os.path.expanduser("~")
 VAST_DIR = os.path.join(HOME, ".mok", "agent", AGENT, "jobs", "vastai")
 RENT_DRIVER = os.path.join(VAST_DIR, "scripts", "vastai_rent_llm.py")
@@ -66,8 +66,8 @@ def spawn_auto_start(user_id: str = "", agent: str = "稚") -> bool:
     原因：主人鐵令「我沒要出片時，侍女不得自己租機」；自動租機鏈已整條切除。"""
     try:
         _msg = ("🧠 偵測到一般模型安全拒答。\n"
-                "⚠ 自動租機已停用（避免沒下令就燒錢）。如需 vast girl 引擎，請主人明確下令／按按鈕，"
-                "或叫侍女開閘：python3 ~/.mok/skill/vastai/scripts/rent_guard.py arm --minutes 90 --reason 出片")
+                "⚠ 自動租機已停用（避免沒下令就燒錢）。如需 vast girl 引擎，請管理員明確下令／按按鈕，"
+                "或由 AI 助手開閘：python3 ~/.mok/skill/vastai/scripts/rent_guard.py arm --minutes 90 --reason 出片")
         try:
             import importlib.util as _ilu
             _p = os.path.join(HOME, ".mok", "skill", "vastai", "scripts", "vast_notify.py")
@@ -159,7 +159,7 @@ async def request_girl_start(user_id: str = "", agent: str = "稚"):
         if os.path.exists(_rgp):
             _s2 = _ilu2.spec_from_file_location("_rent_guard_gate", _rgp)
             _rg = _ilu2.module_from_spec(_s2); _s2.loader.exec_module(_rg)
-            _rg.arm(minutes=60, by="主人", reason="開 vast girl 引擎（按鈕/明確下令）", max_machines=20)
+            _rg.arm(minutes=60, by="管理員", reason="開 vast girl 引擎（按鈕/明確下令）", max_machines=20)
     except Exception as _e_arm:
         print(f"[girl_engine] 開閘失敗（不影響流程）: {_e_arm}")
     ok, err = _spawn_rent(agent)

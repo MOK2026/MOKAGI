@@ -33,7 +33,7 @@
   var CONFIG = {
     placeholder: dataPH || cfg.placeholder || window.MOK6407NAV_PLACEHOLDER || existingPH || '莫生我要查詢頭髮鑽石散熱',
     agent: cfg.agent || window.MOKAGI_AGENT || '客服',
-    server: cfg.server || window.MOKAGI_SERVER || 'https://mokagi.com',
+    server: cfg.server || window.MOKAGI_SERVER || location.origin,
     position: cfg.position || window.position || 'bottom-right',
     contact: cfg.contact || window.contact || 'https://wa.me/85264071181/?text=',
     quickLinks: cfg.quickLinks || window.quickLinks || [

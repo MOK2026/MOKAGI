@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
-import os, json, hashlib, time, shutil
+import os, json, hashlib, time, subprocess
 SKILL_DIR = os.path.expanduser("~/.mok/skill")
+TRASH_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trash.sh")
+
+def _to_trash(path):
+    """把檔案／目錄移入系統回收站（走 trash.sh，侍女守則第 1 條）。回傳 (成功, 訊息)。"""
+    try:
+        r = subprocess.run(["bash", TRASH_SH, str(path)],
+                           capture_output=True, text=True, timeout=60)
+        out = (r.stdout or "").strip() or (r.stderr or "").strip()
+        return r.returncode == 0, out
+    except Exception as e:
+        return False, str(e)
 
 PLUGIN_INFO = {
     "command": "/skill",
@@ -204,15 +215,30 @@ def _delete_skill(filename):
         return json.dumps({"error": "缺少技能名稱"})
     name, d = _skill_dir(filename)
     if os.path.isdir(d):
-        shutil.rmtree(d)
-        return json.dumps({"success": True, "message": "✅ 技能已刪除: " + name + "（整個資料夾）"}, ensure_ascii=False)
+        ok, msg = _to_trash(d)
+        if not ok:
+            return json.dumps({"error": "刪除失敗：" + msg}, ensure_ascii=False)
+        return json.dumps({"success": True, "message": "✅ 技能已刪除: " + name + "（整個資料夾，已移入回收站）"}, ensure_ascii=False)
     legacy = os.path.join(SKILL_DIR, name + ".md")
     if os.path.isfile(legacy):
-        os.remove(legacy)
-        return json.dumps({"success": True, "message": "✅ 技能已刪除: " + name}, ensure_ascii=False)
+        ok, msg = _to_trash(legacy)
+        if not ok:
+            return json.dumps({"error": "刪除失敗：" + msg}, ensure_ascii=False)
+        return json.dumps({"success": True, "message": "✅ 技能已刪除: " + name + "（已移入回收站）"}, ensure_ascii=False)
     return json.dumps({"error": "技能不存在: " + name})
 
 async def handle_skill(args, mode="command", user_id=None, agent_name=None, **kwargs):
+    # 非 admin 禁用（政策唯一真相：tools/tool_policy.py）— 2026-10-17 衍
+    try:
+        from tool_policy import gate as _tp_gate
+        _uid = (mode if isinstance(mode, str) and mode not in ("command", "tool") else "") \
+            or kwargs.get("chat_id") or kwargs.get("user_id") or user_id
+        _deny = _tp_gate("skill", _uid, kwargs.get("agent_config"))
+    except Exception:
+        _deny = '{"success": false, "error": "工具「skill」僅限管理員使用（安全閘門判定失敗，預設拒絕）。", "denied_by": "tool_policy_failclosed"}'
+    if _deny:
+        return _deny
+
     if isinstance(args, dict):
         action = args.get("action", "list")
         filename = args.get("filename", "")

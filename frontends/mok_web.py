@@ -273,6 +273,13 @@ try:
 except Exception as _ij_e:
     print(f"[interject_patch] 載入失敗（不影響主服務）: {_ij_e}")
 
+# ===== 集中式閘門補丁（fail-closed，不動 mokagi.py）=====
+try:
+    from tool_policy import install_central_gate as _icg
+    _icg()
+except Exception:
+    pass
+
 # ===== SSE 串流隊列（HTTP 串流備援，當 Socket.IO 不可用時） =====
 import uuid as _uuid
 import queue as _queue
@@ -386,7 +393,10 @@ def _maybe_schedule_cleanup_after_disconnect(session_id):
 WATCH_PATH = "/home/ubuntu/"
 # 白名單使用動態 home 目錄名稱
 ALLOWED_PATHS = (
-    f'.{MOKAGI_home}',          # .mok
+    f'.{MOKAGI_home}/agent',    # 各 agent 房間（jobs / soul / logs）
+    f'.{MOKAGI_home}/html',     # 前端頁面與 static 資產
+    f'.{MOKAGI_home}/skill',    # 技能文件
+    f'.{MOKAGI_home}/work',     # 工作暫存
     'MOK_AI',
     '.openclaw/workspace',
     '.openclaw/agents',
@@ -398,6 +408,53 @@ ALLOWED_PATHS = (
     '.hermes/skills'
 )
 ALLOWED_ITEMS_LIST = list(ALLOWED_PATHS)
+
+# ===== 2026-10-11 可見性分層 L2 收緊（API平台工程師，主人核可）=====
+# 病根：舊白名單把「整個 .mok 抽屜」列為可讀 → 檔案讀取 API 能摸到各 agent 的
+#       點開頭憑證檔、核心、備份。修法兩層（純加法、可單獨回滾）：
+#   1) 白名單改成精準子目錄（上方 ALLOWED_PATHS，不再整包 .mok）
+#   2) 端點層硬閘 _is_denied_path()：除第一段外任一段以點開頭即拒，另加
+#      DENIED_SUBTREES 黑名單（備份／核心／日誌／憑證區／瀏覽器 profile／向量庫）
+DENIED_SUBTREES = (
+    f'.{MOKAGI_home}/backups',
+    f'.{MOKAGI_home}/gateway',
+    f'.{MOKAGI_home}/core',
+    f'.{MOKAGI_home}/tools',
+    f'.{MOKAGI_home}/logs',
+    f'.{MOKAGI_home}/trash',
+    f'.{MOKAGI_home}/mpt',
+    f'.{MOKAGI_home}/.memory',
+    f'.{MOKAGI_home}/.chroma_data',
+    f'.{MOKAGI_home}/.pending_admin_confirm',
+    f'.{MOKAGI_home}/.pending_cron_confirm',
+    f'.{MOKAGI_home}/browser_profiles',
+)
+
+def _is_denied_path(rel_path, privileged=False):
+    '''檔案讀寫 API 的最後一道硬閘（2026-10-11）。
+    rel_path：相對 WATCH_PATH 的請求路徑；回 True 即一律拒絕。
+    privileged（2026-10-11b A案）：由呼叫端傳入 _is_privileged_session()。
+    只豁免規則②——讓已登入的 admin/root 能讀各房間點開頭憑證檔；
+    ①（..／空路徑）與③（DENIED_SUBTREES 黑名單）永遠照拒；寫入端一律不傳此參數。
+    規則：①空路徑或含 .. → 拒
+          ②除第一段外，任一段落以點開頭 → 拒（隱藏檔＝憑證／密鑰）；privileged 時放行
+          ③落在 DENIED_SUBTREES → 拒
+    '''
+    try:
+        norm = os.path.normpath(str(rel_path or '')).replace(chr(92), '/').lstrip('/')
+    except Exception:
+        return True
+    if not norm or norm in ('.', '..'):
+        return True
+    segs = [s for s in norm.split('/') if s not in ('', '.')]
+    if not segs or '..' in segs:
+        return True
+    if not privileged and any(s.startswith('.') for s in segs[1:]):
+        return True
+    for _d in DENIED_SUBTREES:
+        if norm == _d or norm.startswith(_d + '/'):
+            return True
+    return False
 
 class FileChangeHandler(FileSystemEventHandler):
     def __init__(self, socketio_instance):
@@ -609,6 +666,10 @@ def init_db():
         if 'rounds' not in columns:
             conn.execute('ALTER TABLE chat_history ADD COLUMN rounds TEXT')
             print("✅ chat_history 表已新增 rounds 欄位")
+        # ===== 模型標籤（model）20261017 indexPage：每條訊息記錄實際使用的模型 =====
+        if 'model' not in columns:
+            conn.execute('ALTER TABLE chat_history ADD COLUMN model TEXT')
+            print('✅ chat_history 表已新增 model 欄位')
         # ===== 多租戶隔離（tenant）20260921：舊資料一律歸 'admin' =====
         if 'tenant' not in columns:
             conn.execute('ALTER TABLE chat_history ADD COLUMN tenant TEXT')
@@ -1147,9 +1208,23 @@ def _start_sse_chat_session(data):
                 if event.get("rounds"):
                     _save_rounds_to_db(assistant_msg_id, event["rounds"])
                 conv_id = event.get("conv_id")
-                if conv_id:
+                _model_name = event.get("model_name")
+                if not _model_name:
+                    try:
+                        _model_name = (AVAILABLE_MODELS[CURRENT_MODEL_INDEX] or {}).get("name")
+                    except Exception:
+                        _model_name = None
+                if assistant_msg_id and (conv_id or _model_name):
+                    _sets = []
+                    _vals = []
+                    if conv_id:
+                        _sets.append("conv_id = ?")
+                        _vals.append(conv_id)
+                    if _model_name:
+                        _sets.append("model = ?")
+                        _vals.append(_model_name)
                     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-                        conn.execute("UPDATE chat_history SET conv_id = ? WHERE id = ?", (conv_id, assistant_msg_id))
+                        conn.execute(f"UPDATE chat_history SET {', '.join(_sets)} WHERE id = ?", (*_vals, assistant_msg_id))
                         conn.commit()
                 if conv_id:
                     _update_user_message_conv_id(agent_name, conv_id, user_msg_id, user_id)
@@ -1863,12 +1938,23 @@ def handle_chat_message(data):
                 if event.get("rounds"):
                     _save_rounds_to_db(assistant_msg_id, event["rounds"])
                 conv_id = event.get("conv_id")
-                if conv_id:
+                _model_name = event.get("model_name")
+                if not _model_name:
+                    try:
+                        _model_name = (AVAILABLE_MODELS[CURRENT_MODEL_INDEX] or {}).get("name")
+                    except Exception:
+                        _model_name = None
+                if assistant_msg_id and (conv_id or _model_name):
+                    _sets = []
+                    _vals = []
+                    if conv_id:
+                        _sets.append("conv_id = ?")
+                        _vals.append(conv_id)
+                    if _model_name:
+                        _sets.append("model = ?")
+                        _vals.append(_model_name)
                     with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
-                        conn.execute(
-                            "UPDATE chat_history SET conv_id = ? WHERE id = ?",
-                            (conv_id, assistant_msg_id)
-                        )
+                        conn.execute(f"UPDATE chat_history SET {', '.join(_sets)} WHERE id = ?", (*_vals, assistant_msg_id))
                         conn.commit()
                 if conv_id:
                     _update_user_message_conv_id(agent_name, conv_id, user_msg_id, user_id)
@@ -2297,6 +2383,7 @@ def vtuber_tts():
 
 
     return send_from_directory(os.path.join(BASE_DIR, folder), filename)
+
 
 @app.route('/report/<agent>/<path:filename>')
 def report_files(agent, filename):
@@ -2742,6 +2829,10 @@ def api_room_tree():
 def get_file_content(sub_path):
     # 規範化路徑，去除多餘的斜槓和..等
     normalized = os.path.normpath(sub_path)
+    # 2026-10-11 硬閘：隱藏段（.env／.憑證…）與敏感子樹一律拒，先於白名單判定
+    # 2026-10-11b A案：已登入 admin/root 例外放行「點段」（讀各房間憑證）；.. 與黑名單仍照拒
+    if _is_denied_path(normalized, privileged=_is_privileged_session()):
+        return {"error": "Unauthorized access"}, 403
     # 檢查規範化後的路徑是否以允許的前綴開頭
     if not any(normalized.startswith(p) for p in ALLOWED_PATHS):
         return {"error": "Unauthorized access"}, 403
@@ -2857,6 +2948,10 @@ def create_file():
             return {"status": "error", "error": "Missing path"}, 400
         full_path = os.path.join(WATCH_PATH, path)
         # 安全檢查
+        # 2026-10-11 硬閘：不得經 API 寫入隱藏檔或敏感子樹
+        # 2026-10-11b A案：寫入端刻意不傳 privileged — 管理員亦不得經 API 寫入點段
+        if _is_denied_path(path, privileged=False):
+            return {"status": "error", "error": "Access denied"}, 403
         if not any(full_path.startswith(os.path.join(WATCH_PATH, p)) for p in ALLOWED_PATHS):
             return {"status": "error", "error": "Access denied"}, 403
 
@@ -2896,6 +2991,10 @@ def create_folder():
         if not path:
             return {"status": "error", "error": "Missing path"}, 400
         full_path = os.path.join(WATCH_PATH, path)
+        # 2026-10-11 硬閘：不得經 API 建立隱藏／敏感目錄
+        # 2026-10-11b A案：寫入端刻意不傳 privileged — 管理員亦不得經 API 建點目錄
+        if _is_denied_path(path, privileged=False):
+            return {"status": "error", "error": "Access denied"}, 403
         if not any(full_path.startswith(os.path.join(WATCH_PATH, p)) for p in ALLOWED_PATHS):
             return {"status": "error", "error": "Access denied"}, 403
         os.makedirs(full_path, exist_ok=True)
@@ -2912,6 +3011,137 @@ def create_folder():
 
 
 
+
+
+# ===== admin 專用憑證寫入通道（2026-10-14｜indexPage｜主人核可）=====
+# (indexPage|主人指示：開一條admin專用憑證寫入通道|新增 /api/admin/write_credential：admin已登入可寫點段、寫前自動備份、逐筆記審計|20261014001458)
+# 背景：2026-10-11b A案把寫入端閘死（_is_denied_path(..., privileged=False)），
+#       已登入 admin 亦無法經 API 維護各房間的點開頭憑證檔（.indexPage／.稚…）。
+# 本通道是唯一放行「寫入點段」的入口，一次到位三件事：
+#   1 僅限已登入 admin/root（_is_privileged_session），其餘一律 403；
+#   2 寫入前自動備份舊檔（存在才備）→ backups/credential_writes/；
+#   3 每筆寫入（含被拒）記 action_audit：誰、何時、寫哪個檔、成敗。
+# 設計取捨：純新增端點，不改既有 save_file／create_file 的閘門語意（可單獨回滾）。
+CRED_WRITE_BACKUP_DIR = os.path.join(os.path.expanduser(f"~.{MOKAGI_home}"), "backups", "credential_writes")
+_CRED_WRITE_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _is_dot_path(rel_path):
+    """是否為「點段」路徑（第一段之後任一段以點開頭）＝憑證／隱藏設定檔。"""
+    segs = [s for s in str(rel_path or '').replace(chr(92), '/').split('/') if s not in ('', '.')]
+    return len(segs) > 1 and any(s.startswith('.') for s in segs[1:])
+
+
+def _cred_write_audit(path, decision, reason, ok, result=None, error=None, t0=None):
+    """寫入審計；audit_layer 缺席或異常一律吞掉，絕不影響寫入主流程。"""
+    try:
+        import sys as _s
+        _core = os.path.join(os.path.expanduser(f"~.{MOKAGI_home}"), "core")
+        if _core not in _s.path:
+            _s.path.insert(0, _core)
+        import audit_layer
+        row = audit_layer.log_start(
+            'admin.write_credential', {'path': path}, _session_member_user() or 'unknown',
+            'web:admin', {'kind': 'person', 'detail': 'admin credential channel'},
+            decision, 'credential_write', reason)
+        audit_layer.log_end(row, ok, result=result, error=error,
+                            elapsed_ms=((time.time() - t0) * 1000.0) if t0 else None)
+    except Exception:
+        pass
+
+
+@app.route('/api/admin/write_credential', methods=['POST'])
+def admin_write_credential():
+    """admin 專用憑證（點段）寫入通道 —— 詳見上方區塊註解。
+
+    請求 JSON：{'path': '<相對 WATCH_PATH 路徑>', 'content': '<完整內容>'}
+    成功：{'status':'ok','path':...,'backup':<備份路徑|None>,'created':bool,'bytes':int}
+    """
+    t0 = time.time()
+
+    def _deny(reason, code=403, path=None):
+        _cred_write_audit(path, 'deny', reason, False, error=reason, t0=t0)
+        return {"status": "error", "error": reason}, code
+
+    if not _is_privileged_session():
+        return _deny('forbidden: admin only')
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _deny('Invalid JSON', 400)
+
+    path = str(data.get('path') or '').strip()
+    content = data.get('content')
+    if not path:
+        return _deny('Missing path', 400, path)
+    if content is None:
+        return _deny('Missing content', 400, path)
+    if not isinstance(content, str):
+        return _deny('content 必須是字串', 400, path)
+
+    # (1) 只放行「點段」（憑證／隱藏設定檔），避免此通道被當成通用寫入後門
+    if not _is_dot_path(path):
+        return _deny('僅允許寫入點段（憑證／隱藏檔）；一般檔案請用 /api/save_file', 403, path)
+
+    # (2) 路徑硬閘：privileged=True 僅豁免「點段」一條；'..' 與 DENIED_SUBTREES 永遠拒
+    if _is_denied_path(path, privileged=True):
+        return _deny('Access denied', 403, path)
+
+    # (3) 必須落在白名單子樹內，且實體路徑不得經 symlink 逃逸
+    full_path = os.path.normpath(os.path.join(WATCH_PATH, path))
+    real_full = os.path.realpath(full_path)
+    if not any(real_full == os.path.realpath(os.path.join(WATCH_PATH, p)) or
+               real_full.startswith(os.path.realpath(os.path.join(WATCH_PATH, p)) + os.sep)
+               for p in ALLOWED_PATHS):
+        return _deny('Access denied', 403, path)
+
+    nbytes = len(content.encode('utf-8'))
+    if nbytes > _CRED_WRITE_MAX_BYTES:
+        return _deny('內容超過 2MB 上限，已拒絕寫入', 413, path)
+
+    existed = os.path.isfile(full_path)
+    backup_path = None
+    try:
+        import shutil
+        # (4) 寫前自動備份（原檔存在才備），保留所有權／權限，可原樣回滾
+        if existed:
+            os.makedirs(CRED_WRITE_BACKUP_DIR, exist_ok=True)
+            stamp = time.strftime('%Y%m%d_%H%M%S') + ('_%06d' % int((time.time() % 1) * 1e6))
+            safe = path.replace('/', '__').lstrip('.') or 'cred'
+            backup_path = os.path.join(CRED_WRITE_BACKUP_DIR, f"{stamp}_{safe}.bak")
+            shutil.copy2(full_path, backup_path)
+
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        # (5) 原子寫入：同目錄暫存檔 -> os.replace，避免半截檔
+        fd, tmp_path = tempfile.mkstemp(prefix='.credwrite_', dir=os.path.dirname(full_path))
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+                fh.write(content)
+            if existed:
+                st = os.stat(full_path)
+                os.chmod(tmp_path, st.st_mode & 0o777)
+                try:
+                    os.chown(tmp_path, st.st_uid, st.st_gid)
+                except Exception:
+                    pass
+            else:
+                os.chmod(tmp_path, 0o600)   # 憑證預設私有
+            os.replace(tmp_path, full_path)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+    except Exception as e:
+        _cred_write_audit(path, 'deny', 'write failed', False, error=str(e), t0=t0)
+        return {"status": "error", "error": str(e)}, 500
+
+    _cred_write_audit(path, 'allow', 'admin credential write', True,
+                      result={'backup': backup_path, 'bytes': nbytes,
+                              'created': (not existed), 'existed': existed}, t0=t0)
+    return {"status": "ok", "path": path, "backup": backup_path,
+            "created": (not existed), "bytes": nbytes}
 
 
 # ===== 暫存圖片上傳：貼上截圖後先落盤，AI 用 vision 分析完再刪除 =====
@@ -3049,7 +3279,12 @@ def upload_audio():
 
 @app.route('/api/raw/<path:sub_path>')
 def send_raw_file(sub_path):
-    if not sub_path.startswith(ALLOWED_PATHS):
+    normalized = os.path.normpath(sub_path)
+    # 2026-10-11 硬閘；同時修掉原本 startswith(tuple) 的失效寫法
+    # 2026-10-11b A案：已登入 admin/root 例外放行點段（原檔／憑證下載）
+    if _is_denied_path(normalized, privileged=_is_privileged_session()):
+        return "Unauthorized", 403
+    if not any(normalized.startswith(p) for p in ALLOWED_PATHS):
         return "Unauthorized", 403
     directory = os.path.join(WATCH_PATH, os.path.dirname(sub_path))
     filename = os.path.basename(sub_path)
@@ -3133,6 +3368,10 @@ def api_ml3_list():
 def api_eml_view(sub_path):
     # 解析 .eml 郵件內容（Subject / From / To / Body）
     normalized = os.path.normpath(sub_path)
+    # 2026-10-11 硬閘：隱藏段與敏感子樹一律拒
+    # 2026-10-11b A案：已登入 admin/root 例外放行點段（.eml 郵件解析）
+    if _is_denied_path(normalized, privileged=_is_privileged_session()):
+        return {'error': 'Unauthorized access'}, 403
     if not any(normalized.startswith(p) for p in ALLOWED_PATHS):
         return {'error': 'Unauthorized access'}, 403
     full_path = os.path.join(WATCH_PATH, normalized)
@@ -3181,6 +3420,12 @@ def get_env_files_api():
     current = os.path.basename(CURRENT_ENV_PATH) if CURRENT_ENV_PATH else ""
     # 20260929（凜）：側欄 last_active / 工作中燈號改為「只看自己 tenant」，免被其他會員帶動。
     _caller_tenant = resolve_tenant_arg()
+    # 20261015（稚）：last_active 查詢全程共用 1 條連線，避免每個 agent 各開一條連線造成連線風暴。
+    _la_conn = None
+    try:
+        _la_conn = sqlite3.connect(DB_PATH, timeout=30)
+    except Exception as e:
+        print(f"開啟 last_active 連線失敗: {e}")
     agents = []
     for f in files:
         agent_name = f.lstrip('.')
@@ -3223,14 +3468,14 @@ def get_env_files_api():
         # 20260929（凜）：last_active 只算「自己 tenant」的訊息，避免側欄排序被其他會員帶動。
         last_active = 0
         try:
-            with closing(sqlite3.connect(DB_PATH, timeout=30)) as conn:
+            if _la_conn is not None:
                 if _caller_tenant:
-                    cursor = conn.execute(
+                    cursor = _la_conn.execute(
                         'SELECT timestamp FROM chat_history WHERE agent = ? AND (tenant = ? OR tenant IS NULL) ORDER BY timestamp DESC LIMIT 1',
                         (agent_name, _caller_tenant)
                     )
                 else:
-                    cursor = conn.execute(
+                    cursor = _la_conn.execute(
                         'SELECT timestamp FROM chat_history WHERE agent = ? ORDER BY timestamp DESC LIMIT 1',
                         (agent_name,)
                     )
@@ -3252,6 +3497,13 @@ def get_env_files_api():
 
     # ----- 按 last_active 降序排序（最新排最前）-----
     agents.sort(key=lambda x: x.get('last_active', 0), reverse=True)
+
+    # 20261015（稚）：關閉共用連線。
+    if _la_conn is not None:
+        try:
+            _la_conn.close()
+        except Exception:
+            pass
 
     return {"agents": agents, "current": current}
 
@@ -4052,14 +4304,14 @@ def get_chat_history():
         # 按 id 降序取最新數據（新消息在前）
         if _read_all:
             rows = conn.execute(
-                '''SELECT id, conv_id, role, content, think_content, rounds, timestamp
+                '''SELECT id, conv_id, role, content, think_content, rounds, timestamp, model
                    FROM chat_history WHERE agent = ?
                    ORDER BY id DESC LIMIT ? OFFSET ?''',
                 (agent, limit, offset)
             ).fetchall()
         else:
             rows = conn.execute(
-                '''SELECT id, conv_id, role, content, think_content, rounds, timestamp
+                '''SELECT id, conv_id, role, content, think_content, rounds, timestamp, model
                    FROM chat_history WHERE agent = ? AND tenant = ?
                    ORDER BY id DESC LIMIT ? OFFSET ?''',
                 (agent, tenant, limit, offset)
@@ -4080,7 +4332,8 @@ def get_chat_history():
                 "content": row["content"],
                 "thinkContent": row["think_content"],
                 "rounds": _rounds,
-                "timestamp": row["timestamp"]
+                "timestamp": row["timestamp"],
+                "model": row["model"]
             })
 
         has_more = (offset + limit) < total
@@ -4425,6 +4678,8 @@ def handle_get_agent_jobs(data):
                         rel = os.path.relpath(full, jobs_dir)
                         st = os.stat(full)
                         reports.append((rel, full, st.st_size, st.st_mtime))
+            # indexPage|主人：排列應是最新的放最上|新增一行：reports 依 mtime 倒序排序（原為檔名升序）|20261010-1701(香港)
+            reports.sort(key=lambda _r: _r[3], reverse=True)
             if reports:
                 from urllib.parse import quote
                 out_lines.append(f'<div style="padding:8px; border-bottom:1px solid #3e3e42; color:#4ec9b0; font-weight:bold;">📄 工作報告 共 {len(reports)} 份</div>')
@@ -4686,7 +4941,8 @@ def gpu_status_snapshot():
 
 
 # ===== admin-only 管制（2026-09-23 by 凜）：緊急重啟 / 進化 / admin 桌面 / 備份 =====
-_ADMIN_ONLY_PREFIXES = ('/api/backup/', '/webTools/admin.html', '/skill/進化/','/webTools/novnc','/api/pm2panel/','/api/dream/')
+# 2026-10-14 indexPage：新增 /api/admin/ 前綴，admin 專用 API 命名空間在 before_request 就先擋非 admin
+_ADMIN_ONLY_PREFIXES = ('/api/admin/', '/api/backup/', '/webTools/admin.html', '/skill/進化/','/webTools/novnc','/api/pm2panel/','/api/dream/')
 
 
 def _is_privileged_session():
@@ -5120,6 +5376,18 @@ def add_cors_headers(response):
 
 
 # ========== 全域對話搜尋 API ==========
+def _search_snippet(content, q, before=60, after=160):
+    """以關鍵詞為中心截取片段（衍 2026-10-16）
+    原本一律取訊息開頭 200 字，導致搜尋結果看不到命中的關鍵詞、誤以為「亂搜」。
+    改為：關鍵詞前 before 字 ~ 後 after 字；找不到關鍵詞才回退成開頭 200 字。"""
+    idx = content.lower().find((q or "").lower())
+    if idx < 0:
+        return content[:200] + ("..." if len(content) > 200 else "")
+    start = max(0, idx - before)
+    end = min(len(content), idx + len(q) + after)
+    return ("..." if start > 0 else "") + content[start:end] + ("..." if end < len(content) else "")
+
+
 @app.route("/api/search_all_conversations", methods=["GET"])
 def search_all_conversations():
     """搜尋全主機內所有 agent 與使用者的對話內容（LIKE 全文檢索）"""
@@ -5153,7 +5421,7 @@ def search_all_conversations():
             ).fetchall()
             for row in rows:
                 content = row["content"] or ""
-                snippet = content[:200] + ("..." if len(content) > 200 else "")
+                snippet = _search_snippet(content, q)   # [衍 2026-10-16] 關鍵詞上下文
                 results.append({
                     "source": "chat_history",
                     "id": row["id"],
@@ -5179,7 +5447,7 @@ def search_all_conversations():
             ).fetchall()
             for row in rows:
                 content = row["content"] or ""
-                snippet = content[:200] + ("..." if len(content) > 200 else "")
+                snippet = _search_snippet(content, q)   # [衍 2026-10-16] 關鍵詞上下文
                 results.append({
                     "source": "conversation_history",
                     "id": row["id"],

@@ -17,6 +17,7 @@ done / fail / 達最大步數。
 
 更新記錄:
   20260905 - 初版（路線 A）
+  20261011 - 卓：新增 per-display 互斥鎖＋排隊（修正多侍女同時搶同一 X 桌面）
 """
 
 import os
@@ -26,6 +27,7 @@ import json
 import time
 import asyncio
 import hashlib
+import fcntl
 import logging
 import subprocess
 from datetime import datetime
@@ -116,6 +118,153 @@ PLUGIN_INFO = {
         }
     }
 }
+
+# ------------------------------------------------------------------
+# 桌面互斥鎖（per-display）— 2026-10-11 卓
+#   gui_agent 直接對 X 桌面注入滑鼠/鍵盤；同一 display 若同時被兩個侍女操作，
+#   就會互搶游標與焦點（打架）。此處比照 browser.py 的 per-profile 進程鎖改成
+#   per-display：不同 display 可並行，同一 display 一律排隊。
+#     - 鎖檔 /tmp/mok_gui_display_<n>.lock，用 fcntl.flock 跨進程互斥
+#     - 取不到就排隊等（預設最多 MOK_GUI_LOCK_MAX_WAIT 秒），逾時回報誰在用
+#     - 鎖檔記錄真正的持有者（agent/pid/chat/task/心跳 ts），取得鎖才覆寫
+# ------------------------------------------------------------------
+MOK_GUI_DISPLAY_LOCK_V1 = True
+
+GUI_LOCK_RETRY_SLEEP = float(os.environ.get("MOK_GUI_LOCK_RETRY", "3"))
+GUI_LOCK_MAX_WAIT = float(os.environ.get("MOK_GUI_LOCK_MAX_WAIT", "240"))
+
+
+def _display_num(display: str) -> str:
+    """從 ':1' / ':12' 取出 display 編號字串；取不到一律回 '1'。"""
+    m = re.search(r":(\d+)", str(display or ""))
+    return m.group(1) if m else "1"
+
+
+def _gui_lock_file(display: str) -> str:
+    """每個 display 一條鎖檔；不同 display（不同侍女桌面）可並行。"""
+    return os.path.join("/tmp", "mok_gui_display_%s.lock" % _display_num(display))
+
+
+def _pid_alive(pid) -> bool:
+    """檢查 pid 是否仍存活（用於辨識已結束的持有者）。"""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _read_lock_info(lock_file: str) -> dict:
+    """讀取鎖檔中的持有者資訊（JSON 為主，舊格式向後相容）。"""
+    try:
+        with open(lock_file, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read().strip()
+        if not content:
+            return {}
+        try:
+            info = json.loads(content)
+            return info if isinstance(info, dict) else {"agent": content}
+        except Exception:
+            return {"agent": content}
+    except Exception:
+        return {}
+
+
+def _write_lock_holder(fd: int, holder: dict) -> None:
+    """把『真正的』持有者寫進鎖檔（含心跳時間戳）。"""
+    try:
+        payload = dict(holder)
+        payload["ts"] = time.time()
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    except Exception:
+        pass
+
+
+def _try_lock_gui(lock_file: str, holder: dict):
+    """非阻塞搶鎖：成功回 fd、被佔用回 None（拿到鎖才覆寫持有者，不會蓋掉別人名字）。"""
+    try:
+        fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o644)
+    except Exception:
+        return None
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return None
+        _write_lock_holder(fd, holder)
+        return fd
+    except Exception:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        return None
+
+
+def _holder_desc(lock_file: str) -> str:
+    """把目前持有者格式化成一句人話，方便回報。"""
+    info = _read_lock_info(lock_file)
+    if not info:
+        return "（未知持有者）"
+    agent = info.get("agent") or "?"
+    task = str(info.get("task") or "").strip()
+    desc = "%s" % agent + ("（任務：%s）" % task if task else "")
+    try:
+        held = int(time.time() - float(info.get("ts") or 0))
+        if held >= 0:
+            desc += "，已持有 %d 秒" % held
+    except Exception:
+        pass
+    if info.get("pid") and not _pid_alive(info.get("pid")):
+        desc += "（該持有者進程已結束，鎖將自動釋放）"
+    return desc
+
+
+async def _acquire_gui_lock(display: str, holder: dict, max_wait: float = None):
+    """排隊取得桌面鎖：被佔用就等，等超過上限回 (None, lock_file)。"""
+    lock_file = _gui_lock_file(display)
+    limit = GUI_LOCK_MAX_WAIT if max_wait is None else float(max_wait)
+    t0 = time.time()
+    notified = False
+    while True:
+        fd = _try_lock_gui(lock_file, holder)
+        if fd is not None:
+            if notified:
+                logger.info("gui_agent: 已取得桌面 %s 鎖（排隊 %d 秒）" % (display, int(time.time() - t0)))
+            return fd, lock_file
+        if time.time() - t0 >= limit:
+            return None, lock_file
+        if not notified:
+            logger.info("gui_agent: 桌面 %s 忙線，排隊中 — %s" % (display, _holder_desc(lock_file)))
+            notified = True
+        await asyncio.sleep(GUI_LOCK_RETRY_SLEEP)
+
+
+def _release_gui_lock(fd) -> None:
+    if fd is None:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        os.close(fd)
+    except Exception:
+        pass
+
 
 # ------------------------------------------------------------------
 # 基礎工具函數
@@ -305,7 +454,7 @@ def _parse_decision(txt: str) -> dict | None:
 # ------------------------------------------------------------------
 # vision（多模態）呼叫：含 model 輪換重試
 # ------------------------------------------------------------------
-async def _ask_vision(agent_config, img_path: str, prompt: str) -> str:
+async def _ask_vision(agent_config, img_path: str, prompt: str, agent_name: str = None) -> str:
     """回傳模型原始文字；失敗回傳 {"success":false,...} json 字串"""
     if _vision is None:
         return json.dumps({"success": False, "error": "無法 import vision 模組"})
@@ -322,7 +471,7 @@ async def _ask_vision(agent_config, img_path: str, prompt: str) -> str:
             if not cfg or not cfg.get("api_url"):
                 continue
             txt = await asyncio.wait_for(
-                _vision._call_vision_model(img_b64, mime, prompt, cfg), timeout=120)
+                _vision._call_vision_model(img_b64, mime, prompt, cfg, agent_name=agent_name), timeout=120)
             if not txt:
                 continue
             try:
@@ -391,8 +540,17 @@ def _balance_blocked(tool_name):
 
 
 async def handle_gui_agent(args, chat_id="web", agent_config=None):
+    # 非 admin 禁用（政策唯一真相：tools/tool_policy.py）— 2026-10-17 衍
+    try:
+        from tool_policy import gate as _tp_gate
+        _deny = _tp_gate("gui_agent", chat_id, agent_config)
+    except Exception:
+        _deny = '{"success": false, "error": "工具「gui_agent」僅限管理員使用（安全閘門判定失敗，預設拒絕）。", "denied_by": "tool_policy_failclosed"}'
+    if _deny:
+        return _deny
+
     if _balance_blocked("gui_agent"):
-        return json.dumps({"success": False, "error": "DeepSeek 餘額不足，已暫停非必要高耗工具（GUI 自動化）；請主人補值後再試。"}, ensure_ascii=False)
+        return json.dumps({"success": False, "error": "DeepSeek 餘額不足，已暫停非必要高耗工具（GUI 自動化）；請管理員補值後再試。"}, ensure_ascii=False)
     t0 = time.time()
     try:
         p = _parse_args(args)
@@ -416,6 +574,44 @@ async def handle_gui_agent(args, chat_id="web", agent_config=None):
     if agent_config is None or not isinstance(agent_config, dict):
         agent_config = _load_agent_config()
 
+    # 2026-10-09 記帳歸屬：解析 agent 名，傳給 vision 記帳（避免黑數/unknown）
+    try:
+        _agent_name = agent_config.get("MOK_AGENT_NAME") if isinstance(agent_config, dict) else None
+    except Exception:
+        _agent_name = None
+    _agent_name = _agent_name or os.environ.get("MOK_AGENT_NAME") or None
+
+    # 2026-10-11 卓｜桌面互斥鎖：先排隊取得鎖，再碰桌面，避免兩個侍女互搶滑鼠/鍵盤
+    _lock_holder = {
+        "agent": _agent_name or "unknown",
+        "pid": os.getpid(),
+        "chat": str(chat_id or ""),
+        "task": task[:80],
+        "display": display,
+    }
+    lock_fd, lock_file = await _acquire_gui_lock(display, _lock_holder)
+    if lock_fd is None:
+        return json.dumps({
+            "success": False,
+            "error": ("桌面 %s 正在被其他工作使用中，已排隊等待 %d 秒仍未取得。"
+                      "目前持有者：%s。請稍後再試，或改用其他 display。"
+                      % (display, int(GUI_LOCK_MAX_WAIT), _holder_desc(lock_file))),
+            "locked": True,
+            "display": display,
+            "queue_wait_sec": int(GUI_LOCK_MAX_WAIT),
+        }, ensure_ascii=False)
+    try:
+        return await _gui_loop(task, display, max_steps, pause, agent_config,
+                               _agent_name, t0, chat_id, lock_fd, _lock_holder)
+    finally:
+        _release_gui_lock(lock_fd)
+
+
+# ------------------------------------------------------------------
+# 桌面任務主迴圈（持有桌面鎖後才會被呼叫）
+# ------------------------------------------------------------------
+async def _gui_loop(task, display, max_steps, pause, agent_config, agent_name,
+                    t0, chat_id="", lock_fd=None, lock_holder=None):
     os.makedirs(SHOT_DIR, exist_ok=True)
     run_dir = os.path.join(SHOT_DIR, datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(run_dir, exist_ok=True)
@@ -428,6 +624,8 @@ async def handle_gui_agent(args, chat_id="web", agent_config=None):
     last_shot = ""
 
     for step in range(1, max_steps + 1):
+        if lock_fd is not None and lock_holder:
+            _write_lock_holder(lock_fd, lock_holder)   # 心跳：讓排隊者知道鎖還活著
         if time.time() - t0 > HARD_TIME_LIMIT:
             final_reason = "超過整體時間上限，強制結束"
             break
@@ -445,11 +643,11 @@ async def handle_gui_agent(args, chat_id="web", agent_config=None):
 
         # 2) vision 看圖 → 決定下一步
         prompt = _build_prompt(task, step, w, h, display, history, same, unchanged)
-        raw = await _ask_vision(agent_config, sp, prompt)
+        raw = await _ask_vision(agent_config, sp, prompt, agent_name=agent_name)
         decision = _parse_decision(raw)
         if decision is None:
             # 一次修正：把無法解析的回覆再丟回去，只要 JSON
-            fix_raw = await _ask_vision(agent_config, sp, _fix_prompt(raw))
+            fix_raw = await _ask_vision(agent_config, sp, _fix_prompt(raw), agent_name=agent_name)
             decision = _parse_decision(fix_raw)
         if decision is None:
             final_reason = f"步驟{step}: vision 回覆無法解析為 JSON（{raw[:120]}）"

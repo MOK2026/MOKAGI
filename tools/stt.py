@@ -24,6 +24,8 @@ import json
 import logging
 import subprocess
 import tempfile
+import threading
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -264,6 +266,88 @@ def _transcribe_whisper(audio_path, model_name="tiny", language=None):
         return None
 
 
+# ================== SenseVoice (FunASR) 轉寫 - 粵語/中文優先 ==================
+
+try:
+    import funasr  # noqa: F401
+    HAS_FUNASR = True
+except ImportError:
+    HAS_FUNASR = False
+
+_SENSEVOICE_MODEL = None
+_SENSEVOICE_LOCK = threading.Lock()
+
+_LANG_MAP = {
+    "yue": "yue", "cantonese": "yue", "粵語": "yue", "粤语": "yue",
+    "zh-yue": "yue", "yue-cn": "yue", "yue-hk": "yue",
+    "zh": "zh", "zh-cn": "zh", "zh-hk": "zh", "zh-tw": "zh",
+    "chinese": "zh", "mandarin": "zh", "國語": "zh", "中文": "zh",
+    "en": "en", "english": "en", "ja": "ja", "japanese": "ja",
+    "ko": "ko", "korean": "ko",
+}
+
+
+def _normalize_sensevoice_lang(language):
+    if not language:
+        return "auto"
+    key = str(language).strip().lower()
+    return _LANG_MAP.get(key, "auto")
+
+
+def _get_sensevoice_model():
+    global _SENSEVOICE_MODEL
+    if _SENSEVOICE_MODEL is None:
+        with _SENSEVOICE_LOCK:
+            if _SENSEVOICE_MODEL is None:
+                from funasr import AutoModel
+                _SENSEVOICE_MODEL = AutoModel(
+                    model="iic/SenseVoiceSmall",
+                    vad_model="fsmn-vad",
+                    vad_kwargs={"max_single_segment_time": 30000},
+                    device="cpu",
+                    disable_update=True,
+                )
+    return _SENSEVOICE_MODEL
+
+
+def _extract_sensevoice_lang(raw_text):
+    m = re.search(r"<\|(yue|zh|en|ja|ko)\|>", raw_text or "")
+    return m.group(1) if m else "auto"
+
+
+def _transcribe_sensevoice(audio_path, language=None):
+    if not HAS_FUNASR:
+        return None
+    try:
+        model = _get_sensevoice_model()
+        lang = _normalize_sensevoice_lang(language)
+        res = model.generate(
+            input=audio_path,
+            cache={},
+            language=lang,
+            use_itn=True,
+            batch_size_s=60,
+            merge_vad=True,
+        )
+        text = ""
+        raw_text = ""
+        if res:
+            raw_text = res[0].get("text", "") or ""
+            text = raw_text.strip()
+        # 去除 SenseVoice 語言/情緒標籤，例如 <|yue|><|NEUTRAL|><|Speech|><|withitn|>
+        text = re.sub(r"<\|[^|]*\|>", "", text).strip()
+        detected = _extract_sensevoice_lang(raw_text)
+        return {
+            "text": text,
+            "language": lang if lang != "auto" else detected,
+            "model": "SenseVoiceSmall (FunASR)",
+            "segments": len(res) if res else 1,
+        }
+    except Exception as e:
+        logger.error(f"[STT] SenseVoice 轉寫失敗: {e}")
+        return None
+
+
 # ================== OpenAI API 備用 ==================
 
 def _transcribe_openai_api(audio_path, agent_config=None, language=None):
@@ -379,10 +463,19 @@ def handle_stt(args, chat_id="web", agent_config=None):
         if is_temp:
             tmp_files.append(wav_path)
 
-        # 轉寫
+        # 轉寫：SenseVoice（粵語/中文優先）→ whisper → OpenAI API
         result = None
-        if HAS_WHISPER:
+        engine = ""
+        if agent_config:
+            engine = str(agent_config.get("STT_ENGINE", "") or "").lower()
+        if engine == "whisper":
             result = _transcribe_whisper(wav_path, model_name, language)
+        elif engine == "openai":
+            result = _transcribe_openai_api(wav_path, agent_config, language)
+        else:
+            result = _transcribe_sensevoice(wav_path, language)
+            if result is None:
+                result = _transcribe_whisper(wav_path, model_name, language)
         if result is None:
             result = _transcribe_openai_api(wav_path, agent_config, language)
 

@@ -54,6 +54,11 @@ _LIST_KEYS = ("images", "videos", "audios", "urls", "media_urls", "items")
 # 型別提示鍵
 _TYPE_KEYS = ("type", "kind", "media_type", "mediatype", "content_type")
 
+# 泛用「網址」鍵：語意模糊（工具 JSON 幾乎都有 url，但可能是頁面網址而非媒體網址）。
+# 此類鍵須「有媒體副檔名」或「有明確 type 提示」才收，否則丟棄。
+# indexPage|L3結構化媒體|修 web_fetch 等把頁面網址(url)誤判成圖片→前端死圖|202610092325(HK)
+_GENERIC_URL_KEYS = ("url", "src", "path", "file", "output", "output_path")
+
 
 def _clean_url(u: Any) -> Optional[str]:
     """正規化並白名單過濾 URL；不合法者回 None。"""
@@ -79,9 +84,19 @@ def _has_media_ext(url: str) -> bool:
     return any(path.endswith(ext) for ext in _EXT2TYPE)
 
 
+def _norm_hint(hint: Any) -> Optional[str]:
+    """把型別提示正規化為 MEDIA_TYPES 之一；非明確提示回 None。"""
+    if isinstance(hint, str):
+        h = hint.strip().lower()
+        if h in MEDIA_TYPES:
+            return h
+    return None
+
+
 def _guess_type(url: str, hint: Any = None) -> str:
-    if isinstance(hint, str) and hint in MEDIA_TYPES:
-        return hint
+    h = _norm_hint(hint)
+    if h:
+        return h
     path = url.split("?", 1)[0].split("#", 1)[0].lower()
     for ext, t in _EXT2TYPE.items():
         if path.endswith(ext):
@@ -114,16 +129,20 @@ def _from_dict(d: Dict[str, Any]) -> List[Dict[str, Any]]:
     poster = d.get("poster") or d.get("thumbnail") or d.get("cover")
 
     # 2) 單一媒體網址欄位
+    #    泛用鍵（_GENERIC_URL_KEYS）語意模糊：工具 JSON 幾乎都有 url，但可能是「頁面網址」，
+    #    故須「有媒體副檔名」或「有明確 type 提示」才收，否則丟棄（避免把網頁網址當成圖片）。
+    _explicit = _norm_hint(hint) is not None
     for k in _URL_KEYS:
         v = d.get(k)
+        _need_ext = (k in _GENERIC_URL_KEYS) and not _explicit
         if isinstance(v, str):
             url = _clean_url(v)
-            if url and (k not in ("path", "file", "output", "output_path", "src") or _has_media_ext(url)):
+            if url and (not _need_ext or _has_media_ext(url)):
                 out.append(_make(url, hint, d.get("alt") or d.get("caption") or d.get("title"), poster))
         elif isinstance(v, list):
             for one in v:
                 url = _clean_url(one)
-                if url:
+                if url and (not _need_ext or _has_media_ext(url)):
                     out.append(_make(url, hint, None, poster))
 
     # 3) 網址清單欄位

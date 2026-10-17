@@ -301,8 +301,7 @@ pm2 start "${PROJECT_DIR}/core/launcher.py" \
 
 # launcher 統一管理 mok_web 與所有 Agent；只有獨立維修台由另一個 PM2 進程管理。
 pm2 delete mok_web 2>/dev/null || true
-pm2 delete mok_repair 2>/dev/null || true
-pm2 start "${PROJECT_DIR}/ecosystem.config.js" --only mok_repair
+# mok_repair 已於 2026-10-12 下架（wa.mokagi.com 下架殘留清理）
 pm2 save
 
 # -----------------------------------------------

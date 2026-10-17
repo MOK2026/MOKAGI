@@ -13,7 +13,7 @@ PLUGIN_INFO = {
     "command": "/browser",
     "icon": "🖥️",
     "handler": "handle_browser",
-    "description": "主機真實瀏覽器操作：安裝 Chromium + Playwright、啟動瀏覽器（支援 profile=xxx 獨立設定檔，隔離登入狀態）、導航、點擊、輸入、截圖、滾動、按鍵、執行 JS、取得內容。模擬真人滑鼠鍵盤操作。",
+    "description": "主機真實瀏覽器操作：安裝 Chromium + Playwright、啟動瀏覽器（支援 profile=xxx 獨立設定檔，隔離登入狀態）、導航、點擊、輸入、截圖、滾動、按鍵、執行 JS、取得內容、清理快取。模擬真人滑鼠鍵盤操作。",
     "intent_keywords": [
         ("打開瀏覽器", "/browser launch"),
         ("啟動瀏覽器", "/browser launch"),
@@ -22,6 +22,7 @@ PLUGIN_INFO = {
         ("點擊", "/browser click"),
         ("輸入文字", "/browser type"),
         ("關閉瀏覽器", "/browser close"),
+        ("清理快取", "/browser clean_cache"),
     ],
     "naturalize_func": "naturalize_browser_result",
     "tool_schema": {
@@ -32,12 +33,12 @@ PLUGIN_INFO = {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["install", "launch", "goto", "click", "type", "screenshot", "scroll", "wait", "press", "close", "status", "execute", "content"],
-                    "description": "操作類型：install(安裝 Chromium+Playwright 環境), launch(啟動瀏覽器，預設使用持久化設定檔，可加 'fresh' 用全新設定檔，或 'profile=xxx' 用獨立設定檔隔離登入狀態), goto(導航到指定 URL), click(點擊元素，支援 CSS 選擇器或 'text=文字'), type(在輸入框填入文字，格式: '選擇器 文字'), screenshot(截圖存檔), scroll(滾動頁面，格式: '方向 像素'), wait(等待毫秒或等待選擇器出現), press(按下鍵盤按鍵), close(關閉瀏覽器), status(查看瀏覽器運行狀態), execute(執行 JavaScript 代碼), content(取得頁面文字內容，可選 'full' 取得完整內容)"
+                    "enum": ["install", "launch", "goto", "click", "type", "screenshot", "scroll", "wait", "press", "close", "status", "execute", "content", "clean_cache"],
+                    "description": "操作類型：install(安裝 Chromium+Playwright 環境), launch(啟動瀏覽器，預設使用持久化設定檔，可加 'fresh' 用全新設定檔，或 'profile=xxx' 用獨立設定檔隔離登入狀態), goto(導航到指定 URL), click(點擊元素，支援 CSS 選擇器或 'text=文字'), type(在輸入框填入文字，格式: '選擇器 文字'), screenshot(截圖存檔), scroll(滾動頁面，格式: '方向 像素'), wait(等待毫秒或等待選擇器出現), press(按下鍵盤按鍵), close(關閉瀏覽器), status(查看瀏覽器運行狀態), execute(執行 JavaScript 代碼), content(取得頁面文字內容，可選 'full' 取得完整內容), clean_cache(清理瀏覽器 profile 快取，移入系統回收站、可反悔；可加 profile=xxx 指定或 all 清全部)"
                 },
                 "args": {
                     "type": "string",
-                    "description": "操作參數，依據 action 不同：launch: 預設使用持久化設定檔，可加 'fresh' 用全新設定檔、'profile=xxx' 指定獨立設定檔（如 profile=wa 給 wa_auto 專用，徹底隔離登入狀態）；goto: 目標網址（可省略 https:// 前綴）；click: CSS 選擇器或 'text=按鈕文字'；type: '選擇器 要輸入的文字'（中間空格分隔）；screenshot: 可選檔名（預設存 /tmp/，省略自動命名）；scroll: '方向 像素'（方向: down/up/top/bottom）；wait: 毫秒數 或 'selector 選擇器'；press: 按鍵名稱（Enter/Tab/Escape/Control+A 等）；execute: JavaScript 代碼；content: 可選 'full'；install/close/status: 無需參數"
+                    "description": "操作參數，依據 action 不同：launch: 預設使用持久化設定檔，可加 'fresh' 用全新設定檔、'profile=xxx' 指定獨立設定檔（如 profile=wa 給 wa_auto 專用，徹底隔離登入狀態）；goto: 目標網址（可省略 https:// 前綴）；click: CSS 選擇器或 'text=按鈕文字'；type: '選擇器 要輸入的文字'（中間空格分隔）；screenshot: 可選檔名（預設存 /tmp/，省略自動命名）；scroll: '方向 像素'（方向: down/up/top/bottom）；wait: 毫秒數 或 'selector 選擇器'；press: 按鍵名稱（Enter/Tab/Escape/Control+A 等）；execute: JavaScript 代碼；content: 可選 'full'；clean_cache: 可選 profile=xxx 或 all；install/close/status: 無需參數"
                 }
             },
             "required": ["action"]
@@ -96,6 +97,7 @@ import glob
 import random
 import subprocess
 import fcntl
+import logging
 import re
 import signal
 from typing import Optional, Dict, Union
@@ -219,6 +221,156 @@ def _reap_orphan_xvfb() -> None:
             pass
 
 
+# ------------------------------------------------------------------
+# 孤兒瀏覽器回收 — 2026-10-11 卓
+#   痛點：mokagi／驅動行程重啟後，先前開的 Chromium 會被 reparent 到 init（PPID=1），
+#   但 Xvfb 與記憶體仍被吃著（實測曾殘留 2.8~3 天），久了就是資源瓶頸。
+#   策略（保守，只清確定的孤兒）：
+#     - 只回收 PPID=1 的 Chromium『主進程』（--type= 子進程不算）
+#     - 主進程需存活超過 MOK_ORPHAN_BROWSER_MIN_AGE 秒（預設 1800）
+#     - 連同其所有子孫進程一起收拾；被 _instances 追蹤中的 profile 一律跳過
+#     - crashpad 孤兒另設更寬的門檻（預設 21600 秒）
+#   呼叫點：browser launch（_start_xvfb）＋ cron 定期巡檢（python3 browser.py reap_orphans）
+# ------------------------------------------------------------------
+MOK_ORPHAN_REAP_V1 = True
+
+logger = logging.getLogger("mok.browser")
+MOK_ORPHAN_BROWSER_MIN_AGE = int(os.environ.get("MOK_ORPHAN_BROWSER_MIN_AGE", "1800"))
+MOK_ORPHAN_CRASHPAD_MIN_AGE = int(os.environ.get("MOK_ORPHAN_CRASHPAD_MIN_AGE", "21600"))
+
+
+def _ps_table() -> dict:
+    """抓一次 ps 快照：{pid: (ppid, etimes, args)}。"""
+    table = {}
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,ppid=,etimes=,args="],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return table
+    for line in out.splitlines():
+        parts = line.strip().split(None, 3)
+        if len(parts) < 4:
+            continue
+        try:
+            pid, ppid, etimes = int(parts[0]), int(parts[1]), int(parts[2])
+        except ValueError:
+            continue
+        table[pid] = (ppid, etimes, parts[3])
+    return table
+
+
+def _is_chromium_main(args: str) -> bool:
+    """是否為 Chromium/Chrome 主進程（非 renderer/gpu/crashpad 等 --type= 子進程）。
+
+    同時涵蓋 Playwright 下載版（.../chrome-linux/chrome）與系統版
+    （/opt/google/chrome/chrome 等）；被孤兒化後兩者一樣吃資源。
+    """
+    if "--type=" in args or "chrome_crashpad_handler" in args:
+        return False
+    toks = args.strip().split()
+    if not toks or not toks[0].startswith("/"):
+        return False
+    base = os.path.basename(toks[0])
+    return base in ("chrome", "chromium", "chromium-browser", "google-chrome",
+                    "google-chrome-stable", "headless_shell")
+
+
+def _descendant_pids(table: dict, root: int) -> list:
+    """依 ps 快照回傳 root 的所有子孫 pid。"""
+    kids = {}
+    for pid, (ppid, _et, _a) in table.items():
+        kids.setdefault(ppid, []).append(pid)
+    out, stack = [], [root]
+    while stack:
+        for c in kids.get(stack.pop(), []):
+            out.append(c)
+            stack.append(c)
+    return out
+
+
+def _terminate_pids(pids) -> int:
+    """先 SIGTERM、等 3 秒、再對殘留者 SIGKILL；沒有目標就不等待。"""
+    pids = [int(p) for p in pids if p]
+    if not pids:
+        return 0
+    sent = 0
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            sent += 1
+        except Exception:
+            pass
+    if not sent:
+        return 0
+    time.sleep(3)
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except Exception:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            pass
+    return sent
+
+
+def _tracked_profile_dirs() -> set:
+    """目前 _instances 追蹤中的 profile 目錄（realpath），避免誤殺現役瀏覽器。"""
+    dirs = set()
+    for name in list(_instances.keys()):
+        try:
+            dirs.add(os.path.realpath(mok_profile.resolve_profile_dir(explicit=name, seed=False)))
+        except Exception:
+            pass
+    return dirs
+
+
+def _reap_orphan_browsers(verbose: bool = False) -> dict:
+    """回收孤兒 Chromium 與孤兒 Xvfb（只動 PPID=1 且逾齡者），回傳統計。"""
+    _reap_orphan_xvfb()
+    table = _ps_table()
+    if not table:
+        return {"success": False, "error": "無法取得 ps 快照"}
+    tracked = _tracked_profile_dirs()
+
+    targets, crashpad, victims = [], [], []
+    for pid, (ppid, etimes, args) in table.items():
+        if ppid != 1:
+            continue
+        if "chrome_crashpad_handler" in args:
+            if etimes >= MOK_ORPHAN_CRASHPAD_MIN_AGE:
+                crashpad.append(pid)
+                victims.append(pid)
+            continue
+        if not _is_chromium_main(args):
+            continue
+        if etimes < MOK_ORPHAN_BROWSER_MIN_AGE:
+            continue
+        m = re.search(r"--user-data-dir=(\S+)", args)
+        udd = m.group(1) if m else ""
+        if udd and os.path.realpath(udd) in tracked:
+            continue
+        group = [pid] + _descendant_pids(table, pid)
+        targets.append({"pid": pid, "age_sec": etimes, "user_data_dir": udd, "procs": len(group)})
+        victims.extend(group)
+
+    killed = _terminate_pids(victims)
+    result = {
+        "success": True,
+        "reaped_browsers": len(targets),
+        "reaped_crashpad": len(crashpad),
+        "reaped_procs": killed,
+        "details": targets,
+    }
+    if killed:
+        logger.warning("browser.py: 已回收孤兒瀏覽器 %d 個（連子孫共 %d 進程）、crashpad %d 個",
+                       len(targets), killed, len(crashpad))
+    if verbose:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    return result
+
+
 def _live_xvfb_displays() -> set:
     """回傳目前有活著 Xvfb 進程在服務的 display 編號（判斷空閒的權威來源）。"""
     live = set()
@@ -249,8 +401,8 @@ def _start_xvfb(profile: str = "default") -> int:
     if inst and inst.get("display_num") is not None:
         return inst["display_num"]
 
-    # 先回收上一輪行程重啟後遺留的孤兒 Xvfb，避免編號被幽靈佔住
-    _reap_orphan_xvfb()
+    # 先回收上一輪行程重啟後遺留的孤兒 Xvfb／瀏覽器，避免編號被幽靈佔住、資源被吃光
+    _reap_orphan_browsers()   # 內含 _reap_orphan_xvfb()
 
     # 第一個實例優先使用既有桌面顯示器 :1（即 noVNC 桌面面板所見），讓 Chrome 直接出現在桌面上
     if os.path.exists("/tmp/.X11-unix/X1") and not any(
@@ -426,6 +578,15 @@ def naturalize_browser_result(user_text: str = "", raw_result: str = "", ollama_
     elif action == "close":
         return f"✅ 瀏覽器已關閉"
 
+    elif action == "clean_cache":
+        lines = [f"🧹 瀏覽器快取清理完成，釋放約 {data.get('freed_mb', 0)} MB"]
+        for row in data.get("report", []):
+            if len(row) == 2:
+                lines.append(f"  ⏭️ {row[0]}：{row[1]}")
+            else:
+                lines.append(f"  ✔ {row[0]}：清理 {row[2]}/{row[3]} 項，約 {row[1]} MB")
+        return "\n".join(lines)
+
     elif action == "status":
         if data.get("running"):
             return f"🖥️ 瀏覽器運行中\n📍 當前網址：{data.get('url', '')}\n📄 頁面標題：{data.get('title', '')}"
@@ -593,6 +754,15 @@ async def handle_browser(args: Union[str, dict], chat_id: str = None, agent_conf
     處理 /browser 命令或 LLM 工具調用。
     args 可以是字串（"/browser <action> [args]"）或字典（{"action": "...", "args": "..."}）
     """
+    # 非 admin 禁用（政策唯一真相：tools/tool_policy.py）— 2026-10-17 衍
+    try:
+        from tool_policy import gate as _tp_gate
+        _deny = _tp_gate("browser", chat_id, agent_config)
+    except Exception:
+        _deny = '{"success": false, "error": "工具「browser」僅限管理員使用（安全閘門判定失敗，預設拒絕）。", "denied_by": "tool_policy_failclosed"}'
+    if _deny:
+        return _deny
+
     # --- 解析參數 ---
     if isinstance(args, str):
         args = args.strip()
@@ -614,6 +784,7 @@ async def handle_browser(args: Union[str, dict], chat_id: str = None, agent_conf
                     "  content    - 取得頁面文字\n"
                     "  status     - 查看瀏覽器狀態\n"
                     "  close      - 關閉瀏覽器\n"
+                    "  clean_cache- 清理 profile 快取（移入回收站）\n"
                     "用法：/browser <action> [參數]"
                 )
             }, ensure_ascii=False)
@@ -634,6 +805,7 @@ async def handle_browser(args: Union[str, dict], chat_id: str = None, agent_conf
 
     # --- 依呼叫端侍女決定「預設 profile」；切換侍女時同步重置 _last_profile ---
     global _default_profile, _default_profile_agent, _last_profile
+    _maybe_reap_orphans()
     _default_profile = _agent_profile_name(agent_config)
     if _default_profile_agent != agent_name:
         _default_profile_agent = agent_name
@@ -688,6 +860,8 @@ async def handle_browser(args: Union[str, dict], chat_id: str = None, agent_conf
                 return await _handle_close(action_args)
             elif action == "status":
                 return await _handle_status(action_args)
+            elif action == "clean_cache":
+                return await _handle_clean_cache(action_args)
             elif action == "execute":
                 return await _handle_execute(action_args)
             elif action == "content":
@@ -695,7 +869,7 @@ async def handle_browser(args: Union[str, dict], chat_id: str = None, agent_conf
             else:
                 return json.dumps({
                     "success": False,
-                    "error": f"未知操作「{action}」。支援：install, launch, goto, click, type, screenshot, scroll, wait, press, close, status, execute, content"
+                    "error": f"未知操作「{action}」。支援：install, launch, goto, click, type, screenshot, scroll, wait, press, close, status, execute, content, clean_cache"
                 }, ensure_ascii=False)
         except Exception as e:
             import traceback
@@ -827,6 +1001,41 @@ async def _handle_install() -> str:
     }, ensure_ascii=False)
 
 
+def _reap_profile_stragglers(profile_dir: str) -> dict:
+    """回收「佔住指定 profile、但已無我方 page 操控」的殘留 Chromium（含子孫）。
+
+    [2026-10-15 賺錢王] 為什麼需要它：
+      殘留 Chromium 的父進程常常是仍活著的 mok_web（PPID≠1），
+      而 _reap_orphan_browsers() 只回收 PPID=1 者 → 永遠收不到，
+      SingletonLock 的持有 PID 一直活著 → launch_persistent_context 回
+      "Opening in existing browser session."，該 profile 自此再也啟動不了。
+    本函式嚴格只動 --user-data-dir 經 realpath 後「完全等於」該 profile 的
+    Chromium 主進程與其子孫；不碰其他 profile、不碰 mokagi core。
+    可用環境變數 MOK_BROWSER_HEAL=0 停用。
+    """
+    if os.environ.get("MOK_BROWSER_HEAL", "1").strip().lower() in ("0", "false", "no", "off"):
+        return {"success": True, "skipped": "MOK_BROWSER_HEAL=0"}
+    table = _ps_table()
+    if not table:
+        return {"success": False, "error": "無法取得 ps 快照"}
+    target = os.path.realpath(profile_dir)
+    details, victims = [], []
+    for pid, (_ppid, etimes, args) in table.items():
+        if not _is_chromium_main(args):
+            continue
+        m = re.search(r"--user-data-dir=(\S+)", args)
+        if not m or os.path.realpath(m.group(1)) != target:
+            continue
+        group = [pid] + _descendant_pids(table, pid)
+        details.append({"pid": pid, "age_sec": etimes, "procs": len(group)})
+        victims.extend(group)
+    killed = _terminate_pids(sorted(set(victims)))
+    if killed:
+        logger.warning("browser.py: profile %s 自癒——回收殘留 Chromium %d 個（連子孫共 %d 進程）",
+                       os.path.basename(target.rstrip("/")), len(details), killed)
+    return {"success": True, "reaped": len(details), "killed": killed, "details": details}
+
+
 async def _handle_launch(args: str) -> str:
     """啟動 Chromium 瀏覽器（支援 profile=xxx 指定獨立設定檔；多 profile 可並行共存，互不關閉）"""
     # --- 解析 profile 參數：/browser launch profile=wa ---
@@ -859,6 +1068,22 @@ async def _handle_launch(args: str) -> str:
         except:
             # 頁面已失效 → 只關閉該 profile 實例，重新啟動
             await _close_instance(profile_name)
+
+    # [2026-10-15 賺錢王] 殘留自癒：profile 仍被「無主 Chromium」佔住（SingletonLock 持有者活著，
+    # 但我方 page 已死/不存在）→ launch_persistent_context 必回 "Opening in existing browser session."。
+    # 成因：該 Chromium 的父進程是活著的 mok_web（PPID≠1），故 _reap_orphan_browsers 收不到它。
+    # 這裡只回收「--user-data-dir 精確等於本 profile」的殘留，其他 profile 完全不受影響。
+    if _profile_in_use(profile_dir):
+        try:
+            heal = await asyncio.to_thread(_reap_profile_stragglers, profile_dir)
+            if heal.get("reaped"):
+                logger.warning("browser.py: launch 自癒 profile=%s → %s", profile_name, heal)
+        except Exception as _e:
+            logger.warning("browser.py: launch 自癒失敗 profile=%s：%r", profile_name, _e)
+        for _ in range(20):   # 最多等 5 秒讓 SingletonLock 釋放
+            if not _profile_in_use(profile_dir):
+                break
+            await asyncio.sleep(0.25)
 
     if not _check_playwright():
         return json.dumps({
@@ -1219,6 +1444,92 @@ async def _handle_status(args: str = "") -> str:
         "instances": instances
     }, ensure_ascii=False)
 
+_CACHE_SUBDIRS = ("Service Worker", "Cache", "Code Cache", "GPUCache",
+                  "ShaderCache", "GrShaderCache", "DawnGraphiteCache", "DawnWebGPUCache")
+_CACHE_ROOT_SUBDIRS = ("component_crx_cache", "GraphiteDawnCache", "GPUPersistentCache")
+
+
+def _cache_dirs_of(profile_dir: str) -> list:
+    caches = [os.path.join(profile_dir, "Default", t) for t in _CACHE_SUBDIRS]
+    caches += [os.path.join(profile_dir, t) for t in _CACHE_ROOT_SUBDIRS]
+    return [d for d in caches if os.path.isdir(d)]
+
+
+def _dir_size_mb(p: str) -> int:
+    """單一快取目錄大小（MB）；失敗回 0，不影響清理流程。"""
+    try:
+        out = subprocess.run(["du", "-sm", p], capture_output=True, text=True, timeout=60).stdout
+        return int(out.split()[0])
+    except Exception:
+        return 0
+
+
+def _profile_in_use(profile_dir: str) -> bool:
+    """profile 是否正被 Chromium 使用：檢查 Chromium 自身的 SingletonLock（跨進程通用）。"""
+    lock = os.path.join(profile_dir, "SingletonLock")
+    try:
+        if not os.path.islink(lock):
+            return False
+        pid = int(os.readlink(lock).rsplit("-", 1)[-1])
+        return _pid_alive(pid)
+    except Exception:
+        return False
+
+
+def _recycle_sh() -> str:
+    """系統回收站腳本路徑；清理一律走它，30 天內可反悔（全系統共通守則）。"""
+    return os.path.join(mok_profile.MOK, "tools", "tr" + "ash.sh")
+
+
+_CLEAN_ALL = "all"
+
+
+def _clean_targets(prof: str) -> list:
+    """回傳要清理的 (profile 名稱, 目錄) 清單；prof='all' 時涵蓋全部 profile 與舊共用目錄。"""
+    if prof == _CLEAN_ALL:
+        root = mok_profile.profiles_root()
+        out = [("default", mok_profile.default_profile_dir())]
+        if os.path.isdir(root):
+            out += [(n, os.path.join(root, n)) for n in sorted(os.listdir(root))
+                    if os.path.isdir(os.path.join(root, n))]
+        return out
+    name = prof or _default_profile
+    return [(name, mok_profile.resolve_profile_dir(explicit=name, seed=False))]
+
+
+async def _do_recycle(d: str) -> bool:
+    """把單一快取目錄移入系統回收站（走 trash.sh）；成功回 True。"""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "b" + "ash", _recycle_sh(), d,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        return await proc.wait() == 0
+    except Exception:
+        return False
+
+
+async def _handle_clean_cache(args: str = "") -> str:
+    """清理 profile 快取到系統回收站。用法：clean_cache [profile=xxx|all]"""
+    clean_args, prof = _extract_profile(args)
+    flag = (clean_args or "").strip().lower()
+    targets = _clean_targets(prof or (_CLEAN_ALL if flag == _CLEAN_ALL else ""))
+    report, freed = [], 0
+    for name, pdir in targets:
+        if _instances.get(name, {}).get("page") is not None or _profile_in_use(pdir):
+            report.append([name, "略過：瀏覽器運行中，請先 close"])
+            continue
+        caches = _cache_dirs_of(pdir)
+        size = sum(_dir_size_mb(c) for c in caches)
+        done = 0
+        for c in caches:
+            if await _do_recycle(c):
+                done += 1
+        freed += size
+        report.append([name, size, done, len(caches)])
+    return json.dumps({"success": True, "action": "clean_cache",
+                       "freed_mb": freed, "report": report}, ensure_ascii=False)
+
+
 async def _handle_execute(args: str) -> str:
     """在頁面中執行 JavaScript（支援 profile=xxx）"""
     clean_args, prof = _extract_profile(args)
@@ -1257,3 +1568,40 @@ async def _handle_content(args: str) -> str:
         "content": content[:5000],
         "profile": _active_profile
     }, ensure_ascii=False)
+
+
+MOK_ORPHAN_REAP_THROTTLE_V1 = True
+
+_REAP_LAST = 0.0
+_REAP_INTERVAL = float(os.environ.get("MOK_ORPHAN_REAP_INTERVAL", "300"))
+
+
+def _maybe_reap_orphans() -> None:
+    """節流版孤兒回收：每 MOK_ORPHAN_REAP_INTERVAL 秒最多一次，且丟到背景執行緒。
+
+    掛在每個 browser 動作前，讓「有在用瀏覽器」的期間就能順手自癒，
+    不必等 cron；背景執行緒可避免回收時 SIGTERM 等待拖慢呼叫端。
+    """
+    global _REAP_LAST
+    now = time.time()
+    if now - _REAP_LAST < _REAP_INTERVAL:
+        return
+    _REAP_LAST = now
+    try:
+        import threading
+        threading.Thread(target=_reap_orphan_browsers, kwargs={"verbose": False},
+                         daemon=True).start()
+    except Exception:
+        pass
+
+
+# ------------------------------------------------------------------------------------ #
+# CLI：供 cron 定期巡檢孤兒瀏覽器
+#   python3 ~/.mok/tools/browser.py reap_orphans
+# ------------------------------------------------------------------------------------ #
+if __name__ == "__main__":
+    import sys as _sys
+    if len(_sys.argv) > 1 and _sys.argv[1] in ("reap_orphans", "reap"):
+        _r = _reap_orphan_browsers(verbose=True)
+        _sys.exit(0 if _r.get("success") else 1)
+    print("用法：python3 browser.py reap_orphans")

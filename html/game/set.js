@@ -57,13 +57,13 @@ function toCSSColor(hex){const r=(hex>>16)&255,g=(hex>>8)&255,b=hex&255;return `
 function hexToGL(hex){return[(hex>>16&255)/255,(hex>>8&255)/255,(hex&255)/255];}
 // MOKAGI總部面向 = pos:[+左-右,高,前=+,後=-] [+-18,0,]
 const BUILDINGS = [
-  {name:"🎮 遊戲入口",desc:"遊戲 / 多巴安 · 注意力收割中心",url:"https://mokagi.com/game",urlName:"遊戲入口",skill:"沉迷：攻速+100%",pos:[0,0,-10],color:0x4a1a1a,w:2,h:2,d:2,lv:1},
-  {name:"🔌 商用AI接入",desc:"商用AI接入 · 工作流自動化",url:"https://mokagi.com/project/",urlName:"商用AI入口",skill:"智慧化：反擊傷害+100%",pos:[-5,0,7],color:0x1a2a3a,w:2,h:3,d:2,lv:2},
+  {name:"🎮 遊戲入口",desc:"遊戲 / 多巴安 · 注意力收割中心",url:location.origin+"/game",urlName:"遊戲入口",skill:"沉迷：攻速+100%",pos:[0,0,-10],color:0x4a1a1a,w:2,h:2,d:2,lv:1},
+  {name:"🔌 商用AI接入",desc:"商用AI接入 · 工作流自動化",url:location.origin+"/project/",urlName:"商用AI入口",skill:"智慧化：反擊傷害+100%",pos:[-5,0,7],color:0x1a2a3a,w:2,h:3,d:2,lv:2},
   {name:"🤖 個人AI工具",desc:"MOKAGI · 個人AI助手",url:"https://github.com/MOK2026/MOKAGI/",urlName:"MOKAGI",skill:"分身：反擊+100%",pos:[5,0,8],color:0x2a1a4a,w:2,h:2.5,d:2,lv:3},
   {name:"💘 男性情感",desc:"男性情感問題 · 關係經營",url:"https://t.me/+yR5Q6k0lBXU4ZTll",urlName:"情感入口",skill:"魅力：血量+100%",pos:[7,0,16],color:0x4a1a2a,w:2,h:2.5,d:2,lv:4},
   {name:"🔮 玄學",desc:"玄學 · 命理風水占卜",url:"https://www.facebook.com/groups/306405626834251",urlName:"玄學入口",skill:"天命：格擋+100%",pos:[10,0,20],color:0x2a1a3a,w:2,h:2.5,d:2,lv:5},
   {name:"👥 人力資源",desc:"兼職炒散 + 康力人力資源顧問公司",url:"https://www.facebook.com/groups/1375195432528847",urlName:"兼職炒散",url2:"https://64071181.github.io/康力人力資源顧問公司/",url2Name:"康力人力資源",skill:"招募：血量+100%",pos:[-8,0,-11],color:0x2a2a1a,w:2,h:2.5,d:2,lv:6},
-  {name:"💇 理髮·髮變鑽石",desc:"理髮 + 頭髮回收→生物鑽石散熱",url:"https://www.facebook.com/groups/193265888192020",urlName:"理髮群組",url2:"https://mokagi.com/project/髮變鑽石/index.html",url2Name:"髮變鑽石",skill:"金剛石：防禦+100%",pos:[-17,0,-4],color:0x2a1a5c,w:2.2,h:3,d:2.2,lv:7},
+  {name:"💇 理髮·髮變鑽石",desc:"理髮 + 頭髮回收→生物鑽石散熱",url:"https://www.facebook.com/groups/193265888192020",urlName:"理髮群組",url2:location.origin+"/project/髮變鑽石/index.html",url2Name:"髮變鑽石",skill:"金剛石：防禦+100%",pos:[-17,0,-4],color:0x2a1a5c,w:2.2,h:3,d:2.2,lv:7},
   {name:"🧺 小商販",desc:"小商販 · 地攤經濟與供貨鏈",url:"https://www.facebook.com/groups/2109045609316212",urlName:"小商販入口",skill:"薄利多銷：反擊+100%",pos:[-8,0,13],color:0x3a2a1a,w:2,h:2,d:2,lv:8},
   {name:"👼 金主天使投資",desc:"天使投資 · 初創資金與孵化",url:"https://www.facebook.com/groups/1619118991433947",urlName:"天使投資入口",skill:"注資：血量+100%",pos:[1,15,5],color:0x3a2a1a,w:2,h:2.5,d:2,lv:9},
   {name:"🍜 飲食業",desc:"飲食業 · 餐廳與食品供應鏈",url:"https://www.facebook.com/groups/301634967109276",urlName:"飲食業入口",skill:"大快朵頤：血量+100%",pos:[-13,0,8],color:0x4a2a0a,w:2,h:2.5,d:2,lv:10},

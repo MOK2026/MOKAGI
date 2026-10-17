@@ -87,6 +87,15 @@ def _call(action, arg="", publish=False, video="", profile_dir=None):
 
 
 def handle_linkedin(args, chat_id=None, agent_config=None):
+    # 非 admin 禁用（政策唯一真相：tools/tool_policy.py）— 2026-10-17 衍
+    try:
+        from tool_policy import gate as _tp_gate
+        _deny = _tp_gate("linkedin", chat_id, agent_config)
+    except Exception:
+        _deny = '{"success": false, "error": "工具「linkedin」僅限管理員使用（安全閘門判定失敗，預設拒絕）。", "denied_by": "tool_policy_failclosed"}'
+    if _deny:
+        return _deny
+
     if isinstance(args, str):
         try:
             args = json.loads(args)

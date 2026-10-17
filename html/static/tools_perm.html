@@ -22,9 +22,9 @@ button.primary{background:#1e3a8a;border-color:#2f4fa8;color:#fff;font-weight:60
 button.ghost{background:transparent}
 .msg{margin-left:auto;font-size:13px}
 .msg.ok{color:#9ae6b4}.msg.err{color:#ffb3c1}
-table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+table{width:100%;border-collapse:separate;border-spacing:0;background:var(--panel);border:1px solid var(--line);border-radius:12px}th:first-child{border-top-left-radius:11px}th:last-child{border-top-right-radius:11px}tbody tr:last-child td:first-child{border-bottom-left-radius:11px}tbody tr:last-child td:last-child{border-bottom-right-radius:11px}
 th,td{padding:9px 10px;border-bottom:1px solid #20263f;font-size:13px;text-align:left;vertical-align:middle}
-th{background:#141a29;color:#cdd3e8;font-weight:600;white-space:nowrap;position:sticky;top:64px;z-index:10}
+th{background:#141a29;color:#cdd3e8;font-weight:600;white-space:nowrap;position:sticky;top:var(--bar-h,63px);z-index:10;box-shadow:0 1px 0 #20263f}
 th.lv{text-align:center;width:96px}
 td.lv{text-align:center}
 tr:hover td{background:#1a2036}
@@ -43,8 +43,8 @@ input[type=checkbox]{width:18px;height:18px;accent-color:#5b8def;cursor:pointer}
 .hint{color:var(--dim);font-size:12px;margin:10px 0 0;line-height:1.7}
 code{background:#101528;border:1px solid #2a3050;border-radius:6px;padding:1px 6px;font-size:12px}
 
-/* ===== 手機版響應式 by 春 2026-10-02 ===== */
-@media (max-width:680px){
+/* ===== 手機版響應式 by 春 2026-10-02（2026-10-10 春：觸控裝置一律卡片式，避免手機開「電腦版網站」時表格被擠成半張） ===== */
+@media (max-width:680px), (hover:none) and (pointer:coarse){
   .wrap{padding:14px 12px 96px}
   h1{font-size:19px}
   .sub{font-size:12.5px;margin-bottom:12px}
@@ -97,7 +97,7 @@ code{background:#101528;border:1px solid #2a3050;border-radius:6px;padding:1px 6
 .warnsum.ok{color:#86efac}.warnsum.bad{color:#fca5a5;font-weight:600}
 td.lv.warn{background:#3a2410!important;box-shadow:inset 0 0 0 1.5px #b45309;border-radius:8px}
 .warnmark{color:#fbbf24;font-size:13px;margin-left:5px;font-weight:700}
-@media (max-width:680px){
+@media (max-width:680px), (hover:none) and (pointer:coarse){
   .pp{font-size:11.5px;gap:5px}
   .pgb{font-size:10.5px;padding:1px 6px}
   .warnsum{width:auto;flex:0 0 auto;white-space:nowrap;font-size:11.5px;margin:0;text-align:left}
@@ -160,6 +160,10 @@ td.lv.warn{background:#3a2410!important;box-shadow:inset 0 0 0 1.5px #b45309;bor
   function $(id){return document.getElementById(id)}
   function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
   function msg(t,ok){var m=$("msg");m.textContent=t;m.className="msg "+(ok?"ok":"err");if(t){setTimeout(function(){if(m.textContent===t){m.textContent="";}},4000);}}
+  /* 動態量測工具列高度，讓表頭 sticky 精準貼在其下 by 春 2026-10-10 */
+  function syncBarH(){var b=document.querySelector(".bar");if(!b)return;var h=Math.round(b.getBoundingClientRect().height);if(h>0)document.documentElement.style.setProperty("--bar-h",h+"px");}
+  window.addEventListener("resize",syncBarH);
+  window.addEventListener("orientationchange",function(){setTimeout(syncBarH,120)});
 
   function rows(){ return DOC.keys || []; }
 
@@ -316,7 +320,7 @@ td.lv.warn{background:#3a2410!important;box-shadow:inset 0 0 0 1.5px #b45309;bor
         .then(function(r){return r.json()})
         .then(function(d){ DOC=d; if(!DOC.perms)DOC.perms={}; if(!DOC.keys)DOC.keys=[]; render(); recomputeWarnings();
           var _u=(PLANS&&PLANS.updated)?("；頁面白名單快照 "+PLANS.updated):"";
-          msg("已載入 "+DOC.keys.length+" 個鍵"+_u,true); })
+          msg("已載入 "+DOC.keys.length+" 個鍵"+_u,true); syncBarH(); })
         .catch(function(e){ msg("❌ 讀取 tools_perm.json 失敗："+e,false); });
     });
   }

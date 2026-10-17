@@ -241,6 +241,10 @@ def _publish_web_audio(mp3_path):
         fname = f"tts_{uuid.uuid4().hex[:12]}.mp3"
         dest = os.path.join(out_dir, fname)
         shutil.move(mp3_path, dest)
+        try:
+            os.chmod(dest, 0o644)
+        except OSError:
+            pass
         return f"/static/tts/{fname}"
     except Exception as e:
         logger.error(f"[TTS] 發佈 Web 語音失敗: {e}")

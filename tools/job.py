@@ -19,7 +19,8 @@ PLUGIN_INFO = {
         (/執行工作, /job run),
         (/移交任務, /job handover <job_name> <target_agent>),
         (/接管任務, /job takeover <job_name> [source_agent]),
-        (/繼續工作, /continue <job_name> 或 /continue <job_name> 補充內容)
+        (/繼續工作, /continue <job_name> 或 /continue <job_name> 補充內容),
+        (/任務看板, /job board)
     """,
     "heartbeat": {
         "enabled": True,
@@ -37,6 +38,8 @@ PLUGIN_INFO = {
         ("/移交任務", "/job handover"),
         ("/接管任務", "/job takeover"),
         ("/分享任務", "/job share"),
+        ("/任務看板", "/job board"),
+        ("/辦公桌看板", "/job board"),
     ],
     "tool_schema": {
         "name": "job",
@@ -47,12 +50,13 @@ PLUGIN_INFO = {
             "更新：/job update <job_name> <選項> [值]\n"
             "  0=進行中  1=完成  2=封鎖  3=等待確認  4 <進度%>\n"
             "跨Agent移交：handover <job_name> <target_agent>\n"
-            "跨Agent接管：takeover <job_name> [source_agent]"
+            "跨Agent接管：takeover <job_name> [source_agent]\n"
+            "重建辦公桌看板快照：board"
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["new", "list", "get", "update", "delete", "run", "listall", "handover", "takeover", "share"]},
+                "action": {"type": "string", "enum": ["new", "list", "get", "update", "delete", "run", "listall", "handover", "takeover", "share", "board"]},
                 "content": {"type": "string", "description": "動作所需參數"}
             },
             "required": ["action"]
@@ -65,6 +69,7 @@ import os
 import re
 import time
 import json
+import base64
 import hashlib
 import logging
 import shutil
@@ -72,6 +77,20 @@ import asyncio
 import httpx
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple
+
+# ---------- 回收站（侍女守則第 1 條：刪檔一律先入回收站） ----------
+TRASH_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trash.sh")
+
+def _to_trash(path) -> Tuple[bool, str]:
+    """把檔案／目錄移入系統回收站（走 trash.sh）。回傳 (成功, 訊息)。"""
+    import subprocess
+    try:
+        r = subprocess.run(["bash", TRASH_SH, str(path)],
+                           capture_output=True, text=True, timeout=60)
+        out = (r.stdout or "").strip() or (r.stderr or "").strip()
+        return r.returncode == 0, out
+    except Exception as e:
+        return False, str(e)
 
 logger = logging.getLogger(__name__)
 
@@ -136,34 +155,110 @@ def list_all_agents() -> List[str]:
                 agents.append(d.name)
     return sorted(agents)
 
+# ========== 交接輔助（A/B 案 2026-10-10）：任務級並行鎖 + 交接摘要 ==========
+LOCK_DIR = PROJECT_DIR / ".joblocks"
+SHARED_POOL_NAME = "📦共享池"      # 虛擬 Agent：跨 Agent 共享池
+
+def _resolve_job_dir(agent_name: str, job_name: str) -> Path:
+    """任務所在目錄（相容共享池虛擬 Agent）。"""
+    if agent_name == SHARED_POOL_NAME:
+        return get_shared_jobs_root() / job_name
+    return get_job_path(agent_name, job_name)
+
+def _resolve_jobs_root(agent_name: str) -> Path:
+    """該 Agent 的 jobs 根目錄（相容共享池虛擬 Agent）。"""
+    return get_shared_jobs_root() if agent_name == SHARED_POOL_NAME else get_jobs_root(agent_name)
+
+def _lock_path(agent_name: str, job_name: str) -> Path:
+    safe = re.sub(r"[^0-9A-Za-z_.\-]", "_", f"{agent_name}__{job_name}")
+    return LOCK_DIR / f"{safe}.lock"
+
+def acquire_job_lock(agent_name: str, job_name: str, ttl: int = 120) -> bool:
+    """任務級並行鎖（O_EXCL）：避免兩個 Agent 同時移轉同一任務；逾時 ttl 秒自動失效。"""
+    p = _lock_path(agent_name, job_name)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        for _ in range(2):
+            try:
+                fd = os.open(str(p), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, f"{os.getpid()} {time.time()}".encode())
+                os.close(fd)
+                return True
+            except FileExistsError:
+                if time.time() - p.stat().st_mtime > ttl:
+                    p.unlink(missing_ok=True)
+                    continue
+                return False
+    except Exception as e:
+        logger.warning(f"取得任務鎖失敗（不阻擋流程）: {e}")
+    return False
+
+def release_job_lock(agent_name: str, job_name: str) -> None:
+    try:
+        _lock_path(agent_name, job_name).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+def _one_line(text: str, limit: int = 160) -> str:
+    s = re.sub(r"\s+", " ", (text or "").strip())
+    return s[:limit] + ("…" if len(s) > limit else "")
+
+def stamp_handover(data: Dict[str, str], frm: str, to: str, kind: str = "移交") -> None:
+    """寫入「交接紀錄」：接手者一開 job.md 就知前因後果（含交接摘要）。"""
+    ts = time.strftime("%Y-%m-%d %H:%M")
+    record = (
+        f"> {ts}｜{kind}：{frm} → {to}\n"
+        f"> · 狀態：{data.get('狀態', 'unknown')}／進度：{data.get('進度', '0%')}\n"
+        f"> · 上次執行：{_one_line(data.get('上次執行摘要')) or '（無）'}\n"
+        f"> · 下一次目標：{_one_line(data.get('下一次目標')) or '（無）'}\n"
+        f"> · 產出位置：{data.get('產出位置') or '（未設定）'}"
+    )
+    old = (data.get("交接紀錄") or "").strip()
+    data["交接紀錄"] = f"{old}\n{record}" if old else record
+
+def normalize_job_fields(data: Dict[str, str], agent_name: str, job_dir: Path) -> Dict[str, str]:
+    """補齊舊任務缺少的負責人／產出位置（向後相容，不破壞既有 job.md）。"""
+    data.setdefault("負責人", agent_name)
+    if not data.get("產出位置"):
+        data["產出位置"] = str(job_dir)
+    return data
+
 # ========== 跨 Agent 任務交接 ==========
 def handover_job(source_agent: str, target_agent: str, job_name: str) -> Tuple[bool, str]:
     """將任務從 source_agent 移交給 target_agent"""
-    src_path = get_job_path(source_agent, job_name)
+    src_path = _resolve_job_dir(source_agent, job_name)
     if not src_path.exists():
         return False, f"❌ 在 `{source_agent}` 中找不到任務 `{job_name}`"
     
     all_agents = list_all_agents()
-    if target_agent not in all_agents:
+    if target_agent != SHARED_POOL_NAME and target_agent not in all_agents:
         return False, f"❌ 目標 Agent `{target_agent}` 不存在。可用 Agent: {', '.join(all_agents)}"
     
-    dst_root = get_jobs_root(target_agent)
+    dst_root = _resolve_jobs_root(target_agent)
     dst_root.mkdir(parents=True, exist_ok=True)
     
     dst_path = dst_root / job_name
     if dst_path.exists():
         return False, f"❌ 目標 Agent `{target_agent}` 已存在同名任務 `{job_name}`。請先刪除或重新命名。"
     
+    if not acquire_job_lock(source_agent, job_name):
+        return False, f"🔒 任務 \`{job_name}\` 正被其他 Agent 操作中（並行鎖），請稍後再試。"
+
     md_path = src_path / "job.md"
     if md_path.exists():
-        data = parse_job_md(md_path)
+        data = normalize_job_fields(parse_job_md(md_path), source_agent, src_path)
         data["移交自"] = source_agent
         data["移交時間"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        data["負責人"] = target_agent
+        if data.get("產出位置", "").startswith(str(src_path)):
+            data["產出位置"] = data["產出位置"].replace(str(src_path), str(dst_path), 1)
+        stamp_handover(data, source_agent, target_agent, "移交")
         with open(md_path, "w", encoding="utf-8") as f:
             f.write(render_job_md(data, data.get("_title", job_name)))
     
     shutil.move(str(src_path), str(dst_path))
-    return True, f"✅ 已將任務 `{job_name}` 從 `{source_agent}` 移交給 `{target_agent}`"
+    release_job_lock(source_agent, job_name)
+    return True, f"✅ 已將任務 `{job_name}` 從 `{source_agent}` 移交給 `{target_agent}`（已附交接摘要）"
 
 
 def takeover_job(target_agent: str, job_name: str, source_agent: str = None) -> Tuple[bool, str]:
@@ -176,7 +271,7 @@ def takeover_job(target_agent: str, job_name: str, source_agent: str = None) -> 
     if shared_root.exists():
         for d in shared_root.iterdir():
             if d.is_dir() and d.name == job_name:
-                found.append(("📦共享池", d))
+                found.append((SHARED_POOL_NAME, d))
     
     for agent in list_all_agents():
         if agent == target_agent:
@@ -200,16 +295,24 @@ def takeover_job(target_agent: str, job_name: str, source_agent: str = None) -> 
     if dst_path.exists():
         return False, f"❌ 目標 Agent 已存在同名任務 `{job_name}`"
     
+    if not acquire_job_lock(src_agent, job_name):
+        return False, f"🔒 任務 `{job_name}` 正被其他 Agent 操作中（並行鎖），請稍後再試。"
+
     md_path = src_path / "job.md"
     if md_path.exists():
-        data = parse_job_md(md_path)
+        data = normalize_job_fields(parse_job_md(md_path), src_agent, src_path)
         data["接管自"] = src_agent
         data["接管時間"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        data["負責人"] = target_agent
+        if data.get("產出位置", "").startswith(str(src_path)):
+            data["產出位置"] = data["產出位置"].replace(str(src_path), str(dst_path), 1)
+        stamp_handover(data, src_agent, target_agent, "接管")
         with open(md_path, "w", encoding="utf-8") as f:
             f.write(render_job_md(data, data.get("_title", job_name)))
     
     shutil.move(str(src_path), str(dst_path))
-    return True, f"✅ `{target_agent}` 已從 `{src_agent}` 接管任務 `{job_name}`"
+    release_job_lock(src_agent, job_name)
+    return True, f"✅ `{target_agent}` 已從 `{src_agent}` 接管任務 `{job_name}`（已附交接摘要）"
 
 
 def share_job_to_pool(agent_name: str, job_name: str) -> Tuple[bool, str]:
@@ -223,15 +326,18 @@ def share_job_to_pool(agent_name: str, job_name: str) -> Tuple[bool, str]:
     
     dst_path = shared_root / job_name
     if dst_path.exists():
-        shutil.rmtree(str(dst_path))
+        ok, msg = _to_trash(dst_path)
+        if not ok:
+            return False, f"❌ 無法清理共享池中的舊任務 `{job_name}`（{msg}）"
     
     shutil.copytree(str(src_path), str(dst_path))
     
     md_path = dst_path / "job.md"
     if md_path.exists():
-        data = parse_job_md(md_path)
+        data = normalize_job_fields(parse_job_md(md_path), agent_name, src_path)
         data["共享自"] = agent_name
         data["共享時間"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        stamp_handover(data, agent_name, SHARED_POOL_NAME, "分享")
         with open(md_path, "w", encoding="utf-8") as f:
             f.write(render_job_md(data, data.get("_title", job_name)))
     
@@ -258,6 +364,89 @@ def list_all_jobs() -> List[Tuple[str, str, str, str]]:
     return all_jobs
 
 
+# ========== 侍女辦公桌看板（C 案 2026-10-10） ==========
+# 看板真實檔放在所有者 agent 的 jobs/，經 /report/<agent>/... route 提供（需登入）
+BOARD_AGENT = "衍"
+BOARD_DIR = PROJECT_DIR / "agent" / BOARD_AGENT / "jobs" / "侍女辦公桌"
+BOARD_PAGE_PATH = BOARD_DIR / "index.html"
+
+def _job_card(agent_name: str, job_dir: Path, shared: bool = False) -> Optional[dict]:
+    md_path = job_dir / "job.md"
+    if not md_path.exists():
+        return None
+    data = parse_job_md(md_path)
+    log = (data.get("交接紀錄") or "").strip()
+    rel_root = "shared_jobs" if shared else f"agent/{agent_name}/jobs"
+    return {
+        "agent": agent_name,
+        "shared": shared,
+        "name": job_dir.name,
+        "title": data.get("_title") or job_dir.name,
+        "status": data.get("狀態", "unknown"),
+        "progress": data.get("進度", "0%"),
+        "owner": data.get("負責人") or agent_name,
+        "output": data.get("產出位置", ""),
+        "goal": _one_line(data.get("下一次目標"), 120),
+        "last": _one_line(data.get("上次執行摘要"), 120),
+        "handover": _one_line(log.split("\n")[-1], 120) if log else "",
+        "handover_count": sum(1 for ln in log.split("\n") if ln.startswith("> ") and "→" in ln),
+        "updated": int(md_path.stat().st_mtime),
+        "path": f".mok/{rel_root}/{job_dir.name}/job.md",
+    }
+
+def collect_board_data() -> dict:
+    """掃描全體侍女任務，彙整看板資料。"""
+    agents, total = [], 0
+    for agent in list_all_agents():
+        root = get_jobs_root(agent)
+        if not root.exists():
+            continue
+        cards = [c for c in (_job_card(agent, d) for d in sorted(root.iterdir()) if d.is_dir()) if c]
+        if cards:
+            total += len(cards)
+            agents.append({"agent": agent, "jobs": cards})
+    shared_cards = []
+    shared_root = get_shared_jobs_root()
+    if shared_root.exists():
+        shared_cards = [c for c in (_job_card(SHARED_POOL_NAME, d, True) for d in sorted(shared_root.iterdir()) if d.is_dir()) if c]
+        total += len(shared_cards)
+    return {
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_ts": int(time.time()),
+        "total": total,
+        "agents": agents,
+        "shared": shared_cards,
+    }
+
+def build_board_snapshot() -> str:
+    """重建看板資料並內嵌進需登入的頁面（避免 /static 未登入即外洩任務內容）。"""
+    try:
+        payload = collect_board_data()
+        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        blob = base64.b64encode(raw).decode("ascii")
+        BOARD_DIR.mkdir(parents=True, exist_ok=True)
+        page = BOARD_PAGE_PATH.read_text(encoding="utf-8")
+        new_page, n = re.subn(
+            r'(<script id="board-data" type="application/json">).*?(</script>)',
+            lambda m: m.group(1) + blob + m.group(2),
+            page, flags=re.S,
+        )
+        if n != 1:
+            return "❌ 看板頁面缺少資料掛載點（board-data），未寫入。"
+        tmp = BOARD_PAGE_PATH.with_suffix(".html.tmp")
+        tmp.write_text(new_page, encoding="utf-8")
+        os.replace(tmp, BOARD_PAGE_PATH)
+        return (
+            f"🪑 侍女辦公桌看板已重建\n"
+            f"· 任務：{payload['total']} 件／侍女：{len(payload['agents'])} 位\n"
+            f"· 共享池：{len(payload['shared'])} 件\n"
+            f"· 時間：{payload['generated_at']}\n"
+            f"· 看板：/report/{BOARD_AGENT}/侍女辦公桌/index.html（需登入）"
+        )
+    except Exception as e:
+        logger.error(f"重建看板快照失敗: {e}")
+        return f"❌ 重建看板快照失敗：{e}"
+
 # ========== Markdown 解析與渲染 ==========
 def parse_job_md(filepath: Path) -> Dict[str, str]:
     """從 job.md 解析出各個區塊（## 標題）的內容，含隱藏 metadata"""
@@ -280,7 +469,8 @@ def parse_job_md(filepath: Path) -> Dict[str, str]:
     
     data = {}
     for title, body in matches:
-        data[title.strip()] = body.strip()
+        # 2026-10-10：剝掉誤入章節內部的 METADATA 註解，避免污染看板／摘要
+        data[title.strip()] = re.sub(r'<!-- METADATA.*?-->', '', body, flags=re.DOTALL).strip()
     
     # 合併 metadata（_ 開頭的內部欄位）
     data.update(metadata)
@@ -293,7 +483,7 @@ def parse_job_md(filepath: Path) -> Dict[str, str]:
 def render_job_md(data: Dict[str, str], title: str) -> str:
     """將 dict 渲染為 job.md 格式，metadata（_ 開頭欄位）以隱藏註解保存"""
     lines = [f"# {title}", ""]
-    sections = ["狀態", "進度", "主人原話", "上次執行摘要", "下一次目標", "主人補充"]
+    sections = ["狀態", "進度", "負責人", "產出位置", "主人原話", "上次執行摘要", "下一次目標", "主人補充", "交接紀錄"]
     for sec in sections:
         if sec in data and data[sec]:
             lines.append(f"## {sec}")
@@ -319,10 +509,13 @@ def create_job(agent_name: str, job_name: str, user_text: str) -> bool:
     data = {
         "狀態": "waiting_confirm",
         "進度": "0%",
+        "負責人": agent_name,
+        "產出位置": str(job_dir),
         "主人原話": user_text,
         "上次執行摘要": "任務剛建立，等待第一次執行。",
         "下一次目標": "請 AI 分析並制定具體步驟。",
-        "主人補充": ""
+        "主人補充": "",
+        "交接紀錄": ""
     }
     md_path = get_job_md_path(agent_name, job_name)
     with open(md_path, 'w', encoding='utf-8') as f:
@@ -343,6 +536,9 @@ def read_job_summary(agent_name: str, job_name: str) -> Dict[str, str]:
     return {
         "狀態": data.get("狀態", "unknown"),
         "進度": data.get("進度", "0%"),
+        "負責人": data.get("負責人") or agent_name,
+        "產出位置": data.get("產出位置", ""),
+        "交接紀錄": data.get("交接紀錄", ""),
         "主人原話": data.get("主人原話", ""),
         "上次執行摘要": data.get("上次執行摘要", ""),
         "下一次目標": data.get("下一次目標", ""),
@@ -443,6 +639,8 @@ def get_llm_context(agent_name: str, job_name: str) -> str:
 
 - 狀態：{summary.get('狀態', 'unknown')}
 - 進度：{summary.get('進度', '0%')}
+- 負責人：{summary.get('負責人', '（未設定）')}
+- 產出位置：{summary.get('產出位置', '（未設定）')}
 
 📌 主人原話：
 {summary.get('主人原話', '')}
@@ -713,6 +911,9 @@ async def handle_job(args, chat_id: str = None, agent_config: dict = None):
             f"可使用 `/continue {job_name}` 繼續執行，或等待心跳自動觸發。"
         )
 
+    elif action == "board":
+        return build_board_snapshot()
+
     elif action == "list":
         jobs = list_jobs(agent_name)
         if not jobs:
@@ -732,10 +933,13 @@ async def handle_job(args, chat_id: str = None, agent_config: dict = None):
             f"📋 任務 `{content}`\n"
             f"狀態：{data.get('狀態')}\n"
             f"進度：{data.get('進度')}\n"
+            f"負責人：{data.get('負責人', '（未設定）')}\n"
+            f"產出位置：{data.get('產出位置', '（未設定）')}\n"
             f"主人原話：{data.get('主人原話')}\n"
             f"上次執行摘要：{data.get('上次執行摘要')}\n"
             f"下一次目標：{data.get('下一次目標')}\n"
-            f"主人補充：{data.get('主人補充')}"
+            f"主人補充：{data.get('主人補充')}\n"
+            f"交接紀錄：\n{data.get('交接紀錄') or '（尚無交接）'}"
         )
 
     elif action == "update":
@@ -805,8 +1009,10 @@ async def handle_job(args, chat_id: str = None, agent_config: dict = None):
         job_path = get_job_path(agent_name, job_name)
         if not job_path.exists():
             return f"❌ 找不到任務 `{job_name}`"
-        shutil.rmtree(job_path)
-        return f"🗑️ 已刪除任務 `{job_name}`"
+        ok, msg = _to_trash(job_path)
+        if not ok:
+            return f"❌ 刪除失敗：{msg}"
+        return f"🗑️ 已刪除任務 `{job_name}`（已移入回收站，30 天內可還原）"
 
     elif action == "run":
         if not content:
@@ -876,5 +1082,6 @@ async def handle_job(args, chat_id: str = None, agent_config: dict = None):
             "  `/job run <job_name>`     手動立即執行任務\n"
             "  `/job handover <job_name> <target_agent>`  移交任務給其他 Agent\n"
             "  `/job takeover <job_name> [source_agent]`  接管其他 Agent 的任務\n"
-            "  `/job share <job_name>`   分享任務到共享池"
+            "  `/job share <job_name>`   分享任務到共享池\n"
+            "  `/job board`              重建侍女辦公桌看板快照 -> /report/衍/侍女辦公桌/index.html"
         )

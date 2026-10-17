@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 公開白名單閘 v1  (2026-10-03)  作者：API平台工程師
+v2 patch (2026-10-11 SEO侍女)：未登入訪客的「未知路徑」改回 404（不再 302/403）。
 ====================================================
 載入：mok_web/保丁.py 載入器自動掃描（目錄名 8 個 ｚ 開頭，載入順序最後）。
 
@@ -72,6 +73,60 @@ ALWAYS_PREFIX = (
 )
 
 
+# ===== v2 (2026-10-11 SEO侍女)：未知路徑 -> 404 =====
+_HTML_ROOT = os.path.expanduser('~/.mok/html')
+_PUBLIC_ROOT = '/var/www/mok-public'
+
+SAFE_FILES = (
+    '/robots.txt', '/sitemap.xml', '/llms.txt', '/llms-full.txt',
+    '/humans.txt', '/feed.xml', '/og.png', '/.well-known/security.txt',
+)
+
+
+def _exists(np):
+    try:
+        return _exists_inner(np)
+    except Exception:
+        return True
+
+
+def _exists_inner(np):
+    if np in ('/', ''):
+        return True
+    if np in SAFE_FILES:
+        return True
+    page = np.strip('/')
+    if not page:
+        return True
+    try:
+        from flask import request as _rq
+        adapter = app.url_map.bind(_rq.host or 'mokagi.com')
+        rule, args = adapter.match(np, method=_rq.method)
+        if 'page' not in args:
+            return True
+    except Exception:
+        pass
+    roots = [r for r in (_HTML_ROOT, _PUBLIC_ROOT) if r]
+    for r in roots:
+        for c in (os.path.join(r, page),
+                  os.path.join(r, page + '.html'),
+                  os.path.join(r, page, 'index.html')):
+            try:
+                if os.path.exists(c):
+                    return True
+            except Exception:
+                pass
+    first = page.split('/')[0]
+    if first:
+        try:
+            if os.path.exists(os.path.join(_HTML_ROOT, first)):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+
 def _norm(p):
     from urllib.parse import unquote as _uq
     p = _uq(p or '').strip().split('?')[0].split('#')[0]
@@ -135,6 +190,44 @@ def _is_public(np, entries):
     return False
 
 
+_NOTFOUND_HTML = """<!doctype html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,follow">
+<title>404 &middot; 找不到頁面 | MOKAGI</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:radial-gradient(1200px 600px at 50% -10%,#1b2440 0%,#0b0f1a 60%,#05070d 100%);
+color:#e8ecf8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang HK","Noto Sans CJK TC",sans-serif}
+.wrap{max-width:640px;padding:48px 28px;text-align:center}
+.code{font-size:96px;font-weight:800;letter-spacing:4px;line-height:1;
+background:linear-gradient(90deg,#5ea0ff,#a86bff);-webkit-background-clip:text;background-clip:text;color:transparent}
+h1{font-size:22px;margin:18px 0 8px}p{color:#9aa6c4;line-height:1.7;margin:8px 0}
+a.btn{display:inline-block;margin:18px 8px 0;padding:12px 22px;border-radius:999px;text-decoration:none;
+background:linear-gradient(90deg,#3b6ff0,#8b5cf6);color:#fff;font-weight:600}
+a.link{color:#9ec1ff;text-decoration:none;margin:0 8px}.small{margin-top:26px;font-size:12px;color:#65708f}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="code">404</div>
+  <h1>找不到這個頁面 &middot; Page not found</h1>
+  <p>您要找的頁面不存在、已被移動，或網址有誤。</p>
+  <p>The page you requested does not exist or has been moved.</p>
+  <a class="btn" href="https://mokagi.com/">回到首頁 &middot; Home</a>
+  <div class="small">
+    <a class="link" href="https://mokagi.com/faq/">FAQ</a>
+    <a class="link" href="https://mokagi.com/ai-agent/">AI Agent</a>
+    <a class="link" href="https://mokagi.com/about/">關於 MOKAGI</a>
+  </div>
+  <div class="small">MOKAGI &middot; 自託管多 Agent AI 作業系統 &middot; <a class="link" href="https://mokagi.com/">mokagi.com</a></div>
+</div>
+</body>
+</html>"""
+
 def _guard():
     try:
         from flask import request, session, redirect, jsonify
@@ -156,6 +249,10 @@ def _guard():
     acc = (request.headers.get('Accept') or '').lower()
     mode = (request.headers.get('Sec-Fetch-Mode') or '').lower()
     is_nav = ('text/html' in acc) or (mode == 'navigate') or (acc == '')
+    if not _exists(np):
+        if is_nav:
+            return _NOTFOUND_HTML, 404, {'Content-Type': 'text/html; charset=utf-8'}
+        return jsonify({'success': False, 'error': 'not found'}), 404
     if is_nav:
         from urllib.parse import quote
         return redirect('/login?next=' + quote(path))

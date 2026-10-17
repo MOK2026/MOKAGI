@@ -170,7 +170,8 @@ def start_bot(agent_name, config_path):
     proc = subprocess.Popen(
         [sys.executable, str(bot_script)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        env=env, cwd=str(PROJECT_DIR), text=True, bufsize=1
+        env=env, cwd=str(PROJECT_DIR), text=True, bufsize=1,
+        errors="replace"
     )
     proc.type = 'bot'          # 標記為機器人進程
 
@@ -218,7 +219,7 @@ def start_web(port=5000):
         [sys.executable, str(web_script)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env, cwd=str(PROJECT_DIR), text=True, bufsize=1,
-        start_new_session=True
+        start_new_session=True, errors="replace"
     )
     proc.type = 'web'
     return proc
@@ -324,6 +325,12 @@ def master_restart(output_queue=None):
             except Exception:
                 pass
     print("[launcher] ✅ 子進程已收尾，重啟 launcher 本體…", flush=True)
+    # [Bug1 2026-10-16 稚] 最終 reap：SIGKILL 後阻塞 wait 回收所有子進程，避免 execv 後成殭屍累積
+    for _p in list(processes):
+        try:
+            _p.wait(timeout=3)
+        except Exception:
+            pass
     try:
         sys.stdout.flush()
         sys.stderr.flush()
@@ -371,7 +378,7 @@ def soft_restart_web(output_queue=None):
         if output_queue is not None:
             threading.Thread(target=stream_reader, args=(newp.stdout, "[Web]", output_queue), daemon=True).start()
             if newp.stderr:
-                threading.Thread(target=stream_reader, args=(newp.stderr, "[Web][ERR]", output_queue), daemon=True).start()
+                threading.Thread(target=stream_reader, args=(newp.stderr, "[Web][STDERR]", output_queue), daemon=True).start()
         print(f"[launcher] ✅ Web 已軟重啟（新 PID {newp.pid}），補丁已重新載入", flush=True)
     else:
         print("[launcher] ⚠️ 軟重啟失敗：Web 未成功啟動", flush=True)
@@ -401,6 +408,12 @@ def signal_handler(sig, frame):
                 p.kill()
             except Exception:
                 pass
+    # [Bug1 2026-10-16 稚] 最終 reap：SIGKILL 後阻塞 wait 回收所有子進程，避免殭屍累積
+    for p in processes:
+        try:
+            p.wait(timeout=3)
+        except Exception:
+            pass
     stop_event.set()
     sys.exit(0)
 
@@ -433,7 +446,7 @@ def _ensure_pm2_guard():
         print("[Guard] 重注入%s。" % ("成功" if ok else "後驗證失敗"), flush=True)
         return ok
     except Exception as e:
-        print(f"[Guard] 自動重注入失敗：{e}（請主人手動處理）", flush=True)
+        print(f"[Guard] 自動重注入失敗：{e}（請管理員手動處理）", flush=True)
         return False
 
 
@@ -484,7 +497,7 @@ def main():
         processes.append(web_proc)
         threading.Thread(target=stream_reader, args=(web_proc.stdout, "[Web]", output_queue), daemon=True).start()
         if web_proc.stderr:
-            threading.Thread(target=stream_reader, args=(web_proc.stderr, "[Web][ERR]", output_queue), daemon=True).start()
+            threading.Thread(target=stream_reader, args=(web_proc.stderr, "[Web][STDERR]", output_queue), daemon=True).start()
     else:
         print("啟動網頁界面失敗", flush=True)
 
@@ -538,7 +551,7 @@ def main():
                         processes.append(replacement)
                         threading.Thread(target=stream_reader, args=(replacement.stdout, "[Web]", output_queue), daemon=True).start()
                         if replacement.stderr:
-                            threading.Thread(target=stream_reader, args=(replacement.stderr, "[Web][ERR]", output_queue), daemon=True).start()
+                            threading.Thread(target=stream_reader, args=(replacement.stderr, "[Web][STDERR]", output_queue), daemon=True).start()
                     continue
                 else:  # bot 進程退出
                     # 機器人退出，從列表中移除，不觸發全局重啟

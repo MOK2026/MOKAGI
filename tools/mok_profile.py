@@ -32,6 +32,14 @@ _INVALID_NAMES = ("", "?", "default", "助手", "none", "None", "null")
 
 _COPY_IGNORE = ("lockfile", ".lock")
 
+# 種子複製時排除的 Chromium 快取目錄（與工具層 clean_cache / 快取回收清單一致；
+# 不含登入狀態，瀏覽器會自動重建）。
+_CACHE_IGNORE = (
+    "Cache", "Code Cache", "GPUCache", "ShaderCache", "GrShaderCache",
+    "DawnGraphiteCache", "DawnWebGPUCache", "GraphiteDawnCache",
+    "GPUPersistentCache", "component_crx_cache", "Service Worker",
+)
+
 
 def safe_profile_name(name) -> str:
     """把侍女或整合名稱清洗成可安全作為目錄名的字串；無效則回傳空字串（規則與 browser 工具一致）。"""
@@ -75,7 +83,8 @@ def _under_profiles_root(path: str) -> bool:
 
 
 def _ignore(_dir, names):
-    return [n for n in names if n.startswith("Singleton") or n in _COPY_IGNORE]
+    return [n for n in names
+            if n.startswith("Singleton") or n in _COPY_IGNORE or n in _CACHE_IGNORE]
 
 
 def seed_profile(profile_dir: str) -> bool:

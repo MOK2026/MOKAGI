@@ -1,7 +1,7 @@
 {
   "_comment": "右側工具面板（.tools-header／#toolsMoreDropdown）按鍵的等級權限矩陣。by 凜 2026-10-01。全權限與否只影響前端顯示與可操作；admin 一律全開。",
   "version": 1,
-  "updated": "2026-10-06 11:25:53",
+  "updated": "2026-10-13 17:17:39",
   "levels": [
     "guest",
     "free",
@@ -15,7 +15,16 @@
     "vip": "vip 尊榮會員"
   },
   "admin_note": "admin（管理員）不受此矩陣限制，一律全開。",
-  "keys": [ {"key": "履歷生成網", "icon": "📄", "label": "履歷生成網", "panel": 1, "admin_only": false, "desc": "履歷之神 · AI 精美履歷生成器（RenderCV 引擎）。生成一次扣 150000 token。", "page": "/report/履歷之神/履歷生成網/index.html"},
+  "keys": [
+    {
+      "key": "履歷生成網",
+      "icon": "📄",
+      "label": "履歷生成網",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "履歷之神 · AI 精美履歷生成器（RenderCV 引擎）。生成一次扣 150000 token。",
+      "page": "/report/履歷之神/履歷生成網/index.html"
+    },
     {
       "key": "__panel__",
       "icon": "🔲",
@@ -239,8 +248,17 @@
       "label": "短劇王",
       "panel": 1,
       "admin_only": false,
-      "desc": "短劇王操作台：漫劇／短劇分鏡腳本、出圖出片、審片與成片下載（iframe：/jobs/短劇王/index.html）。",
-      "page": "/jobs/短劇王/index.html"
+      "desc": "短劇王操作台：漫劇／短劇分鏡腳本、出圖出片、審片與成片下載（iframe：/report/影片女/短劇王/index.html）。",
+      "page": "/report/影片女/短劇王/index.html"
+    },
+    {
+      "key": "短劇王Veo",
+      "icon": "🎥",
+      "label": "短劇王Veo",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "短劇王Veo 操作台：用 skill「影片生成」的 Veo 3.1 Lite 做逐鏡接力、自動抽尾幀出短劇（iframe：/veodrama/）。出片限 admin。",
+      "page": "/veodrama/"
     },
     {
       "key": "快取日報",
@@ -313,9 +331,33 @@
       "admin_only": true,
       "desc": "PM2 一鍵開關面板：列出所有 pm2 進程，逐列啟動／停止／重啟＋即時狀態燈（iframe：/report/mokagi說明/pm2面板/index.html）。",
       "page": "/report/mokagi說明/pm2面板/index.html"
+    },
+    {
+      "key": "侍女辦公桌",
+      "icon": "🪑",
+      "label": "侍女辦公桌",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "全體侍女的任務看板快照（真實檔：agent/衍/jobs/侍女辦公桌/index.html）。",
+      "page": "/report/衍/侍女辦公桌/index.html"
+    },
+    {
+      "key": "自助頁原型",
+      "icon": "🧪",
+      "label": "自助頁原型",
+      "panel": 1,
+      "admin_only": true,
+      "desc": "自助頁原型（痛點 → AI 生成 demo → 三段定價付款鍵）；任務產物原型，僅供主人預覽。",
+      "page": "/report/命/20261014-0110_自助頁原型/index.html"
     }
   ],
-  "perms": { "履歷生成網": {"guest": 0, "free": 1, "pro": 1, "vip": 1},
+  "perms": {
+    "履歷生成網": {
+      "guest": 0,
+      "free": 1,
+      "pro": 1,
+      "vip": 1
+    },
     "agentInfoBtn": {
       "guest": 0,
       "free": 0,
@@ -499,8 +541,14 @@
     "短劇王": {
       "guest": 0,
       "free": 0,
-      "pro": 0,
+      "pro": 1,
       "vip": 0
+    },
+    "短劇王Veo": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 1
     },
     "pm2面板": {
       "guest": 0,
@@ -509,6 +557,18 @@
       "vip": 0
     },
     "金流後台": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "侍女辦公桌": {
+      "guest": 0,
+      "free": 0,
+      "pro": 0,
+      "vip": 0
+    },
+    "自助頁原型": {
       "guest": 0,
       "free": 0,
       "pro": 0,

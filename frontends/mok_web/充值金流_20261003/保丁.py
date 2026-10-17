@@ -8,7 +8,9 @@ MOKAGI 金流補丁 v1.0   （2026-10-03 支付女）
     cron「金流巡檢.py」每 3 分鐘掃鏈 → 比對 pending 訂單 → credit_tokens() 自動完成。
     客人亦可即時貼上 tx hash → 走 p3a-walletd 鏈上驗證 → 秒級完成。
 
-【階段 2｜半自動】香港支付寶 / 支付寶 / 微信錢包（QR 圖） / 轉數快 FPS / 信用卡
+【階段 2｜半自動】香港支付寶 / 支付寶 / 微信錢包（QR 圖） / 轉數快 FPS
+    ※ 信用卡（原 card 渠道）2026-10-10 依 admin 指示暫時隱藏：前端不顯示、API 拒單；
+      定義保留在 CH_META['card'] 的 'hide': True，恢復時刪除該旗標即可。
     客人建單 → 顯示收款資訊 → 上傳收據截圖 → AI（vision）預檢 → 管理員一鍵確認。
 
 【三條鐵律】
@@ -109,6 +111,16 @@ PRICE_PER_TOKEN_HKD = _load_price_per_token()
 HKD_PER_MILLION = round(PRICE_PER_TOKEN_HKD * 1000000.0, 4)
 
 
+def is_plan_order_note(note):
+    """方案單判定：訂單 note 以 'PLAN:' 開頭（自助頁／方案層蓋上）。
+
+    只用來決定「這筆要不要入點數」；一般充值單 note 為空或不含 PLAN:，
+    行為與加入本判斷前完全一致（2026-10-14 方案單不入點數）。
+    前端雖可自行塞 note，但偽造只會令自己不入點、無法多取點數。
+    """
+    return str(note or '').strip().upper().startswith('PLAN:')
+
+
 def hkd_to_tokens(hkd):
     try:
         hkd = float(hkd)
@@ -145,7 +157,7 @@ CH_META = {
     'alipay': {'name': '支付寶',              'icon': '🅰', 'auto': False, 'cur': 'HKD'},
     'wechat': {'name': '微信錢包',            'icon': '💬', 'auto': False, 'cur': 'HKD'},
     'fps':    {'name': '轉數快 FPS',            'icon': '⚡', 'auto': False, 'cur': 'HKD'},
-    'card':   {'name': '信用卡（需網關）',      'icon': '💳', 'auto': False, 'cur': 'HKD'},
+    'card':   {'name': '信用卡（需網關）',      'icon': '💳', 'auto': False, 'cur': 'HKD', 'hide': True},  # 2026-10-10 admin 指示：前端隱藏 + 後端拒單（恢復＝刪除本行 hide）
 }
 
 # QR 收款渠道：以下三渠道以「QR 圖」收款（非文字帳號）
@@ -345,10 +357,12 @@ def _unique_amount(order_no, hkd, rate):
     return round(base + tail, 6)
 
 
-def create_order(username, channel, hkd, note=''):
+def create_order(username, channel, hkd, note='', credit=True):
     channel = (channel or '').strip().lower()
     if channel not in CH_META:
         return None, '不支援的付款渠道'
+    if CH_META[channel].get('hide'):
+        return None, '此付款方式暫未開放'
     try:
         hkd = float(hkd)
     except Exception:
@@ -359,8 +373,9 @@ def create_order(username, channel, hkd, note=''):
     if hkd > 2000000:
         return None, '單筆上限 HK$2,000,000，請分單'
 
-    tokens = hkd_to_tokens(hkd)
-    if tokens <= 0:
+    # 方案單（自助頁服務費）：credit=False → 收錢不入點；一般充值單 credit=True，行為不變。
+    tokens = hkd_to_tokens(hkd) if credit else 0
+    if credit and tokens <= 0:
         return None, '金額太小'
 
     no = _new_order_no()
@@ -686,16 +701,21 @@ def apply_chain_payment(order, tx_hash, source='user'):
     else:
         return False, '此渠道不支援鏈上入帳', {}
 
-    tokens = hkd_to_tokens(hkd)
-    if tokens <= 0:
+    _is_plan = is_plan_order_note(order.get('note'))
+    tokens = 0 if _is_plan else hkd_to_tokens(hkd)
+    if not _is_plan and tokens <= 0:
         return False, '實收金額換算後為 0 點數', ver
 
-    ok, msg, bal = credit_tokens(order['username'], tokens, 'recharge_chain',
-                                 order_no=order['order_no'],
-                                 idem_key='crypto:%s' % tx_hash.lower(),
-                                 meta=json.dumps({'channel': ch, 'tx': tx_hash,
-                                                  'hkd': round(hkd, 4), 'source': source},
-                                                 ensure_ascii=False))
+    if _is_plan:
+        # 方案單：鏈上驗證通過即完成收款，不入任何點數（避免收了錢又送等值 AI 額度）。
+        ok, msg, bal = True, 'ok', None
+    else:
+        ok, msg, bal = credit_tokens(order['username'], tokens, 'recharge_chain',
+                                     order_no=order['order_no'],
+                                     idem_key='crypto:%s' % tx_hash.lower(),
+                                     meta=json.dumps({'channel': ch, 'tx': tx_hash,
+                                                      'hkd': round(hkd, 4), 'source': source},
+                                                     ensure_ascii=False))
     if not ok:
         return False, msg, ver
     set_order(order['order_no'], status='paid', paid_ts=time.time(), tx_hash=tx_hash,
@@ -814,6 +834,7 @@ function hkdFmt(n){ return "HK$" + Number(n).toLocaleString("en-HK",{minimumFrac
 function renderCh(){
   let h = "";
   for (const k in CH){
+    if (CH[k].hide) continue;
     const c = CH[k];
     h += '<div class="ch'+(k===curCh?' on':'')+'" data-ch="'+k+'">'
        + '<span style="font-size:17px">'+c.icon+'</span><span class="nm">'+c.name+'</span>'
@@ -951,7 +972,7 @@ def render_recharge(username, user, err=''):
           'placeholder="或自訂金額（HK$）"></div>'
           '<button class="btn" id="mk">③ 產生付款訂單</button>'
           '<div class="note">加密貨幣（USDC/BTC）為全自動：付款後貼上交易編號即秒級入帳。<br>'
-          '香港支付寶 / 支付寶 / 微信錢包 / FPS / 信用卡為人工確認：付款後上傳收據，管理員核對後入帳。</div></div>')
+          '香港支付寶 / 支付寶 / 微信錢包 / FPS 為人工確認：付款後上傳收據，管理員核對後入帳。</div></div>')
     h += '<div class="panel" id="order" style="display:none"></div>'
 
     # 我的訂單
@@ -1130,7 +1151,10 @@ if app is not None:
         if not u:
             return jsonify({'ok': False, 'error': '請先登入'})
         j = request.get_json(silent=True) or request.form
-        order, err = create_order(u, j.get('channel'), j.get('hkd'), j.get('note') or '')
+        _note = j.get('note') or ''
+        # note 帶 PLAN: 者視為方案單 → 不入點數；其餘（含 note 為空）與原本完全相同。
+        order, err = create_order(u, j.get('channel'), j.get('hkd'), _note,
+                                  credit=not is_plan_order_note(_note))
         if err:
             return jsonify({'ok': False, 'error': err})
         qr = ''
@@ -1260,16 +1284,22 @@ if app is not None:
         except Exception:
             tk = 0
         if tk <= 0:
-            tk = int(o['tokens'])
-        ok, msg, bal = credit_tokens(o['username'], tk, 'recharge_manual', order_no=no,
-                                     idem_key='order:%s' % no,
-                                     meta=json.dumps({'by': u, 'channel': o['channel']}, ensure_ascii=False))
-        if not ok:
-            return render_admin_orders('⚠️ 入帳失敗：' + msg)
+            tk = int(o['tokens'] or 0)
+        if tk > 0:
+            ok, msg, bal = credit_tokens(o['username'], tk, 'recharge_manual', order_no=no,
+                                         idem_key='order:%s' % no,
+                                         meta=json.dumps({'by': u, 'channel': o['channel']}, ensure_ascii=False))
+            if not ok:
+                return render_admin_orders('⚠️ 入帳失敗：' + msg)
+        else:
+            # 方案單（PLAN:）：確認收款但不入點數；tk=0 不再視為入帳失敗。
+            bal = None
         set_order(no, status='paid', paid_ts=time.time(),
                   credited_tokens=int(o['credited_tokens'] or 0) + tk)
         _audit('pay_confirm', '%s +%d' % (no, tk))
-        return render_admin_orders('✅ 已入帳 %s：+%s 點（%s 餘額 %s）' % (no, format(tk, ','), o['username'], format(bal, ',')))
+        if tk > 0:
+            return render_admin_orders('✅ 已入帳 %s：+%s 點（%s 餘額 %s）' % (no, format(tk, ','), o['username'], format(bal, ',')))
+        return render_admin_orders('✅ 已確認收款 %s（方案單：不入點數）— %s' % (no, o['username']))
 
     @app.route(R_A_ORDERS + '/bind', methods=['POST'])
     def pay_admin_bind():

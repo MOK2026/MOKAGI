@@ -28,6 +28,7 @@ PLUGIN_INFO = {
 }
 
 import os
+import sys
 import time
 import threading
 import logging
@@ -180,10 +181,27 @@ async def handle_heart(args, chat_id: str = None, agent_config: dict = None):
             "可用指令：\n"
             "  /heart status   查看已啟用心跳的工具\n"
             "  /heart scan     手動觸發一次掃描\n"
-            "（自動掃描每 60 秒執行一次）"
+            "（自動掃描每 60 秒執行一次，僅限服務進程）"
         )
 
-# ---------- 啟動（模組載入時自動啟動） ----------
-start_heart_thread()
-import atexit
-atexit.register(stop_heart_thread)
+# ---------- 啟動策略 ----------
+# 只有「長期服務進程」才自動啟動心跳。
+# 背景（2026-10-15 體檢 H2）：本模組被 tool_handler 載入時若無條件啟動，
+# 任何掃描器／一次性腳本只要 import 工具，就會真的執行任務（發文／上傳可能重複送出）。
+#   MOK_HEART_ENABLED=1/true  → 強制啟動（任何進程）
+#   MOK_HEART_ENABLED=0/false → 永不啟動
+#   未設定                    → 僅當主程式是已知的服務入口才啟動
+_SERVICE_ENTRYPOINTS = {"launcher.py", "mok_tg.py", "mok_web.py", "mok_wa.py"}
+
+def should_autostart() -> bool:
+    """判斷本進程是否應自動啟動心跳（策略見上方註解）。"""
+    if str(os.environ.get("MOK_HEART_ENABLED", "")).strip():
+        return HEART_ENABLED
+    return os.path.basename(sys.argv[0] or "") in _SERVICE_ENTRYPOINTS
+
+if should_autostart():
+    start_heart_thread()
+    import atexit
+    atexit.register(stop_heart_thread)
+else:
+    logger.info("❤️ 非服務進程（%s），心跳未自動啟動", os.path.basename(sys.argv[0] or ""))

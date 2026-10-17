@@ -16,8 +16,12 @@ P1 範圍：
  4. 與 P0 共用 users / auth_audit；登入成功沿用同一 session（member_user）
 依賴：webauthn 3.0.0（py_webauthn，開源免費、純 Python）
 環境變數（可選）：
- MOK_WEB_RP_ID    預設 mokagi.com     WebAuthn Relying Party ID（= 對外網域）
- MOK_WEB_ORIGINS  預設 https://<rp_id>  允許來源，逗號分隔
+ MOK_WEB_RP_DOMAINS 預設 64071181.xyz,mokagi.com   多個 apex 以逗號分隔；每個網域各自一個 rp_id
+ MOK_WEB_RP_ID      預設 mokagi.com   單網域相容用（未設 MOK_WEB_RP_DOMAINS 時的唯一來源）
+ MOK_WEB_ORIGINS    預設 https://<各網域> 允許來源，逗號分隔
+多網域（2026-10-11）：
+ WebAuthn 憑證綁定 rp_id，不同註冊網域無法共用同一把 Passkey；
+ 現對外網域統一為單一 mokagi.com；Passkey 集合與帳號（member.db）皆共用。
 """
 import os
 import sys
@@ -54,9 +58,41 @@ except Exception as _e:
 
 MOK_ROOT = Path('/home/ubuntu/.mok')
 RP_ID = os.environ.get('MOK_WEB_RP_ID', 'mokagi.com')
+
+
+DEFAULT_RP_DOMAINS = '64071181.xyz,mokagi.com'
+
+
+def _rp_domains():
+    raw = (os.environ.get('MOK_WEB_RP_DOMAINS') or os.environ.get('MOK_WEB_RP_ID')
+           or DEFAULT_RP_DOMAINS)
+    out = []
+    for x in raw.split(','):
+        d = x.strip().lower().split('://')[-1].split('/')[0].split(':')[0]
+        if d and d not in out:
+            out.append(d)
+    d0 = RP_ID.strip().lower()
+    if d0 and d0 not in out:
+        out.insert(0, d0)
+    return out
+
+
+RP_DOMAINS = _rp_domains()
 ORIGIN_ALLOW = [x.strip().rstrip('/') for x in
-                os.environ.get('MOK_WEB_ORIGINS', 'https://%s' % RP_ID).split(',') if x.strip()]
+                os.environ.get('MOK_WEB_ORIGINS',
+                               ','.join('https://%s' % d for d in RP_DOMAINS)).split(',')
+                if x.strip()]
 CHALLENGE_TTL = 300
+
+
+def _rp_for_host(host):
+    host = (host or '').strip().lower()
+    if not host:
+        return None
+    for d in RP_DOMAINS:
+        if host == d or host.endswith('.' + d):
+            return d
+    return None
 
 
 def _find_member_db():
@@ -226,11 +262,12 @@ def _ctx():
     host = origin.split('://', 1)[-1].split('/')[0].split(':')[0].lower()
     if host in ('localhost', '127.0.0.1'):
         return host, origin, None
-    if host == RP_ID or host.endswith('.' + RP_ID):
-        return RP_ID, origin, None
+    rp = _rp_for_host(host)
+    if rp:
+        return rp, origin, None
     if origin in ORIGIN_ALLOW:
         return host, origin, None
-    return None, None, '來源 %s 不在允許清單（MOK_WEB_ORIGINS）' % origin
+    return None, None, '來源 %s 不在允許清單（MOK_WEB_RP_DOMAINS／MOK_WEB_ORIGINS）' % origin
 
 
 def _save_challenge(kind, username, challenge, rp_id, origin):
@@ -292,7 +329,8 @@ def api_wa_register_begin():
     rp, origin, err = _ctx()
     if err:
         return jsonify({'ok': False, 'error': err}), 400
-    ex = [PublicKeyCredentialDescriptor(id=_b64u_dec(c['cred_id'])) for c in _creds(u)]
+    ex = [PublicKeyCredentialDescriptor(id=_b64u_dec(c['cred_id']))
+          for c in _creds(u) if (c.get('rp_id') or '').lower() == rp]
     opts = generate_registration_options(
         rp_id=rp, rp_name='MOKAGI',
         user_id=u.encode('utf-8'), user_name=u, user_display_name=u,
@@ -368,8 +406,12 @@ def api_wa_login_begin():
             return jsonify({'ok': False, 'error': '帳號不存在'}), 404
         if _is_locked(u):
             return jsonify({'ok': False, 'error': '嘗試次數過多，請 15 分鐘後再試'}), 429
-        allow = [PublicKeyCredentialDescriptor(id=_b64u_dec(x['cred_id'])) for x in _creds(u)]
+        mine = [x for x in _creds(u) if (x.get('rp_id') or '').lower() == rp]
+        allow = [PublicKeyCredentialDescriptor(id=_b64u_dec(x['cred_id'])) for x in mine]
         if not allow:
+            if _creds(u):
+                return jsonify({'ok': False, 'error':
+                                '此帳號的 Passkey 綁定在其他網址；請在本網站以密碼登入後，到 /security/passkey 新增一把。'}), 404
             return jsonify({'ok': False, 'error': '此帳號尚未設定 Passkey'}), 404
     opts = generate_authentication_options(
         rp_id=rp, allow_credentials=allow,
@@ -429,14 +471,17 @@ def api_wa_list():
     u = _current_user()
     if not u:
         return jsonify({'ok': False, 'error': '請先登入'}), 401
+    rp, _origin, _err = _ctx()
     out = []
     for r in _creds(u):
+        crp = (r.get('rp_id') or '')
         out.append({
             'cred_id': r['cred_id'], 'label': r['label'], 'created_ts': r['created_ts'],
             'last_used_ts': r['last_used_ts'], 'device_type': r['device_type'],
             'backed_up': bool(r['backed_up']), 'transports': r['transports'],
+            'rp_id': crp, 'active': (crp.lower() == (rp or '').lower()),
         })
-    return jsonify({'ok': True, 'rp_id': RP_ID, 'credentials': out})
+    return jsonify({'ok': True, 'rp_id': rp, 'credentials': out})
 
 
 def api_wa_rename():
@@ -511,6 +556,7 @@ PASSKEY_PAGE_BODY = """
 <h1>Passkey 管理</h1>
 <p class="sub">支援指紋、Face ID、Windows Hello、實體安全金鑰。<br>
 生物特徵只留在你自己的裝置，本站只保存公開金鑰；Passkey 綁定網域，換網站無效。</p>
+<p class="sub" id="rpinfo"></p>
 <div id="msg" class="sub"></div>
 <button onclick="pkAdd()">＋ 新增 Passkey</button>
 <div id="list"><p class="sub">載入中…</p></div>
@@ -525,11 +571,13 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
 function pkLoad(){
  fetch('/api/auth/webauthn/list').then(function(r){return r.json();}).then(function(j){
   var box=document.getElementById('list');
+  var info=document.getElementById('rpinfo');
   if(!j.ok){box.innerHTML='<p class="sub bad">'+esc(j.error||'讀取失敗')+'</p>';return;}
+  if(info)info.textContent='目前網址綁定：'+esc(j.rp_id||'')+'（Passkey 只在這個網址有效，其他網址要各自新增）';
   if(!j.credentials.length){box.innerHTML='<p class="sub">尚未新增任何 Passkey。</p>';return;}
   var h='';
   j.credentials.forEach(function(c){
-   h+='<div class="row"><div><b>'+esc(c.label||'Passkey')+'</b><br>'+
+   h+='<div class="row"><div><b>'+esc(c.label||'Passkey')+'</b>'+(c.active?'':' <span class="bad">（綁定 '+(c.rp_id?esc(c.rp_id):'未知')+'，此網址不可用）</span>')+'<br>'+
       '<span class="mono">'+esc(c.cred_id.slice(0,18))+'… ｜ '+(c.backed_up?'已同步':'單機')+
       ' ｜ 上次：'+esc(fmt(c.last_used_ts))+'</span></div>'+
       '<div><button class="ghost" onclick="pkRename(\\''+esc(c.cred_id)+'\\')">改名</button> '+

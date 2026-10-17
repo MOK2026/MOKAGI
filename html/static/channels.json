@@ -1,5 +1,6 @@
 {
-  "channels": [ {"id": "履歷生成網", "icon": "📄", "label": "履歷生成網", "href": "report/履歷之神/履歷生成網/index.html", "tone": "#7c7dff"},
+  "_lastEdit": "indexPage|2026-10-14 13:00|「萬事屋」icon 由 🧪 改為 🏮",
+  "channels": [ {"id": "selfserve-proto", "icon": "🏮", "label": "萬事屋", "href": "https://mokagi.com/start", "tone": "#6c8cff"}, {"id": "履歷生成網", "icon": "📄", "label": "履歷生成網", "href": "report/履歷之神/履歷生成網/index.html", "tone": "#7c7dff"},
     {
       "id": "room",
       "icon": "🏠",
