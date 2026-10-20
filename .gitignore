@@ -26,9 +26,13 @@ frontends/mok_web/Plans後台_202609051030/
 html/static/render_round_blocks.js
 html/webTools/novnc/diag_novnc.sh
 tools/patch_conv_id.py
+tools/scripts/patch_conv_id.py
 tools/repair_server.py
+tools/scripts/repair_server.py
 tools/sandbox_bridge.py
+tools/scripts/sandbox_bridge.py
 tools/speech2text.py
+tools/scripts/speech2text.py
 # (2) 不需上傳的內容/專案
 html/project/AI 分身交易所/
 html/project/髮變鑽石/
