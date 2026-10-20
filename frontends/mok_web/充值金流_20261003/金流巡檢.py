@@ -58,6 +58,8 @@ SCAN_RETRY          = int(os.environ.get('MOK_SCAN_RETRY', '2'))         # 網�
 SCAN_BACKOFF        = float(os.environ.get('MOK_SCAN_BACKOFF', '1.0'))   # 網路類退避基數（秒）
 SCAN_BACKOFF_RL     = float(os.environ.get('MOK_SCAN_BACKOFF_RL', '4.0'))  # 限流類(403/429)退避基數（秒）
 SCAN_MIN_CHUNK      = int(os.environ.get('MOK_SCAN_MIN_CHUNK', '100'))   # 縮塊下限（格）
+# 2026-10-20 修：PSP 提幣手續費補償（幣安 Base USDC fee=0.2 由提幣金額內扣）
+FEE_ALLOWANCE       = float(os.environ.get("MOK_CHAIN_FEE_ALLOWANCE", "0.25"))  # 容許實收少於應付的最大手續費差額
 SCAN_THROTTLE       = float(os.environ.get('MOK_SCAN_THROTTLE', '0.3'))  # 塊間節流（秒），避免觸發節點配額
 
 
@@ -71,13 +73,13 @@ def _seen(tx_hash):
     return r
 
 
-def _remember(tx_hash, chain, amount, frm='', block=0):
+def _remember(tx_hash, chain, amount, frm='', block=0, to_addr='', note='unmatched'):
     try:
         with P._db_lock, P._connect() as conn:
             conn.execute('INSERT OR IGNORE INTO chain_tx (tx_hash, chain, order_no, from_addr, amount, '
-                         'block, seen_ts, handled, note) VALUES (?,?,?,?,?,?,?,?,?)',
+                         'block, seen_ts, handled, note, to_addr) VALUES (?,?,?,?,?,?,?,?,?,?)',
                          (tx_hash.lower(), chain, '', frm, float(amount), int(block),
-                          time.time(), 0, 'unmatched'))
+                          time.time(), 0, note, to_addr))
             conn.commit()
     except Exception as e:
         log('  ! 記錄 chain_tx 失敗: %s' % e)
@@ -96,21 +98,33 @@ def _try_match(chain, tx_hash, amount, tol_abs=0.02, tol_rel=0.005):
     orders = _pending_orders(chain)
     if not orders:
         return False, 'no_pending_order'
-    best, bestd = None, None
+    amt = float(amount)
+    cands = []
     for o in orders:
         try:
             need = float(o['pay_amount'])
         except Exception:
             continue
-        d = abs(need - float(amount))
-        limit = max(tol_abs, need * tol_rel)
-        if d <= limit and (bestd is None or d < bestd):
-            best, bestd = o, d
-    if best is None:
+        cands.append((max(tol_abs, need * tol_rel), need, abs(need - amt), o))
+    # A) 嚴格配對：差額在容差內
+    pool = [c for c in cands if c[2] <= c[0]]
+    fee_tag = ''
+    if not pool:
+        # B) 手續費補償：PSP 從提幣金額內扣手續費（幣安 Base USDC = 0.2），令實收少於應付。
+        #    只接受「實收 <= 應付」方向，差額上限 FEE_ALLOWANCE，且候選必須唯一。
+        near = [c for c in cands if c[2] <= c[0] + FEE_ALLOWANCE and amt <= c[1] + 0.01]
+        near.sort(key=lambda c: c[2])
+        if len(near) > 1 and (near[1][2] - near[0][2]) < 0.02:
+            return False, 'ambiguous_amount_match(%d 張相近)' % len(near)
+        pool = near[:1]
+        if pool:
+            fee_tag = ' [手續費補償 %.4f]' % (pool[0][1] - amt)
+    if not pool:
         return False, 'no_amount_match'
+    best = min(pool, key=lambda c: c[2])[3]
     ok, msg, info = P.apply_chain_payment(best, tx_hash, source='watcher')
     if ok:
-        return True, '%s -> %s +%s 點' % (tx_hash[:16], best['order_no'], format(info['credited_tokens'], ','))
+        return True, '%s -> %s +%s 點%s' % (tx_hash[:16], best['order_no'], format(info['credited_tokens'], ','), fee_tag)
     return False, '%s 配對 %s 但驗證失敗: %s' % (tx_hash[:16], best['order_no'], msg)
 
 
@@ -242,31 +256,169 @@ def scan_usdc():
     return n
 
 
+# ---- BTC 多地址掃描參數（2026-10-17 一單一址）-------------------------------
+BTC_SCAN_LIMIT    = int(os.environ.get('MOK_BTC_SCAN_LIMIT', '200'))
+BTC_SCAN_WORKERS  = int(os.environ.get('MOK_BTC_SCAN_WORKERS', '4'))
+BTC_SCAN_THROTTLE = float(os.environ.get('MOK_BTC_SCAN_THROTTLE', '0.15'))
+BTC_SCAN_RETRY    = int(os.environ.get('MOK_BTC_SCAN_RETRY', '2'))
+BTC_ESPLORA = [x.strip().rstrip('/') for x in os.environ.get(
+    'MOK_BTC_ESPLORA',
+    '%s,https://blockstream.info' % getattr(P, 'MEMPOOL', 'https://mempool.space')).split(',')
+    if x.strip()]
+
+
+def _btc_min_conf():
+    """自動入帳所需確認數；0 = 沿用舊行為（0-conf 即入帳）。"""
+    try:
+        return max(0, int(float(P._sget('btc_min_conf') or 0)))
+    except Exception:
+        return 0
+
+
+def _btc_get_json(path):
+    """Esplora API 主 + 備援；404 視為「無資料」不重試。"""
+    last = ''
+    for base in BTC_ESPLORA:
+        for attempt in range(BTC_SCAN_RETRY + 1):
+            try:
+                return P._http_get_json(base + path, timeout=25)
+            except Exception as e:
+                last = str(e)
+                if '404' in last:
+                    return None
+                time.sleep(0.4 * (2 ** attempt))
+    log('  ! BTC 查詢失敗 %s: %s' % (path, last[:90]))
+    return None
+
+
+def _btc_fetch(args):
+    addr, = args
+    if BTC_SCAN_THROTTLE > 0:
+        time.sleep(BTC_SCAN_THROTTLE)
+    return addr, (_btc_get_json('/api/address/%s/txs' % addr) or [])
+
+
 def scan_btc():
-    addr = (P._sget('btc_address') or '').strip()
-    if not addr:
+    """多地址掃描 ＋ 地址優先配對（一單一址）。
+
+    與舊版的差異：
+      1. 不再只掃 settings.pay_btc_address 一個地址，而是掃 btc_addresses 的活躍集合
+         （pool + assigned + void 近 30 天 + paid 近 7 天），round-robin 上限 200。
+      2. 配對以「收款地址」為主鍵：地址直接綁 order_no，不必再用金額尾數猜。
+      3. 逐 vout 拆解，金額以整數 satoshi 判定。
+      4. pool 地址收到錢、或單筆不足額 → 只記錄待人工，不自動入帳（避免認錯單）。
+      5. 已 paid 的訂單不重複入帳（apply_chain_payment 本身亦冪等）。
+    """
+    H = getattr(P, 'HD', None)
+    if H is None or not H.get_zpub():
         return 0
     try:
-        txs = P._http_get_json(P.MEMPOOL + '/api/address/' + addr + '/txs', timeout=25)
-    except Exception as e:
-        log('  ! BTC 查詢失敗: %s' % e)
+        H.ensure_pool()
+    except Exception:
+        pass
+    items = H.active_addresses(limit=BTC_SCAN_LIMIT)
+    if not items:
         return 0
+    amap = {it['address']: it for it in items}
+    min_conf = _btc_min_conf()
+
+    fetched = {}
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=max(1, BTC_SCAN_WORKERS)) as ex:
+            for addr, txs in ex.map(_btc_fetch, [(a,) for a in amap]):
+                fetched[addr] = txs
+    except Exception as e:
+        log('  ! BTC 併發抓取失敗，退回單線程: %s' % e)
+        for a in amap:
+            _, txs = _btc_fetch((a,))
+            fetched[a] = txs
+
     n = 0
-    for t in txs or []:
-        txid = (t.get('txid') or '').lower()
-        if not txid or _seen(txid):
-            continue
-        recv = 0.0
-        for v in t.get('vout', []):
-            if v.get('scriptpubkey_address') == addr:
-                recv += float(v.get('value') or 0) / 1e8
-        if recv <= 0:
-            continue
-        st = t.get('status') or {}
-        _remember(txid, 'btc', recv, '', int(st.get('block_height') or 0))
-        ok, msg = _try_match('btc', txid, recv, tol_abs=0.000002, tol_rel=0.005)
-        log(('  ✅ ' if ok else '  ⏳ ') + msg)
-        n += 1
+    last_addr = ''
+    for addr, txs in fetched.items():
+        last_addr = addr
+        meta = amap.get(addr) or {}
+        order_no = (meta.get('order_no') or '').strip()
+        o = P.get_order(order_no) if order_no else None
+        addr_total_sat = 0
+        seen_any = False
+        for t in txs or []:
+            txid = (t.get('txid') or '').lower()
+            if not txid:
+                continue
+            st = t.get('status') or {}
+            recv = 0
+            for v in t.get('vout') or []:
+                if v.get('scriptpubkey_address') == addr:
+                    try:
+                        recv += int(v.get('value') or 0)
+                    except Exception:
+                        pass
+            if recv <= 0:
+                continue
+            addr_total_sat += recv
+            seen_any = True
+
+            if o and o.get('status') == 'paid':
+                continue                      # 已入帳，不重複
+
+            if not order_no:
+                # pool 地址理論上不該收款；收到就留給人工，不猜歸屬
+                if not _seen(txid):
+                    _remember(txid, 'btc', recv / 1e8, '', int(st.get('block_height') or 0),
+                              to_addr=addr, note='pool_address_payment')
+                    log('  ⚠️ %s 收到 %.8f BTC 但屬 pool 地址（無訂單）→ 待人工'
+                        % (txid[:16], recv / 1e8))
+                    n += 1
+                continue
+            if not o:
+                continue
+
+            if min_conf >= 1 and not bool(st.get('confirmed')):
+                log('  ⏳ %s 等待確認（%s，%d sat）' % (txid[:16], addr, recv))
+                continue
+
+            try:
+                need_sat = int(round(float(o['pay_amount']) * 1e8))
+            except Exception:
+                need_sat = 0
+
+            if need_sat and recv < int(need_sat * 0.98):
+                # 單筆不足（分筆付款或真的不足額）→ 不自動入帳，留待人工
+                if not _seen(txid):
+                    _remember(txid, 'btc', recv / 1e8, '', int(st.get('block_height') or 0),
+                              to_addr=addr, note='underpaid')
+                    log('  ⚠️ %s 不足額：實收 %d sat / 應付 %d sat（%s）→ 待人工'
+                        % (txid[:16], recv, need_sat, o['order_no']))
+                    n += 1
+                continue
+
+            ok, msg, info = P.apply_chain_payment(o, txid, source='watcher')
+            log(('  ✅ ' if ok else '  ⏳ ') + msg)
+            if ok:
+                n += 1
+                o = P.get_order(order_no)
+
+        if seen_any:
+            try:
+                if o and o.get('status') == 'paid':
+                    H.mark_paid(addr, addr_total_sat)
+                else:
+                    H.touch_seen(addr, addr_total_sat,
+                                 len([t for t in (txs or []) if t.get('txid')]))
+            except Exception:
+                pass
+
+    if last_addr:
+        H.set_scan_cursor(last_addr)
+    try:
+        st = H.stats()
+        log('  🧭 BTC 多地址：掃 %d 個（pool %d / assigned %d / void %d / paid %d），處理 %d 筆'
+            % (len(items), st.get('pool', 0), st.get('assigned', 0), st.get('void', 0),
+               st.get('paid', 0), n))
+    except Exception:
+        pass
     return n
 
 

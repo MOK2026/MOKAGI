@@ -32,8 +32,8 @@ MOKAGI 金流補丁 v1.0   （2026-10-03 支付女）
   管理者專區 payconfig              改收款資訊 / 匯率（需 CSRF）
 """
 
-import sys, os, json, time, hmac, sqlite3, secrets, threading, base64, hashlib
-import urllib.request, urllib.error, traceback
+import sys, os, io, json, time, hmac, sqlite3, secrets, threading, base64, hashlib
+import urllib.request, urllib.error, urllib.parse, traceback
 
 main = sys.modules.get('__main__')
 app = getattr(main, 'app', None)
@@ -96,6 +96,22 @@ def _connect():
     return conn
 
 
+# ---------------------------------------------------------------- BTC 多地址派生（zpub）
+# 2026-10-17：一單一址。伺服器只持有 zpub（公鑰），私鑰永不上伺服器。
+HD = None
+try:
+    import importlib.util as _ilu
+    _hd_spec = _ilu.spec_from_file_location('mok_hd_btc', os.path.join(_PATCH_DIR, 'hd_btc.py'))
+    HD = _ilu.module_from_spec(_hd_spec)
+    sys.modules['mok_hd_btc'] = HD
+    _hd_spec.loader.exec_module(HD)
+    HD.configure(MEMBER_DB)
+    print('[金流] hd_btc 就緒 | %s' % HD.validate_config())
+except Exception as _hd_e:
+    HD = None
+    print('[金流] hd_btc 載入失敗（BTC 多地址停用，建單會回錯而非發空白地址）: %s' % _hd_e)
+
+
 # ---------------------------------------------------------------- 價格（唯一真源 mok_price）
 def _load_price_per_token():
     for mod in ('mok_price', 'mok_token'):
@@ -156,33 +172,90 @@ CH_META = {
     'alipay_hk': {'name': '香港支付寶',        'icon': '🇭🇰', 'auto': False, 'cur': 'HKD'},
     'alipay': {'name': '支付寶',              'icon': '🅰', 'auto': False, 'cur': 'HKD'},
     'wechat': {'name': '微信錢包',            'icon': '💬', 'auto': False, 'cur': 'HKD'},
+    'binance_pay': {'name': '幣安 Pay（掃碼）', 'icon': '🟡', 'auto': False, 'cur': 'HKD', 'hide': True},  # 2026-10-20 admin 指示：停用（前端隱藏 + 後端拒單；恢復＝刪除本行 hide）
     'fps':    {'name': '轉數快 FPS',            'icon': '⚡', 'auto': False, 'cur': 'HKD'},
     'card':   {'name': '信用卡（需網關）',      'icon': '💳', 'auto': False, 'cur': 'HKD', 'hide': True},  # 2026-10-10 admin 指示：前端隱藏 + 後端拒單（恢復＝刪除本行 hide）
 }
 
-# QR 收款渠道：以下三渠道以「QR 圖」收款（非文字帳號）
-QR_CH = ('alipay_hk', 'alipay', 'wechat')
-QR_SETTING_KEY = {'alipay_hk': 'alipay_hk_qr', 'alipay': 'alipay_qr', 'wechat': 'wechat_qr'}
-_QR_KEYS = [('alipay_hk_qr', '香港支付寶'), ('alipay_qr', '支付寶'), ('wechat_qr', '微信錢包')]
-_QR_CH_OF = {'alipay_hk_qr': 'alipay_hk', 'alipay_qr': 'alipay', 'wechat_qr': 'wechat'}
+# QR 收款渠道：以下渠道以「QR 圖」收款（非文字帳號）
+# 2026-10-19：加入 binance_pay（幣安 Pay 收款碼）。QR 圖由後台「收款資訊」上傳；
+# 未上傳時 create_order 會直接拒單，前端亦顯示「未開通」，不會出現掃到死圖的情況。
+QR_CH = ('alipay_hk', 'alipay', 'wechat', 'binance_pay')
+QR_SETTING_KEY = {'alipay_hk': 'alipay_hk_qr', 'alipay': 'alipay_qr', 'wechat': 'wechat_qr',
+                  'binance_pay': 'binance_pay_qr'}
+_QR_KEYS = [('alipay_hk_qr', '香港支付寶'), ('alipay_qr', '支付寶'), ('wechat_qr', '微信錢包'),
+            ('binance_pay_qr', '幣安 Pay（收款碼）〔已停用〕')]   # 2026-10-20 停用（前台隱藏+後端拒單）
+_QR_CH_OF = {'alipay_hk_qr': 'alipay_hk', 'alipay_qr': 'alipay', 'wechat_qr': 'wechat',
+             'binance_pay_qr': 'binance_pay'}
 
 
 PRESET_HKD = [68, 138, 340, 680, 1360, 6800]
 
 DEFAULT_SETTINGS = {
-    'usdc_address': '0x5E15209aD5F6e165B361a75429d4e34EDb918D17',
-    'eth_address':  '0x5E15209aD5F6e165B361a75429d4e34EDb918D17',
-    'btc_address':  '',
+    'usdc_address': '',   # 2026-10-19 移除舊熱錢包預設；收款地址一律由後台設定寫入 DB pay_usdc_address
+    'eth_address':  '',   # 同上；伺服器不持有任何私鑰（watch-only）
+    'btc_address':  '',          # 舊版單一地址（僅作 fallback，不再用於新訂單）
+    'btc_zpub':     '',          # BIP84 帳戶層公鑰（zpub）；實際值存 settings.pay_btc_zpub
+    'btc_pool_target': '8',      # 預派生池水位
+    'btc_min_conf': '0',         # 自動入帳所需確認數（0=0-conf，沿用現行為；建議日後改 1）
     'fps_id':       '',
     'alipay_hk_qr': '',
     'alipay_qr':    '',
     'wechat_qr':    '',
+    'binance_pay_qr':   '',        # 幣安 Pay 收款碼圖（後台上傳，存檔案路徑）
+    'binance_pay_cur':  'HKD',     # 收款幣種：HKD / USDT / USDC（穩定幣需對匯率）
+    'binance_pay_rate': '7.8',     # 1 USDT / USDC = ? HK$（僅穩定幣收款時使用）
+    'binance_pay_net':  '',        # 收款網絡提示（例：BSC / TRC20；只作文案，不影響邏輯）
     'hkd_per_usdc': '7.8',
     'hkd_per_btc':  '620000',
     'min_hkd':      '68',
     'order_ttl_min': '120',
     'usdc_network': 'Base (eip155:8453)',
+    'usdc_withdraw_fee': '0.2',   # 2026-10-19 Base 提幣手續費（USDC）
+
 }
+
+
+# ---------------------------------------------------------------- QR 碼生成（本機、零外連）
+_QR_CACHE = {}
+
+
+def _qr_data_uri(text, box=6, border=2):
+    """把字串生成 PNG QR 的 data URI。
+
+    - 完全在本機用 qrcode 庫生成，不經 api.qrserver.com 等第三方
+      （不外洩收款地址、不怕第三方倒站或被牆）。
+    - 任何失敗一律回空字串，前端自動降級成「只顯示文字地址」，訂單頁不會爆。
+    """
+    if not text:
+        return ''
+    key = None
+    try:
+        key = (text, box, border)
+        hit = _QR_CACHE.get(key)
+        if hit is not None:
+            return hit
+    except Exception:
+        key = None
+    try:
+        import qrcode
+        from qrcode.constants import ERROR_CORRECT_M
+        q = qrcode.QRCode(version=None, error_correction=ERROR_CORRECT_M,
+                          box_size=box, border=border)
+        q.add_data(text)
+        q.make(fit=True)
+        img = q.make_image(fill_color='black', back_color='white')
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        uri = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode('ascii')
+    except Exception as _qe:
+        print('[金流] QR 生成失敗（降級為純文字地址）: %s' % _qe)
+        return ''
+    if key is not None:
+        if len(_QR_CACHE) > 256:
+            _QR_CACHE.clear()
+        _QR_CACHE[key] = uri
+    return uri
 
 
 def _sget(key):
@@ -261,14 +334,63 @@ CREATE TABLE IF NOT EXISTS chain_tx (
     handled     INTEGER DEFAULT 0,
     note        TEXT DEFAULT ''
 );
+
+-- ---------------------------------------------------------------- BTC 多地址收款
+-- 序號 idx 單調遞增、永不重用；void 地址保留監聽（客人可能遲付），不回收重用。
+CREATE TABLE IF NOT EXISTS btc_addresses (
+    idx           INTEGER PRIMARY KEY,
+    address       TEXT UNIQUE NOT NULL,
+    branch        INTEGER DEFAULT 0,
+    state         TEXT NOT NULL DEFAULT 'pool',   -- pool / assigned / paid / void
+    order_no      TEXT,
+    assigned_ts   REAL,
+    first_seen_ts REAL,
+    confirmed_ts  REAL,
+    received_sat  INTEGER DEFAULT 0,             -- 累計實收（整數 satoshi，不用浮點）
+    tx_count      INTEGER DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_btcaddr_order
+    ON btc_addresses(order_no) WHERE order_no IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_btcaddr_state ON btc_addresses(state, idx);
+
+CREATE TABLE IF NOT EXISTS btc_scan_cursor (
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    last_max_idx   INTEGER DEFAULT -1,
+    last_scan_ts   REAL,
+    last_scan_addr TEXT DEFAULT '',
+    notes          TEXT DEFAULT ''
+);
+INSERT OR IGNORE INTO btc_scan_cursor (id, last_max_idx) VALUES (1, -1);
+
+-- 提款登記：私鑰離線 → 提款不會自動出現在系統，必須人工記帳，否則對帳永遠對不平
+CREATE TABLE IF NOT EXISTS btc_withdrawals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    txid        TEXT UNIQUE NOT NULL,
+    to_addr     TEXT NOT NULL,
+    amount_sat  INTEGER NOT NULL,
+    fee_sat     INTEGER DEFAULT 0,
+    note        TEXT DEFAULT '',
+    created_ts  REAL NOT NULL
+);
 """
 
 
 def _init_db():
     with _db_lock, _connect() as conn:
         conn.executescript(SCHEMA)
+        # 既有表補欄（SQLite 不支援 ADD COLUMN IF NOT EXISTS，重複執行會拋錯，吞掉即可）
+        try:
+            conn.execute("ALTER TABLE chain_tx ADD COLUMN to_addr TEXT DEFAULT ''")
+        except Exception:
+            pass
         conn.commit()
-    print('[金流] DB 就緒 | orders / ledger / chain_tx | %s' % MEMBER_DB)
+    if HD is not None:
+        try:
+            HD.ensure_tables()
+            HD.ensure_pool()
+        except Exception as _e:
+            print('[金流] BTC 池初始化失敗: %s' % _e)
+    print('[金流] DB 就緒 | orders / ledger / chain_tx / btc_addresses | %s' % MEMBER_DB)
 
 
 # ---------------------------------------------------------------- 會員等級同步（付款 → vip）
@@ -363,6 +485,11 @@ def create_order(username, channel, hkd, note='', credit=True):
         return None, '不支援的付款渠道'
     if CH_META[channel].get('hide'):
         return None, '此付款方式暫未開放'
+    # 2026-10-19：QR 圖渠道收款碼未上傳就不收單（避免客人掃到死圖、錢付了對不上帳）
+    if channel in QR_CH:
+        _qp = _sget(QR_SETTING_KEY.get(channel, ''))
+        if not _qp or not os.path.exists(_qp):
+            return None, '此付款方式暫未開放（收款碼尚未設定）'
     try:
         hkd = float(hkd)
     except Exception:
@@ -388,9 +515,33 @@ def create_order(username, channel, hkd, note='', credit=True):
         amo = '%.6f' % _unique_amount(no, hkd, rate)
         memo = no
     elif channel == 'btc':
-        addr = _sget('btc_address')
+        # P0：一單一址後不再用金額尾數辨識；金額以整數 satoshi 精確表示（BTC 沒有小數）
         rate = _sfloat('hkd_per_btc', 620000.0)
-        amo = '%.8f' % _unique_amount(no, hkd, rate)
+        if rate <= 0:
+            return None, 'BTC 匯率設定錯誤，請聯絡客服'
+        sat = int(round(float(hkd) / rate * 1e8))
+        if sat <= 0:
+            return None, '金額換算後為 0 satoshi'
+        amo = '%.8f' % (sat / 1e8)
+        memo = no
+        if HD is None:
+            return None, 'BTC 收款暫時不可用，請改用其他方式'
+        addr = HD.assign_address(no)      # 原子指派；失敗絕不發空白地址
+        if not addr:
+            return None, 'BTC 收款地址暫時不可用，請稍後重試'
+    elif channel == 'binance_pay':
+        # 幣安 Pay（靜態收款碼）：無 webhook，屬人工確認渠道。
+        # pay_amount 一律存「純數字」字串，幣種另存 settings（前端顯示用）。
+        # 穩定幣必須加專屬尾數，否則同金額訂單無法用金額對帳；HKD 收款則靠訂單號備註對帳。
+        addr = ''
+        _coin = (_sget('binance_pay_cur') or 'HKD').strip().upper()
+        if _coin in ('USDT', 'USDC'):
+            rate = _sfloat('binance_pay_rate', 7.8)
+            if rate <= 0:
+                return None, '幣安 Pay 匯率設定錯誤，請聯絡客服'
+            amo = '%.3f' % _unique_amount(no, hkd, rate)
+        else:
+            amo = '%.2f' % float(hkd)
         memo = no
     else:
         if channel in QR_CH:
@@ -401,13 +552,23 @@ def create_order(username, channel, hkd, note='', credit=True):
         amo = 'HK$%.2f' % hkd
         memo = no
 
-    with _db_lock, _connect() as conn:
-        conn.execute('INSERT INTO orders (order_no, username, channel, amount_hkd, tokens, pay_amount, '
-                     'pay_address, pay_memo, status, created_ts, expires_ts, note) '
-                     'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-                     (no, username, channel, hkd, tokens, amo, addr, memo, 'pending',
-                      time.time(), time.time() + ttl, note))
-        conn.commit()
+    try:
+        with _db_lock, _connect() as conn:
+            conn.execute('INSERT INTO orders (order_no, username, channel, amount_hkd, tokens, pay_amount, '
+                         'pay_address, pay_memo, status, created_ts, expires_ts, note) '
+                         'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                         (no, username, channel, hkd, tokens, amo, addr, memo, 'pending',
+                          time.time(), time.time() + ttl, note))
+            conn.commit()
+    except Exception as _e:
+        # 訂單沒建成 → 已指派的地址轉 void（不重用，避免同址對兩單）
+        if channel == 'btc' and HD is not None:
+            try:
+                HD.void_order(no)
+            except Exception:
+                pass
+        print('[金流] 建立訂單失敗 %s: %s' % (no, _e))
+        return None, '建立訂單失敗，請重試'
     return get_order(no), ''
 
 
@@ -417,6 +578,12 @@ def expire_orders():
         conn.execute("UPDATE orders SET status='expired' "
                      "WHERE status='pending' AND expires_ts IS NOT NULL AND expires_ts < ?", (now,))
         conn.commit()
+    # 過期未付 → 地址轉 void，但仍在掃描集合內（客人可能三天後才轉帳）
+    if HD is not None:
+        try:
+            HD.void_expired_orders()
+        except Exception:
+            pass
     return True
 
 
@@ -683,6 +850,7 @@ def apply_chain_payment(order, tx_hash, source='user'):
     ch = order['channel']
     hkd = 0.0
     ver = {}
+    _btc_addr = ''
 
     if ch == 'usdc':
         req = float(order['pay_amount']) * 0.98
@@ -698,6 +866,7 @@ def apply_chain_payment(order, tx_hash, source='user'):
             return False, '鏈上驗證未通過（%s）' % ver.get('reason'), ver
         received = float(ver.get('credited_btc') or 0)
         hkd = received * _sfloat('hkd_per_btc', 620000.0)
+        _btc_addr = addr
     else:
         return False, '此渠道不支援鏈上入帳', {}
 
@@ -723,13 +892,19 @@ def apply_chain_payment(order, tx_hash, source='user'):
     try:
         with _db_lock, _connect() as conn:
             conn.execute('INSERT OR REPLACE INTO chain_tx (tx_hash, chain, order_no, from_addr, amount, '
-                         'block, seen_ts, handled, note) VALUES (?,?,?,?,?,?,?,?,?)',
+                         'block, seen_ts, handled, note, to_addr) VALUES (?,?,?,?,?,?,?,?,?,?)',
                          (tx_hash.lower(), ch, order['order_no'], str(ver.get('from') or ''),
                           float(ver.get('credited_usdc') or ver.get('credited_btc') or 0),
-                          int(ver.get('block') or 0), time.time(), 1, source))
+                          int(ver.get('block') or 0), time.time(), 1, source,
+                          str(_btc_addr if ch == 'btc' else '')))
             conn.commit()
     except Exception:
         pass
+    if ch == 'btc' and HD is not None:
+        try:
+            HD.mark_paid(_btc_addr, int(round(received * 1e8)))
+        except Exception:
+            pass
     return True, 'ok', {'credited_tokens': tokens, 'balance': bal, 'hkd': round(hkd, 4), 'verify': ver}
 
 
@@ -791,6 +966,13 @@ th{color:#8b93b5;font-weight:600}
 .err{background:#33161d;border:1px solid #6b2536;color:#ffb3c1;border-radius:10px;padding:10px 12px;
  font-size:13px;margin-top:10px}
 img.qr{background:#fff;border-radius:10px;padding:6px;display:block;margin:8px 0}
+img.qrb{background:#fff;border-radius:16px;padding:10px;display:block;margin:10px auto;box-shadow:0 8px 26px #0007}
+.qrbox{text-align:center;margin:6px 0 12px}
+.qrt{font-size:12px;color:#8b93b5;margin-top:6px}
+.steps{background:#0b101b;border:1px dashed #2b3550;border-radius:10px;padding:11px 12px;margin-top:12px;font-size:12.5px;color:#cfe0ff;line-height:1.8}
+.steps ol{margin:6px 0 0 18px;padding:0}
+.steps b{color:#a9ffd6}
+.v.amt{color:#a9ffd6;font-size:19px;letter-spacing:.5px}
 a{color:#a9bcff}
 </style>
 """
@@ -836,13 +1018,19 @@ function renderCh(){
   for (const k in CH){
     if (CH[k].hide) continue;
     const c = CH[k];
-    h += '<div class="ch'+(k===curCh?' on':'')+'" data-ch="'+k+'">'
+    const av = (c.avail === false);
+    h += '<div class="ch'+(k===curCh?' on':'')+(av?' off':'')+'" data-ch="'+k+'"'
+       + (av?' style="opacity:.45" title="'+(c.why||'暫未開放')+'"':'')+'>'
        + '<span style="font-size:17px">'+c.icon+'</span><span class="nm">'+c.name+'</span>'
-       + '<span class="tag'+(c.auto?' auto':'')+'">'+(c.auto?'⚡自動':'人工確認')+'</span></div>';
+       + '<span class="tag'+(c.auto?' auto':'')+'">'+(av?'未開通':(c.auto?'⚡自動':'人工確認'))+'</span></div>';
   }
   document.getElementById("chs").innerHTML = h;
   document.querySelectorAll(".ch").forEach(function(e){
-    e.onclick = function(){ curCh = e.getAttribute("data-ch"); renderCh(); renderAmt(); };
+    e.onclick = function(){
+      const k2 = e.getAttribute("data-ch");
+      if (CH[k2] && CH[k2].avail === false){ alert("此付款方式暫未開放：" + (CH[k2].why || "")); return; }
+      curCh = k2; renderCh(); renderAmt();
+    };
   });
 }
 
@@ -880,13 +1068,47 @@ function renderOrder(){
   const o = curOrder, c = CH[o.channel];
   let h = '<h2>訂單 ' + o.order_no + '</h2>';
   h += '<div class="kv"><div class="k">付款渠道</div><div>' + c.icon + " " + c.name + '</div></div>';
-  h += '<div class="kv"><div class="k">應付金額</div><div class="v" style="font-size:17px">' + o.pay_amount + '</div></div>';
   if (o.pay_address){
-    h += '<div class="kv"><div class="k">收款地址 / 帳號（請複製）</div><div class="v">' + o.pay_address + '</div></div>';
-    h += '<button class="btn ghost" onclick="copyTxt(\\'' + o.pay_address + '\\')">複製地址</button> ';
+    // ── 掃碼付款區（2026-10-19）：大 QR → 幣安 App 一掃即填地址，唔使手打 ──
+    h += '<div class="qrbox">';
+    if (o.qr_addr) h += '<img class="qrb" src="' + o.qr_addr + '" width="216" height="216" alt="收款 QR">';
+    h += '<div class="qrt">📷 幣安 App「掃一掃」只會開「提幣」頁並代填地址，唔會自動付款；建議用下面「複製地址」貼落提幣頁</div></div>';
+    h += '<div class="kv"><div class="k">應付金額（請按下面按鈕複製，唔好自己四捨五入）</div>'
+       + '<div class="v amt">' + o.pay_amount + '</div></div>';
+    h += '<button class="btn ghost" onclick="copyTxt(\\'' + o.pay_amount + '\\')">📋 一鍵複製金額</button> ';
+    h += '<div class="kv"><div class="k">收款地址 / 帳號</div><div class="v">' + o.pay_address + '</div></div>';
+    h += '<button class="btn ghost" onclick="copyTxt(\\'' + o.pay_address + '\\')">📋 複製地址</button> ';
+    if (o.qr_pay){ h += '<div class="kv"><div class="k">用其他加密錢包掃這個（自動帶入地址＋金額）</div><img class="qr" src="' + o.qr_pay + '" width="180" height="180"></div>'; }
+    h += '<div class="steps"><b>幣安 App 付款 5 步</b><ol>'
+       + '<li>資產 → ' + (o.channel === 'usdc' ? 'USDC' : 'BTC') + ' → 提幣</li>'
+       + '<li>網絡：<b>' + (o.channel === 'usdc' ? 'Base（唯一正確，揀錯＝錢會消失）' : 'Bitcoin（BTC）') + '</b></li>'
+       + '<li>地址欄貼上上面「複製地址」嘅地址（手動貼最穩；掃碼常因新地址冷靜期或網絡未揀而失敗）</li>'
+       + '<li>數量：<b>' + (o.withdraw_total || o.pay_amount) + '</b> USDC'
+       + '（＝應付 ' + o.pay_amount + ' ＋ 提幣手續費 ' + (o.withdraw_fee || 0) + '；手續費由打入金額扣，所以到帳剛好 ' + o.pay_amount + '。多打少打都會配對失敗）</li>'
+       + '<li>提交後約 1 至 3 分鐘會自動入帳；超過 10 分鐘仍未入帳，才複製 TxID 回此頁提交</li>'
+       + '</ol></div>';
+    if (o.channel === 'btc') h += '<div class="note">⚠️ 此地址僅供本訂單使用，請勿存入其他款項；請按上方顯示的 BTC 金額轉帳（多付不退、少付需人工補處理）。</div>';
+    if (o.channel === 'usdc') h += '<div class="note">⚠️ USDC 只認 <b>Base</b> 網絡（揀錯＝錢永久消失）。幣安 App 提幣手續費 0.2 USDC 係由你打入嘅金額扣，所以「數量」要打上面計好嘅總數；打少 0.2 系統會配對唔到。</div>';
   }
   h += '<div class="kv"><div class="k">備註 / 訂單號（轉帳時請填）</div><div class="v">' + o.pay_memo + '</div></div>';
-  if (o.qr){ h += '<div class="kv"><div class="k">收款 QR 碼（掃碼付款）</div><img class="qr" src="' + o.qr + '" width="180" height="180"></div>'; }
+  if (o.qr && !o.qr_addr){
+    // ── QR 圖渠道（支付寶／微信／幣安 Pay）：金額必須自己顯示，客人才知要付幾多 ──
+    const _amtTxt = (o.pay_coin && o.pay_coin !== 'HKD') ? (o.pay_amount + ' ' + o.pay_coin) : ('HK$' + o.pay_amount);
+    h += '<div class="kv"><div class="k">應付金額（請用下面按鈕複製，唔好自己四捨五入）</div><div class="v amt">' + _amtTxt + '</div></div>';
+    h += '<button class="btn ghost" onclick="copyTxt(\\'' + o.pay_amount + '\\')">📋 一鍵複製金額</button> ';
+    if (o.channel === 'binance_pay'){
+      if (o.pay_net) h += '<div class="note">收款網絡：' + o.pay_net + '（揀錯網絡＝錢會消失）</div>';
+      h += '<div class="steps"><b>幣安 App 付款 5 步</b><ol>'
+         + '<li>打開幣安 App → 右上角「掃一掃」</li>'
+         + '<li>掃下面的「幣安 Pay 收款碼」</li>'
+         + '<li>輸入或貼上「應付金額」' + ((o.pay_coin && o.pay_coin !== 'HKD') ? '（' + o.pay_coin + '）' : '') + '</li>'
+         + '<li>備註／留言填：<b>' + o.order_no + '</b>（對帳用，唔填就要人手查）</li>'
+         + '<li>付款成功後截圖 → 回此頁上傳收據，核對後入帳</li>'
+         + '</ol></div>';
+      h += '<div class="note">⚠️ 幣安 Pay 收款碼係靜態碼：金額要自己入，唔會自動帶；訂單號請務必填入備註。</div>';
+    }
+    h += '<div class="kv"><div class="k">收款 QR 碼（掃碼付款）</div><img class="qr" src="' + o.qr + '" width="180" height="180"></div>';
+  }
   h += '<div class="kv"><div class="k">換算點數</div><div>' + Number(o.tokens).toLocaleString() + ' 點</div></div>';
   h += '<div class="kv"><div class="k">狀態</div><div id="ostat">' + o.status + '</div></div>';
 
@@ -957,6 +1179,36 @@ document.getElementById("mk").onclick = createOrder;
 '''
 
 
+def _channel_ready(ch):
+    # 渠道是否真的收得到錢：前端顯示「未開通」、後端 create_order 雙重把關。
+    try:
+        if ch == 'usdc':
+            return bool(_sget('usdc_address'))
+        if ch == 'btc':
+            return bool((HD is not None) and (_sget('btc_zpub') or _sget('btc_address')))
+        if ch == 'fps':
+            return bool(_sget('fps_id'))
+        if ch in QR_CH:
+            _p = _sget(QR_SETTING_KEY.get(ch, ''))
+            return bool(_p) and os.path.exists(_p)
+        return False
+    except Exception:
+        return True          # 判斷失敗時不擋，交回 create_order 把關
+
+
+def _ch_meta_ui():
+    # CH_META + avail/why：前端據此顯示「未開通」並禁止下單。
+    out = {}
+    for _k, _m in CH_META.items():
+        _mm = dict(_m)
+        _ok = _channel_ready(_k)
+        _mm['avail'] = bool(_ok)
+        if not _ok:
+            _mm['why'] = '收款碼尚未設定' if _k in QR_CH else '尚未設定收款資訊'
+        out[_k] = _mm
+    return out
+
+
 def render_recharge(username, user, err=''):
     bal = int(user.get('balance_tokens') or 0)
     bal_cls = ' neg' if bal < 0 else ''
@@ -993,7 +1245,7 @@ def render_recharge(username, user, err=''):
         h += '</table></div>'
 
     js = (_RC_JS.replace('__API__', A_RC)
-                .replace('__CH__', json.dumps(CH_META, ensure_ascii=False))
+                .replace('__CH__', json.dumps(_ch_meta_ui(), ensure_ascii=False))
                 .replace('__PRESETS__', json.dumps(PRESET_HKD)))
     return _shell('充值', h, R_RECHARGE) + js
 
@@ -1027,8 +1279,17 @@ def render_ledger(username):
     return _shell('我的帳本', h, R_LEDGER)
 
 
-_SET_KEYS = [('usdc_address', 'USDC 收款地址（Base 主網）'), ('eth_address', 'ETH 收款地址（EVM）'),
-             ('btc_address', 'BTC 收款地址'), ('fps_id', '轉數快 FPS（電話/ID）'),
+_SET_KEYS = [('usdc_address', 'USDC 收款地址（Base 主網）'),
+             ('usdc_withdraw_fee', 'USDC 提幣手續費（USDC／Base；用於計「應打數量」）'),
+             ('eth_address', 'ETH 收款地址（EVM）'),
+             ('btc_address', 'BTC 舊單一地址（僅 fallback，新訂單不用）'),
+             ('btc_zpub', 'BTC zpub（BIP84 帳戶公鑰｜可看全部地址與餘額，勿外流）'),
+             ('btc_pool_target', 'BTC 預派生池水位（個）'),
+             ('btc_min_conf', 'BTC 自動入帳確認數（0 = 0-conf）'),
+             ('fps_id', '轉數快 FPS（電話/ID）'),
+             ('binance_pay_cur', '幣安 Pay 收款幣種（HKD / USDT / USDC）'),
+             ('binance_pay_rate', '幣安 Pay：1 USDT/USDC = ? HK$（只計穩定幣收款）'),
+             ('binance_pay_net', '幣安 Pay 收款網絡提示（例：BSC / TRC20；可留空）'),
              ('hkd_per_usdc', '匯率：1 USDC = ? HK$'), ('hkd_per_btc', '匯率：1 BTC = ? HK$'),
              ('min_hkd', '最低充值 HK$'), ('order_ttl_min', '訂單有效期（分鐘）')]
 
@@ -1113,7 +1374,7 @@ def render_admin_orders(msg=''):
               '<input type="file" name="%s" accept="image/*" style="margin-top:6px">'
               '<div class="note" style="margin-top:4px">留空＝不變更；上傳新圖會覆蓋舊圖。</div></div>') % (_qlb, _pv, _qk)
     h += '<button class="btn" type="submit">儲存設定</button></form>'
-    h += '<div class="note">香港支付寶／支付寶／微信錢包為 QR 圖收款；FPS 為文字帳號。未設定的渠道會在充值頁顯示為「未開通」。</div></div>'
+    h += '<div class="note">香港支付寶／支付寶／微信錢包／幣安 Pay 為 QR 圖收款（幣安 Pay 收款碼上傳後才開通）；FPS 為文字帳號。未設定的渠道會在充值頁顯示為「未開通」，後端亦會拒單。</div></div>'
     return _shell('金流後台', h, R_A_ORDERS)
 
 
@@ -1157,14 +1418,34 @@ if app is not None:
                                   credit=not is_plan_order_note(_note))
         if err:
             return jsonify({'ok': False, 'error': err})
-        qr = ''
+        qr, qr_addr, qr_pay = '', '', ''
         if order['channel'] == 'usdc' and order['pay_address']:
-            qr = 'https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=ethereum:' + order['pay_address']
+            # ① 純地址 QR：幣安 App「資產 → USDC → 提幣 → 地址欄掃碼」一掃即填地址。
+            #    刻意不加 ethereum: 前綴 —— 加了錢包會當成「轉原生幣」，
+            #    客人有機會把 ETH 打到 USDC 地址；純地址最安全。
+            qr_addr = _qr_data_uri(order['pay_address'])
         elif order['channel'] == 'btc' and order['pay_address']:
-            qr = 'https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=bitcoin:' + order['pay_address']
+            # ② BTC：地址 QR（通用）＋ BIP21（支援的錢包掃碼自動帶地址+金額+訂單號）
+            qr_addr = _qr_data_uri('bitcoin:' + order['pay_address'])
+            _bip21 = 'bitcoin:%s?amount=%s&label=%s' % (
+                order['pay_address'], order['pay_amount'], order['order_no'])
+            qr_pay = _qr_data_uri(_bip21)
         elif order['channel'] in QR_CH:
             qr = A_RC + '/qr/' + order['channel']
-        order['qr'] = qr
+        if order['channel'] == 'usdc':
+            _fee = _sfloat('usdc_withdraw_fee', 0.2)
+            order['withdraw_fee'] = _fee
+            try:
+                order['withdraw_total'] = '%.6f' % (float(order['pay_amount']) + _fee)
+            except Exception:
+                order['withdraw_total'] = order['pay_amount']
+        order['qr'] = qr_pay or qr_addr or qr
+        order['qr_addr'] = qr_addr
+        order['qr_pay'] = qr_pay
+        if order['channel'] == 'binance_pay':
+            # 幣種／網絡只作前端顯示，不落 DB（避免日後改設定與舊單顯示不一致）
+            order['pay_coin'] = (_sget('binance_pay_cur') or 'HKD').strip().upper()
+            order['pay_net'] = _sget('binance_pay_net') or ''
         try:
             notify('🧾 新訂單已建立\n訂單：%s\n用戶：%s\n渠道：%s\n金額：HK$%s → %s 點' % (
                 order['order_no'], order['username'], _ch_name(order['channel']),
@@ -1341,8 +1622,28 @@ if app is not None:
         if not _check_csrf():
             return _shell('CSRF 失敗', '<div class="err">⛔ CSRF token 不正確。</div>')
         for k, _label in _SET_KEYS:
-            if k in request.form:
-                _sset(k, (request.form.get(k) or '').strip())
+            if k not in request.form:
+                continue
+            _val = (request.form.get(k) or '').strip()
+            # zpub 是派生地址的唯一真相：換了 zpub，已發出的地址就對不上 → 有地址時禁止變更
+            if k == 'btc_zpub' and _val:
+                _old = _sget('btc_zpub')
+                if _old and _val != _old:
+                    try:
+                        with _connect() as _c:
+                            _cnt = _c.execute('SELECT COUNT(*) c FROM btc_addresses').fetchone()['c']
+                    except Exception:
+                        _cnt = 0
+                    if _cnt > 0:
+                        print('[金流] 拒絕變更 btc_zpub：已有 %d 個派生地址' % _cnt)
+                        continue
+                try:
+                    from bip_utils import Bip84 as _B84, Bip84Coins as _B84C
+                    _B84.FromExtendedKey(_val, _B84C.BITCOIN).Bip32Object().ChildKey(0).ChildKey(0)
+                except Exception as _e3:
+                    print('[金流] 拒絕無效 zpub: %s' % _e3)
+                    continue
+            _sset(k, _val)
         for _qk, _qlb in _QR_KEYS:
             _f = request.files.get(_qk)
             if _f and (_f.filename or '').strip():

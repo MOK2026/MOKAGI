@@ -113,9 +113,22 @@ def _get_session_path(username: str) -> Path:
 
 
 # ---------- Client 管理 ----------
+def _resolve_home_proxy():
+    """預設走家機出口（家 ip）；家機不可用則回 None（fallback 主機直連）。
+    instagrapi Client(proxy=...) 接受 URL 字串（socks5h://...）。"""
+    try:
+        sys.path.insert(0, "/home/ubuntu/.mok/tools")
+        import home_proxy
+        if home_proxy.is_home_ip():
+            return home_proxy.SOCKS5_URL
+    except Exception:
+        pass
+    return None
+
+
 def _create_client(username: str = None) -> Client:
     """建立 IG client，若有 session 則嘗試載入"""
-    cl = Client()
+    cl = Client(proxy=_resolve_home_proxy())
     cl.delay_range = [1, 3]  # 模擬人類操作的延遲
     
     if username:

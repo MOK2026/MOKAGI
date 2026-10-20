@@ -76,8 +76,19 @@ for SRC in "$@"; do
   fi
   A=$(realpath -- "$SRC")
   case "$A" in
-    "/"|"$HOME"|"$HOME/.mok"|"$HOME/.mok/core"|"$HOME/.mok/core/"*|"$HOME/.mok/tools"|"$HOME/.mok/tools/"*|/etc|/etc/*|/usr|/usr/*|/bin|/bin/*|/sbin|/sbin/*|/boot|/boot/*|/var|/var/*|/dev|/dev/*|/proc|/proc/*|/sys|/sys/*|/lib|/lib/*|/lib64|/lib64/*|/opt|/opt/*|/root|/root/*|/srv|/srv/*|/run|/run/*)
+    "/"|"$HOME"|"$HOME/.mok"|"$HOME/.mok/core"|"$HOME/.mok/core/"*|/etc|/etc/*|/usr|/usr/*|/bin|/bin/*|/sbin|/sbin/*|/boot|/boot/*|/var|/var/*|/dev|/dev/*|/proc|/proc/*|/sys|/sys/*|/lib|/lib/*|/lib64|/lib64/*|/opt|/opt/*|/root|/root/*|/srv|/srv/*|/run|/run/*)
       echo "❌ 拒絕: $A 是受保護路徑（整批中止）" >&2; exit 1 ;;
+  esac
+  # ---- tools/ 精細保護（2026-10-18 衍）：整段受保護 → 只保護「活的 .py 工具」，放行 .bak／偽工具 ----
+  if [ "$A" = "$HOME/.mok/tools" ]; then
+    echo "❌ 拒絕: $A 是 tools/ 目錄本身（受保護，整批中止）" >&2; exit 1
+  fi
+  case "$A" in
+    "$HOME/.mok/tools/"*.py)
+      if [ "$(dirname -- "$A")" = "$HOME/.mok/tools" ] && grep -qE '^[[:space:]]*PLUGIN_INFO[[:space:]]*=' "$A" 2>/dev/null; then
+        echo "❌ 拒絕: $A 是活的工具（含 PLUGIN_INFO，受保護，整批中止）" >&2; exit 1
+      fi
+      ;;
   esac
   SRCS+=("$A")
 done

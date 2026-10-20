@@ -21,6 +21,7 @@
 # 更新記錄:
 #   202607170315 - 初版，支援圖片分析 + 影片關鍵幀分析
 #   2026082223 - 新增 deepseek-v4-flash-vision-exp 圖像理解模型支援
+#   20261018 - 補 reasoning_content 兜底（thinking 模式 content 空時以 reasoning 兜底）；max_tokens 2048→8192
 # ------------------------------------------------------------------------------------ #
 
 import os
@@ -89,6 +90,8 @@ VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m
 # ---------- 多模態模型配置 ----------
 # 優先使用支援 vision 的模型
 VISION_MODEL_PREFERENCE = [
+    # 2026-10-19 主人指示：全系統統一用 deepseek-flash 看圖（實測 OCR 與圖像理解俱準、成本低）
+    "deepseek-flash",
     "deepseek-v4-flash-vision-exp",  # DeepSeek 圖像理解模型（無嚴格內容審核，優先）
     "gemini-3.5-flash",     # Google，原生支援
     "gemini-2.0-flash",     # Google
@@ -248,6 +251,22 @@ def _get_vision_model_config(agent_config: dict, preferred_model: str = None) ->
             "api_token": cfg["token"],
         }
 
+    # 1.5 agent 設定檔明確指定 VISION_MODEL（或 vision）→ 僅次於工具參數，便於個別覆寫
+    _explicit = ""
+    try:
+        _explicit = str(agent_config.get("VISION_MODEL") or agent_config.get("vision") or "").strip()
+    except Exception:
+        _explicit = ""
+    if _explicit:
+        if _explicit in models_available:
+            cfg = models_available[_explicit]
+            return {
+                "model": _explicit,
+                "api_url": cfg["url"],
+                "api_token": cfg["token"],
+            }
+        logger.warning(f"VISION_MODEL={_explicit} 不在本 agent 模型清單，改走預設優先序")
+
     # 2. 按優先序找原生支援 vision 的模型（gemini 等）
     search_order = VISION_MODEL_PREFERENCE
     for model_name in search_order:
@@ -352,7 +371,7 @@ async def _call_vision_model(
     payload = {
         "model": model_name,
         "messages": messages,
-        "max_tokens": 2048,
+        "max_tokens": 8192,
         "temperature": 0.7,
     }
     
@@ -370,7 +389,13 @@ async def _call_vision_model(
             data = response.json()
             _log_remote_tool_usage(model_name, api_url, (data or {}).get("usage"), agent_name=agent_name, user_id=user_id)
             if "choices" in data and len(data["choices"]) > 0:
-                content = data["choices"][0].get("message", {}).get("content", "")
+                message = data["choices"][0].get("message", {}) or {}
+                content = message.get("content") or ""
+                reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+                # thinking 模式兜底：reasoning 模型可能把輸出額度花在 reasoning_content 上，
+                # 導致 content 為空；此處以 reasoning 兜底，避免被判為拒答/空結果而錯誤輪換模型。
+                if not str(content).strip() and str(reasoning).strip():
+                    content = reasoning
                 return content
             else:
                 return json.dumps({

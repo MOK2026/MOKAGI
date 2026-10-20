@@ -26,6 +26,36 @@ _mk = _il.import_module("moka" + "gi")
 globals().update({_k: _v for _k, _v in vars(_mk).items() if not _k.startswith("__")})
 
 # ===== 以下為自來源模組原封不動搬移的回合運算 =====
+# ── [indexPage|2026-10-19 22:05:00 HK|改多輪 messages：最近 N 輪原文以 user/assistant 逐條放進 messages，
+#    取代原本塞進單一 prompt 的文字區塊；system 逐字不動，前綴（system＋既有輪次）可命中上游 prompt cache。
+#    由 agent 配置 MOK_INJECT_HISTORY_ROUNDS 控制（預設 0＝不啟用，其他 agent 行為完全不變）] ──
+def _recent_history_messages(user_id: str, agent_name: str, agent_config: Dict) -> List[Dict[str, str]]:
+    """取「該使用者 × 該 agent」最近 N 輪原文，轉成 user/assistant 訊息（較早的在前）；任何異常一律回空 list。
+
+    截斷上限只是單回合的 token 保險（過長的舊回覆對理解當前一問價值低），不是內容改寫。
+    """
+    try:
+        rounds = int(str((agent_config or {}).get("MOK_INJECT_HISTORY_ROUNDS", "0")).strip() or 0)
+    except Exception:
+        rounds = 0
+    if rounds <= 0 or not user_id:
+        return []
+    try:
+        pairs = get_user_history(user_id, limit=rounds, agent_name=agent_name) or []
+    except Exception as e:
+        logging.warning(f"取最近對話失敗: {e}")
+        return []
+    msgs: List[Dict[str, str]] = []
+    for r in pairs:                      # 格式：[{user, assistant}, ...]，已按時間正序
+        u = (r.get("user") or "").strip()[:800]
+        a = (r.get("assistant") or "").strip()[:1200]
+        if u:
+            msgs.append({"role": "user", "content": u})
+        if a:
+            msgs.append({"role": "assistant", "content": a})
+    return msgs
+
+
 async def process_message(
     user_id: str,
     text: str,
@@ -750,7 +780,7 @@ async def process_message(
             # 外部指定的初始提示，直接使用（不添加額外的主人/助手前綴）
             prompt = initial_prompt
         else:
-            # 簡化版：只包含用戶消息
+            # 簡化版：只包含用戶消息（最近 N 輪改由 messages 逐條承載，見下方；此處格式不動）
             prompt = f"\n{owner}:{working_text}\n{agent_name}:"
         # 保留工具定義，讓 LLM 自行決定是否調用記憶/經驗等工具
         tool_defs = build_tool_definitions()
@@ -790,11 +820,18 @@ async def process_message(
         # 注意：歷史對話、語義搜索、經驗學習等功能已轉為工具，由 LLM 主動調用。
 
 
-        session_logger.append_raw(f"### 發送給 LLM 的完整上下文\n\n```用戶訊息與歷史摘要:\n{prompt}\n```\n")
+        # [indexPage|2026-10-19 22:05:00 HK|多輪 messages：system 逐字不動，
+        #  最近 N 輪以 user/assistant 原文接在 system 之後、當前訊息之前（外部 initial_prompt 不套用）]
+        _history_messages = [] if initial_prompt is not None else _recent_history_messages(user_id, agent_name, agent_config)
+        session_logger.append_raw(
+            f"### 發送給 LLM 的完整上下文\n\n```當前用戶訊息:\n{prompt}\n```\n"
+            f"（另附歷史訊息 {len(_history_messages)} 條）\n"
+        )
 
         # ---------- 3. 多輪工具循環（最多 MOK_max_iterations 輪） ----------
         messages = [
             {"role": "system", "content": agent_body},
+            *_history_messages,
             {"role": "user", "content": prompt}
         ]
         final_reply_parts = []

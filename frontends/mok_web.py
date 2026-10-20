@@ -2112,9 +2112,16 @@ def handle_stop():
         return
     # 先通知前端服務即將重啟（可選）
     socketio.emit('stream_stopped', {'status': 'restarting'}, room=sid)
-    # 立即執行 pm2 restart（不等待，後臺運行）
-    subprocess.Popen("pm2 restart mok_agi", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"立即停止所有服務及緊急重啟，發起者: {sid}")
+    # 寫主人重啟旗標（原子寫入 master），launcher 偵測後完整重啟本體
+    _flag = "/home/ubuntu/.mok/run/master_restart.flag"
+    try:
+        os.makedirs(os.path.dirname(_flag), exist_ok=True)
+        with open(_flag + ".tmp", "w", encoding="utf-8") as _f:
+            _f.write("master")
+        os.replace(_flag + ".tmp", _flag)
+        print("主人重啟旗標已寫入（發起者: " + str(sid) + "），等待 launcher 接手完整重啟")
+    except Exception as _e:
+        print("寫入主人重啟旗標失敗: " + str(_e))
 
 
 
@@ -2385,9 +2392,86 @@ def vtuber_tts():
     return send_from_directory(os.path.join(BASE_DIR, folder), filename)
 
 
+# ===== /report HTML 追蹤注入（蹤 2026-10-19 E4193）=====
+# 只注入 .html/.htm；超過 2MB 不注入（走原路徑，保留 Range 與原生 ETag）；
+# 注入回應自帶 ETag/Last-Modified 並支援 304；注入結果以 mtime 做 LRU 快取，每 worker 上限 32MB。
+from collections import OrderedDict
+from werkzeug.http import http_date as _rpt_httpdate
+import hashlib
+
+_RPT_INJECT_VERSION = 'v1'
+_RPT_INJECT_MAX = 2 * 1024 * 1024
+_RPT_LRU_MAX_BYTES = 32 * 1024 * 1024
+_RPT_Q = chr(34)
+_RPT_SCRIPT = ('<script src=' + _RPT_Q + '/static/tracker.js' + _RPT_Q + ' defer></script>').encode('utf-8')
+_RPT_LRU = OrderedDict()
+_RPT_LRU_BYTES = 0
+_RPT_LRU_LOCK = threading.Lock()
+
+
+def _rpt_inject_html(raw):
+    if _RPT_SCRIPT in raw:
+        return raw
+    idx = raw.lower().rfind(b'</body>')
+    if idx < 0:
+        return raw + _RPT_SCRIPT
+    return raw[:idx] + _RPT_SCRIPT + raw[idx:]
+
+
+def _rpt_etag(mtime_ns, size):
+    return 'rpt-' + hashlib.md5(('%d:%d:%s' % (mtime_ns, size, _RPT_INJECT_VERSION)).encode('utf-8')).hexdigest()
+
+
+def _rpt_cached(full, mtime_ns, size):
+    key = (full, mtime_ns, size)
+    with _RPT_LRU_LOCK:
+        data = _RPT_LRU.get(key)
+        if data is not None:
+            _RPT_LRU.move_to_end(key)
+        return data
+
+
+def _rpt_store(full, mtime_ns, size, data):
+    global _RPT_LRU_BYTES
+    if len(data) > _RPT_LRU_MAX_BYTES:
+        return
+    key = (full, mtime_ns, size)
+    with _RPT_LRU_LOCK:
+        old = _RPT_LRU.pop(key, None)
+        if old is not None:
+            _RPT_LRU_BYTES -= len(old)
+        _RPT_LRU[key] = data
+        _RPT_LRU_BYTES += len(data)
+        while _RPT_LRU_BYTES > _RPT_LRU_MAX_BYTES and _RPT_LRU:
+            _k, _v = _RPT_LRU.popitem(last=False)
+            _RPT_LRU_BYTES -= len(_v)
+
+
+def _rpt_not_modified(etag, mtime):
+    inm = request.headers.get('If-None-Match')
+    if inm:
+        for part in inm.split(','):
+            tag = part.strip()
+            if tag.startswith('W/'):
+                tag = tag[2:].strip()
+            if len(tag) > 1 and tag.startswith(_RPT_Q) and tag.endswith(_RPT_Q):
+                tag = tag[1:-1]
+            if tag == '*' or tag == etag:
+                return True
+        return False
+    ims = request.headers.get('If-Modified-Since')
+    if ims:
+        try:
+            from email.utils import parsedate_to_datetime
+            return int(mtime) <= int(parsedate_to_datetime(ims).timestamp())
+        except Exception:
+            return False
+    return False
+
+
 @app.route('/report/<agent>/<path:filename>')
 def report_files(agent, filename):
-    """提供 Agent jobs/ 目錄下的工作報告 HTML（防路徑穿越）"""
+    """提供 Agent jobs/ 目錄下的工作報告（防路徑穿越；HTML 自動注入全站追蹤碼）"""
     if not agent or '/' in agent or '\\' in agent or '..' in agent:
         return 'Invalid agent', 400
     jobs_dir = os.path.join(ENV_DIR, agent, 'jobs')
@@ -2395,7 +2479,31 @@ def report_files(agent, filename):
     full = os.path.realpath(os.path.join(jobs_dir, filename))
     if not full.startswith(jobs_real + os.sep) or not os.path.isfile(full):
         return 'Not found', 404
-    _r = send_from_directory(jobs_dir, filename); _e = os.path.splitext(filename)[1].lower(); _r.headers['Cache-Control'] = ('public, max-age=86400' if _e in ('.webp', '.png', '.jpg', '.jpeg', '.gif', '.moc3', '.mp3', '.ogg', '.mp4', '.webm', '.wasm') else _r.headers.get('Cache-Control', 'no-cache')); return _r
+    _e = os.path.splitext(filename)[1].lower()
+    if _e in ('.html', '.htm'):
+        try:
+            _st = os.stat(full)
+            if _st.st_size <= _RPT_INJECT_MAX:
+                _etag = _rpt_etag(_st.st_mtime_ns, _st.st_size)
+                if _rpt_not_modified(_etag, _st.st_mtime):
+                    _nm = Response(status=304)
+                    _nm.set_etag(_etag)
+                    _nm.headers['Last-Modified'] = _rpt_httpdate(_st.st_mtime)
+                    _nm.headers['Cache-Control'] = 'no-cache'
+                    return _nm
+                _body = _rpt_cached(full, _st.st_mtime_ns, _st.st_size)
+                if _body is None:
+                    with open(full, 'rb') as _f:
+                        _body = _rpt_inject_html(_f.read())
+                    _rpt_store(full, _st.st_mtime_ns, _st.st_size, _body)
+                _rr = Response(_body, mimetype='text/html')
+                _rr.set_etag(_etag)
+                _rr.headers['Last-Modified'] = _rpt_httpdate(_st.st_mtime)
+                _rr.headers['Cache-Control'] = 'no-cache'
+                return _rr
+        except Exception:
+            pass
+    _r = send_from_directory(jobs_dir, filename); _r.headers['Cache-Control'] = ('public, max-age=86400' if _e in ('.webp', '.png', '.jpg', '.jpeg', '.gif', '.moc3', '.mp3', '.ogg', '.mp4', '.webm', '.wasm') else _r.headers.get('Cache-Control', 'no-cache')); return _r
 
 # ================= P3A 自管收款後台 API 反向代理（工作區同源 → 本機 127.0.0.1:5120） =================
 _P3AW_UPSTREAM = 'http://127.0.0.1:5120'
@@ -3157,6 +3265,8 @@ def upload_image():
         mime_type = data.get('mime_type', 'image/png')
         if not file_data:
             return jsonify({"success": False, "error": "Missing data"}), 400
+        if len(file_data) > _MAX_TMP_B64_CHARS:
+            return jsonify({"success": False, "error": "圖片過大（上限 20MB）"}), 413
 
         ext_map = {
             'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg',
@@ -3198,6 +3308,13 @@ def upload_image():
 
 TMP_AUDIO_DIR = os.path.join(os.path.expanduser(f"~/.{MOKAGI_home}"), "_tmp", "audio")
 
+# 2026-10-19 15:46（香港）｜idx｜公開暫存上傳的單檔上限：
+#   三支暫存上傳端點（audio/image/text）已開放未登入訪客使用，
+#   故在此設上限，防單一請求塞爆暫存磁碟（語音／圖片實際遠小於 20MB）。
+MAX_TMP_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_TMP_TEXT_BYTES = 2 * 1024 * 1024
+_MAX_TMP_B64_CHARS = MAX_TMP_UPLOAD_BYTES * 4 // 3 + 8
+
 TMP_TEXT_DIR = os.path.join(os.path.expanduser(f"~/.{MOKAGI_home}"), "_tmp", "text")
 
 @app.route('/api/upload_text', methods=['POST'])
@@ -3208,6 +3325,8 @@ def upload_text():
         content = data.get('content', '')
         if not isinstance(content, str) or not content:
             return jsonify({"success": False, "error": "Missing content"}), 400
+        if len(content.encode("utf-8", "ignore")) > MAX_TMP_TEXT_BYTES:
+            return jsonify({"success": False, "error": "文字過大（上限 2MB）"}), 413
 
         os.makedirs(TMP_TEXT_DIR, exist_ok=True)
         now = time.time()
@@ -3238,6 +3357,8 @@ def upload_audio():
         mime_type = data.get('mime_type', 'audio/webm')
         if not file_data:
             return jsonify({"success": False, "error": "Missing data"}), 400
+        if len(file_data) > _MAX_TMP_B64_CHARS:
+            return jsonify({"success": False, "error": "音檔過大（上限 20MB）"}), 413
 
         ext_map = {
             'audio/webm': '.webm', 'audio/ogg': '.ogg', 'audio/mp4': '.m4a',
@@ -3591,6 +3712,23 @@ def create_agent():
         return {"status": "error", "message": f"下載模板失敗: {str(e)}"}, 500
     # 替換佔位符
     content = content.replace('__MOK_AGENT_NAME_PLACEHOLDER__', name)
+    # 2026-10-19（稚）：新建 agent 一併寫入 VISION_MODEL，與既有侍女設定一致
+    # 遠端模板 env.env 未含此行時補上；優先用 ~/.mok/env.env 的值（單一真相），否則系統預設
+    if "VISION_MODEL" not in content:
+        _vm = ""
+        try:
+            with open(os.path.expanduser(f"~/.{MOKAGI_home}/env.env"), encoding="utf-8", errors="ignore") as _bf:
+                for _line in _bf:
+                    _s = _line.strip()
+                    if _s.startswith("VISION_MODEL="):
+                        _vm = _s.split("=", 1)[1].strip().replace("\"", "").replace(chr(39), "")
+                        if _vm:
+                            break
+        except Exception:
+            _vm = ""
+        if not _vm:
+            _vm = "deepseek-flash"
+        content = content.rstrip("\n") + f"\n# ================== 看圖模型 ===================\nVISION_MODEL={_vm}\n"
     # 確保目錄存在
     os.makedirs(agent_dir, exist_ok=True)
     # 寫入配置文件
@@ -4678,48 +4816,75 @@ def handle_get_agent_jobs(data):
                         rel = os.path.relpath(full, jobs_dir)
                         st = os.stat(full)
                         reports.append((rel, full, st.st_size, st.st_mtime))
-            # indexPage|主人：排列應是最新的放最上|新增一行：reports 依 mtime 倒序排序（原為檔名升序）|20261010-1701(香港)
-            reports.sort(key=lambda _r: _r[3], reverse=True)
+            # indexPage|主人：Jobs 要「日期最新在最上」，舊報告被 touch 後不應插到最新日期之前|改以工作日期夾日期（jobs/YYYY-MM-DD/）為主鍵，無日期者退回檔案日期，同日再比 mtime|20261018-2245(香港)
+            def _report_date_key(_rel, _mtime):
+                _m = re.match(r"^(\d{4}-\d{2}-\d{2})", _rel.replace(os.sep, "/"))
+                return (_m.group(1) if _m else time.strftime("%Y-%m-%d", time.localtime(_mtime)), _mtime)
+            reports.sort(key=lambda _r: _report_date_key(_r[0], _r[3]), reverse=True)
             if reports:
                 from urllib.parse import quote
+                from html import escape as _htmlesc
+                _agent_attr = _htmlesc(agent_name, quote=True)
+                # indexPage|主人：預覽、複製路徑後加星號可置頂到上方摺疊區；四鍵統一 20×20 圖示鍵、不用文字|主人要求|新增置頂䴦列渲染 + jobPinnedArea|20261019-2020(香港)
+                _btn = ('width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;'
+                        'padding:0;background:#2a2a2e;border:1px solid #3e3e42;border-radius:6px;'
+                        'cursor:pointer;font-size:12px;line-height:1;flex:0 0 auto;')
+                out_lines.append(f'<div id="jobReportSection" data-agent="{_agent_attr}">')
                 out_lines.append(f'<div style="padding:8px; border-bottom:1px solid #3e3e42; color:#4ec9b0; font-weight:bold;">📄 工作報告 共 {len(reports)} 份</div>')
+                out_lines.append('<div id="jobPinnedArea"></div>')
+                out_lines.append('<div id="jobReportList">')
                 for rel, full, size, mtime in reports:
                     url = '/report/' + quote(agent_name) + '/' + quote(rel)
-                    # 🗑 刪除鍵字串（2026-10-07 by indexPage｜Jobs 面板非 admin 亦看得到，故僅對特權 session 渲染；後端端點仍二次把關）
-                    # 📋 複製路徑鍵（2026-10-08 by indexPage｜主人要求：👁 預覽 後可一鍵複製相對路徑，如「賺錢王/jobs/2026-10-07/coldcall_漏斗升級指標/report.html」）
-                    from html import escape as _htmlesc
-                    copy_btn = (
-                        f'<button onclick="copyReportPath(this)" data-copypath="{_htmlesc(agent_name + "/jobs/" + rel, quote=True)}" '
-                        'title="複製相對路徑（agent/jobs/…）" style="background:#2a2a2e; color:#c9a0ff; border:1px solid #40345a; border-radius:10px; padding:2px 10px; cursor:pointer; font-size:0.75rem;">📋 複製路徑</button>'
+                    rel_attr = _htmlesc(rel, quote=True)
+                    pin_btn = (
+                        f'<button class="job-pin-btn" onclick="toggleReportPin(this)" data-agent="{_agent_attr}" data-rel="{rel_attr}" '
+                        f'title="置頂到最上" style="{_btn} color:#9a9a9a;">☆</button>'
                     )
-                    # 🗑 刪除鍵字串（2026-10-07 by indexPage｜Jobs 面板非 admin 亦看得到，故僅對特權 session 渲染；後端端點仍二次把關）
-                    # indexPage|主人：🗑 刪除 移到最右、與預覽太近|del_btn 加 margin-left:auto 推至列最右|202610080120(香港)
+                    copy_btn = (
+                        f'<button class="job-icon-btn" onclick="copyReportPath(this)" data-copypath="{_htmlesc(agent_name + "/jobs/" + rel, quote=True)}" '
+                        f'title="複製相對路徑（agent/jobs/…）" style="{_btn} color:#c9a0ff;">📋</button>'
+                    )
                     del_btn = ''
                     if _is_privileged_session():
                         del_btn = (
-                            f'<button onclick="deleteReport(this)" data-agent="{_htmlesc(agent_name, quote=True)}" data-path="{_htmlesc(rel, quote=True)}" '
-                            'title="移入回收站，30 天內可還原" style="margin-left:auto; background:#2a2a2e; color:#ff9b9b; border:1px solid #5a3a3a; border-radius:10px; padding:2px 10px; cursor:pointer; font-size:0.75rem;">🗑 刪除</button>'
+                            f'<button class="job-icon-btn" onclick="deleteReport(this)" data-agent="{_agent_attr}" data-path="{rel_attr}" '
+                            f'title="移入回收站（30 天內可還原）" style="{_btn} color:#ff9b9b;">🗑</button>'
                         )
                     size_kb = size / 1024.0
                     time_str = time.strftime('%m-%d %H:%M', time.localtime(mtime))
                     out_lines.append(
-                        '<div style="padding:6px 8px; border-bottom:1px solid #2a2a2e; display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-family:sans-serif;">'
-                        f'<a href="{url}" target="_blank" style="color:#4ec9b0; text-decoration:none; font-weight:bold; font-size:0.85rem;">📄 {rel}</a>'
-                        f'<span style="color:#888; font-size:0.7rem;">({size_kb:.1f}KB · {time_str})</span>'
-                        f'<button onclick="toggleReportPreview(this)" data-src="{url}" style="background:#2a2a2e; color:#4ec9b0; border:1px solid #3e3e42; border-radius:10px; padding:2px 10px; cursor:pointer; font-size:0.75rem;">👁 預覽</button>'
+                        f'<div class="job-report-item" data-report-rel="{rel_attr}">'
+                        '<div class="job-report-row" style="padding:6px 8px; border-bottom:1px solid #2a2a2e; display:flex; align-items:center; gap:6px; flex-wrap:nowrap; font-family:sans-serif;">'
+                        f'<a class="job-report-name" href="{url}" target="_blank" title="{rel_attr}" style="color:#4ec9b0; text-decoration:none; font-weight:bold; font-size:0.85rem;">📄 {rel}</a>'
+                        f'<span class="job-report-meta" style="color:#888; font-size:0.7rem; flex:0 0 auto;">({size_kb:.1f}KB · {time_str})</span>'
+                        '<span class="job-report-actions" style="display:flex; align-items:center; gap:4px; flex:0 0 auto;">'
+                        f'<button class="job-icon-btn" onclick="toggleReportPreview(this)" data-src="{url}" title="預覽報告" style="{_btn} color:#4ec9b0;">👁</button>'
                         + copy_btn
+                        + pin_btn
                         + del_btn
+                        + '</span>'
                         + '</div>'
-                        + '<div style="display:none; margin:0 8px 8px 8px;">'
-                        f'<iframe style="width:100%; height:420px; border:1px solid #3e3e42; border-radius:6px; background:#fff;"></iframe>'
+                        + '<div class="job-report-preview" style="display:none; margin:0 8px 8px 8px;">'
+                        '<iframe style="width:100%; height:420px; border:1px solid #3e3e42; border-radius:6px; background:#fff;"></iframe>'
+                        '</div>'
                         '</div>'
                     )
+                out_lines.append('</div></div>')
         except Exception as e:
             out_lines.append(f'<div style="color:#ff6b6b; padding:2px 8px;">⚠️ 掃描工作報告失敗: {str(e)}</div>')
 
     if os.path.isdir(jobs_dir):
         try:
-            job_dirs = sorted([d for d in os.listdir(jobs_dir) if os.path.isdir(os.path.join(jobs_dir, d))])
+            # indexPage|主人：Jobs 清單同樣要新日期在最上|job_dirs 由檔名升序改為工作日期夾日期倒序，無日期者退回目錄 mtime|20261018-2245(香港)
+            def _jobdir_date_key(_d):
+                _m = re.match(r"^(\d{4}-\d{2}-\d{2})", _d)
+                if _m:
+                    return _m.group(1)
+                try:
+                    return time.strftime("%Y-%m-%d", time.localtime(os.stat(os.path.join(jobs_dir, _d)).st_mtime))
+                except OSError:
+                    return ""
+            job_dirs = sorted([d for d in os.listdir(jobs_dir) if os.path.isdir(os.path.join(jobs_dir, d))], key=_jobdir_date_key, reverse=True)
             if job_dirs:
                 lines = [f'<div style="padding:8px; border-bottom:1px solid #3e3e42; color:#4ec9b0;">📋 jobs/ 共 {len(job_dirs)} 個工作</div>']
                 for jname in job_dirs:

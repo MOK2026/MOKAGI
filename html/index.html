@@ -152,8 +152,10 @@
             <div class="tools-header">
                 <div class="tools-header-buttons">
                     <button id="agentInfoBtn" class="agent-info-btn" title="查看 Agent 資訊">🌸</button>
+                    <button data-tool="pm2面板" data-admin-only class="mok-hidden" title="PM2 面板：主機進程一鍵開關（啟動／停止／重啟）">🎛️ PM2 面板</button>
                     <button data-tool="room">🏠 房間</button>
                     <button data-tool="bookmark">📑 書籤</button>
+                    <button data-tool="pages" title="mokagi 頻道清單（會員頁面即時清單＋admin 頁面權限開關）">📡 mokagi 頻道清單</button>
                     <button data-tool="search">🔍 搜尋</button>
                     <button id="notebookBtn" data-tool="notebook" title="筆記">📝 筆記</button>
                     <button id="toolsTokenBalance" class="tools-token-balance" data-tool="billing" data-member-only title="查看 MOKAGI 用量帳單（token）">📊 token</button>
@@ -165,7 +167,6 @@
                     <button data-tool="進化" data-admin-only class="mok-hidden">🧬 進化</button>
                     <button data-tool="logs" data-admin-only class="mok-hidden">📋 日誌</button>
                     <button data-tool="monitor" data-admin-only class="mok-hidden">📊 監控</button>
-                    <button data-tool="pm2面板" data-admin-only class="mok-hidden" title="PM2 一鍵開關面板（啟動／停止／重啟 pm2 進程）">🎛️ PM2</button>
                     <button data-tool="files">📁 文件</button>
                     <button data-tool="tools">🔧 工具</button>
                     <button data-tool="novnc" data-admin-only class="mok-hidden">🖥️ 桌面</button>
@@ -178,7 +179,6 @@
                     <button data-tool="ascii">🎨 ASCII</button>
                     <button data-tool="侍女辦公桌" title="侍女辦公桌看板（需登入）">🪑 侍女辦公桌</button>
                     <button data-tool="自助頁原型" data-admin-only class="mok-hidden" title="自助頁原型（痛點 → AI demo → 三段定價）">🧪 自助頁原型</button>
-                    <button id="openToolsPanel2" title="再開一組工具面板">🧰 面板2</button>
                 </div>
                 <button id="toolsMoreBtn" class="tools-more-btn" title="更多工具" style="display:none;">⋯</button>
                 <div class="header-btns-dropdown" id="toolsMoreDropdown"></div>
@@ -294,7 +294,7 @@
       for(_k=0;_k<_mem.length;_k++){ _mem[_k].classList.add('mok-mh'); }
       if(window.MOK_LOGGED_IN){ for(_k=0;_k<_mem.length;_k++){ _mem[_k].classList.remove('mok-mh'); } }
       if(!on){
-        var _allow={room:1,billing:1,bookmark:1,search:1,'頻道清單':1,mokagiWIKI:1,'會員系統說明':1};
+        var _allow={room:1,billing:1,bookmark:1,search:1,pages:1,'頻道清單':1,mokagiWIKI:1,'會員系統說明':1};
         for(_k=0;_k<_all.length;_k++){
           var _b=_all[_k];
           if(_b.id==='agentInfoBtn'||_b.id==='notebookBtn'){ _b.classList.remove('mok-mh'); continue; }
@@ -342,25 +342,48 @@
 })();
 </script>
 <script>/* 頻道下拉水晶盤 by indexPage 2026-09-26 */ (function(){function b(){var g=document.getElementById("mokChannelGroup");if(!g||g.dataset.mokChBound)return;var t=document.getElementById("channelBtn"),d=document.getElementById("channelDropdown");if(!t||!d)return;g.dataset.mokChBound="1";function s(o){d.classList.toggle("open",o);t.classList.toggle("open",o);t.setAttribute("aria-expanded",o?"true":"false");}t.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();s(!d.classList.contains("open"));});d.addEventListener("click",function(e){e.stopPropagation();});document.addEventListener("click",function(e){if(!g.contains(e.target))s(false);});document.addEventListener("keydown",function(e){if(e.key==="Escape")s(false);});}if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",b);}else{b();}})();</script>
+<!-- 自動歸位（公開頁面）由 main.js 頻道盤合併，無需獨立腳本 by indexPage 2026-10-19 -->
 <script>/* 頻道清單載入（/static/channels.json，可隨時編輯）by indexPage 2026-09-26 */ (function(){
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  /* idx|2026-10-19 15:12(HK)：尊重 channel_visibility.json —— 主人在頻道清單按「隱藏」的頁面不出現在左頻道（與 main.js normPath 同口徑） */
+  var _hid={};
+  function np(u){
+    var s=String(u==null?'':u).trim(),i,j,low;
+    if(!s)return '';
+    i=s.indexOf('://');
+    if(i>=0){j=s.indexOf('/',i+3);s=(j>=0)?s.slice(j):'/';}
+    s=s.split('?')[0].split('#')[0];low=s.toLowerCase();
+    if(low.slice(-11)==='/index.html')s=s.slice(0,s.length-11)+'/';
+    else if(low.slice(-10)==='/index.htm')s=s.slice(0,s.length-10)+'/';
+    while(s.length>1&&s.charAt(s.length-1)==='/')s=s.slice(0,-1);
+    if(s.charAt(0)!=='/')s='/'+s;
+    return s.toLowerCase();
+  }
+  function isHid(u){var k=np(u);return !!(k&&_hid[k]);}
   function render(list){
     var d=document.getElementById('channelDropdown'); if(!d||!list||!list.length) return;
     var h='';
     for(var i=0;i<list.length;i++){var it=list[i]||{}; if(!it.href) continue;
+      if(isHid(it.href)) continue;
       var tone=it.tone||'#4ec9b0', icon=it.icon||'', label=it.label||it.href, href=String(it.href);
       h+='<button class="header-dropdown-item" data-ch="'+esc(it.id||label)+'" style="--tone:'+esc(tone)+';" '
         +'onclick="location.href=\''+esc(href).replace(/'/g,"\\'")+'\'">'+esc((icon?icon+' ':'')+label)+'</button>';
     }
     if(h) d.innerHTML=h;
+    // 自動歸位（公開頁面）改由 main.js 頻道盤合併處理 by indexPage 2026-10-19
   }
   function boot(){
     if(!document.getElementById('channelDropdown')) return;
     try{
-      fetch('/static/channels.json?t='+Date.now(),{cache:'no-store'})
-        .then(function(r){return r.ok?r.json():null;})
-        .then(function(j){ if(j&&j.channels) render(j.channels); })
-        .catch(function(){});
+      /* idx|2026-10-19 15:12(HK)：先取隱藏集再渲染，避免隱藏頁閃現 */
+      Promise.all([
+        fetch('/static/channels.json?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
+        fetch('/static/channel_visibility.json?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
+      ]).then(function(res){
+        var a=(res[1]&&res[1].hidden)||[],i,k;_hid={};
+        for(i=0;i<a.length;i++){k=np(a[i]);if(k)_hid[k]=1;}
+        if(res[0]&&res[0].channels) render(res[0].channels);
+      });
     }catch(e){}
   }
   if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}

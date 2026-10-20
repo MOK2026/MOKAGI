@@ -1,103 +1,111 @@
 {
-  "_lastEdit": "indexPage|2026-10-14 13:00|「萬事屋」icon 由 🧪 改為 🏮",
-  "channels": [ {"id": "selfserve-proto", "icon": "🏮", "label": "萬事屋", "href": "https://mokagi.com/start", "tone": "#6c8cff"}, {"id": "履歷生成網", "icon": "📄", "label": "履歷生成網", "href": "report/履歷之神/履歷生成網/index.html", "tone": "#7c7dff"},
+  "_lastEdit": "indexPage 2026-10-19 14:00 依主人指示開啟自動收錄（autoInclude=true）：左頻道併入 page_index_public.json 的公開頁面（idx|2026-10-19 14:00(HK)）",
+  "_doc": "精選置頂清單（人手維護）。左頻道顯示本檔 pins（13 項）＋自動收錄公開頁面。autoInclude=true → 併入 /static/page_index_public.json（scope=public，只含 visibility=public 頁面）；主人 2026-10-19 14:00 指示開啟以檢視效果。如需關閉，改 autoInclude:false 即可，毋須改程式。",
+  "autoInclude": true,
+  "channels": [
+    {
+      "id": "selfserve-proto",
+      "icon": "🏮",
+      "label": "萬事屋",
+      "href": "https://mokagi.com/start",
+      "tone": "#6c8cff",
+      "pinned": true
+    },
+    {
+      "id": "履歷生成網",
+      "icon": "📄",
+      "label": "履歷生成網",
+      "href": "report/履歷之神/履歷生成網/index.html",
+      "tone": "#7c7dff",
+      "pinned": true
+    },
     {
       "id": "room",
       "icon": "🏠",
       "label": "房間",
       "href": "/index.html",
-      "tone": "#4ec9b0"
+      "tone": "#4ec9b0",
+      "pinned": true
     },
     {
-      "id": "meeting",
-      "icon": "📋",
-      "label": "會議",
-      "href": "會議模式",
-      "tone": "#4ec9b0"
+      "id": "meeting-v2",
+      "icon": "📹",
+      "label": "會議模式v2",
+      "href": "https://mokagi.com/會議模式v2",
+      "tone": "#4ec9b0",
+      "pinned": true
     },
     {
       "id": "game",
       "icon": "🎮",
       "label": "game",
       "href": "game",
-      "tone": "#ffb84d"
-    },
-    {
-      "id": "live3",
-      "icon": "🎬",
-      "label": "直播房3",
-      "href": "report/病毒引擎/直播房3/index.html",
-      "tone": "#e06c9f"
+      "tone": "#ffb84d",
+      "pinned": true
     },
     {
       "id": "social2",
       "icon": "🌐",
       "label": "mokagi社交平台2",
       "href": "report/春/mokagi社交平台2/index.html",
-      "tone": "#4ea3ff"
+      "tone": "#4ea3ff",
+      "pinned": true
     },
     {
       "id": "github-pages",
       "icon": "📄",
       "label": "GitHub Pages",
       "href": "https://64071181.github.io/",
-      "tone": "#c084fc"
+      "tone": "#c084fc",
+      "pinned": true
     },
     {
       "id": "project",
       "icon": "📁",
       "label": "project",
       "href": "https://mokagi.com/project/",
-      "tone": "#f59e0b"
+      "tone": "#f59e0b",
+      "pinned": true
     },
     {
       "id": "mokcs",
       "icon": "🧩",
       "label": "MokCs",
       "href": "https://mokagi.com/project/MokCs/",
-      "tone": "#34d399"
+      "tone": "#34d399",
+      "pinned": true
     },
     {
       "id": "api",
       "icon": "🔌",
       "label": "api",
       "href": "https://mokagi.com/project/api/",
-      "tone": "#60a5fa"
-    },
-    {
-      "id": "schedule",
-      "icon": "🗓️",
-      "label": "mokagi日程",
-      "href": "https://mokagi.com/report/MOKAGI/mokagi日程/index.html",
-      "tone": "#f472b6"
+      "tone": "#60a5fa",
+      "pinned": true
     },
     {
       "id": "mokagi-gh",
       "icon": "🐙",
       "label": "MOKAGI (GitHub)",
       "href": "https://github.com/MOK2026/MOKAGI",
-      "tone": "#94a3b8"
-    },
-    {
-      "id": "call48",
-      "icon": "📞",
-      "label": "48call 老人陪伴房",
-      "href": "report/衍/48call_老人陪伴房/web/index.html",
-      "tone": "#f59e0b"
+      "tone": "#94a3b8",
+      "pinned": true
     },
     {
       "id": "wiki",
       "icon": "📖",
       "label": "mokagi 說明書 (WIKI)",
       "href": "/project/wiki/index.html",
-      "tone": "#fbbf24"
+      "tone": "#fbbf24",
+      "pinned": true
     },
     {
       "id": "member-system",
       "icon": "💠",
       "label": "會員系統說明",
       "href": "report/凜/會員系統說明/index.html",
-      "tone": "#a78bfa"
+      "tone": "#a78bfa",
+      "pinned": true
     }
   ]
 }

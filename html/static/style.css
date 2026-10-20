@@ -2596,3 +2596,22 @@ body.eye-care #eyeCareLevel{ display:inline-block; }
 #agentSidebar .agent-group--recent { border-left: 2px solid rgba(78,201,176,.35); }
 #agentSidebar .agent-empty { padding: 14px 12px; opacity: .55; font-size: .8rem; text-align: center; }
 #agentSidebar.collapsed .agent-search-wrap { display: none; }
+
+/* ---- Jobs 面板：置頂摺疊區與 20×20 圖示鍵 ---- */
+/* indexPage|主人：預覽/複製路徑後加星號置頂，置頂報告放上方可摺疊導航；四鍵 20×20 圖示、不用文字|20261019-2030(香港) */
+.job-pin-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 5px 8px; background: #24242a; border-bottom: 1px solid #3e3e42;
+  color: #ffd166; font-family: sans-serif; font-size: 0.75rem; font-weight: bold;
+  cursor: pointer; user-select: none;
+}
+.job-pin-head:hover { background: #2c2c33; }
+.job-pin-body { background: #1f1f23; border-bottom: 1px solid #3e3e42; }
+.job-icon-btn, .job-pin-btn { transition: background .12s, border-color .12s; }
+.job-icon-btn:hover, .job-pin-btn:hover { background: #33333a !important; border-color: #4ec9b0 !important; }
+.job-report-preview iframe { display: block; }
+
+/* Jobs 報告列：檔名省略、四個 20×20 鍵單行靠右（窄面板亦不換行） */
+.job-report-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-report-actions { flex: 0 0 auto; }
+@media (max-width: 420px) { .job-report-meta { display: none !important; } }

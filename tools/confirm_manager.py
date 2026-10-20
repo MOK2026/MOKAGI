@@ -335,11 +335,34 @@ def redeem(chat_id, token, agent_config=None):
     return "ok", rec
 
 
+def resend_command(rec):
+    """由待確認記錄重建可直接送出的原命令（單行；含換行或 "=>" 時不提供，避免行動鍵被切壞）。"""
+    if not isinstance(rec, dict):
+        return ""
+    cmd = rec.get("cmd") or ""
+    args = str(rec.get("args") or "").strip()
+    if not args or "=>" in args or "\n" in args or "\r" in args:
+        return ""
+    if (rec.get("kind") or "admin") == "cron":
+        action = cmd[5:] if cmd.startswith("cron_") else cmd
+        return f"/cron {action} {args}" if action in ("add", "delete") else ""
+    prefix = {
+        "shell_exec": "/admin exec ",
+        "pip_install": "/admin pip install ",
+        "ollama_rm": "/admin ollama_rm ",
+    }.get(cmd)
+    return f"{prefix}{args}" if prefix else ""
+
+
 def status_message(status, payload, agent_config=None):
     """把 redeem 的結果轉成人類可讀訊息（非 ok 時使用）。"""
     hint = ttl_hint(get_ttl(agent_config))
     if status == "expired":
-        return f"❌ 確認碼已超時（有效期限 {hint}）。請重新發送原命令。"
+        msg = f"❌ 確認碼已超時（有效期限 {hint}）。請重新發送原命令。"
+        resend = resend_command(payload)
+        if resend:
+            msg += f"\n\n[[行動]]\n1. 🔁 再發一次 => {resend}\n[[/行動]]"
+        return msg
     if status == "already_used":
         info = ""
         if isinstance(payload, dict):

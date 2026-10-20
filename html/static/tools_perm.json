@@ -1,7 +1,7 @@
 {
   "_comment": "右側工具面板（.tools-header／#toolsMoreDropdown）按鍵的等級權限矩陣。by 凜 2026-10-01。全權限與否只影響前端顯示與可操作；admin 一律全開。",
   "version": 1,
-  "updated": "2026-10-13 17:17:39",
+  "updated": "2026-10-18 17:47:21",
   "levels": [
     "guest",
     "free",
@@ -61,6 +61,15 @@
       "admin_only": false,
       "desc": "個人書籤頁（iframe：/webTools/書籤/書籤.html）。",
       "page": "/static/書籤.html"
+    },
+    {
+      "key": "pages",
+      "icon": "📚",
+      "label": "頁面目錄",
+      "panel": 1,
+      "admin_only": false,
+      "desc": "自動收錄 visibility=member 的頁面（所有 agent 的 jobs），供會員在右側工作區查找。",
+      "page": "/static/page_index.html?scope=member"
     },
     {
       "key": "search",
@@ -573,6 +582,12 @@
       "free": 0,
       "pro": 0,
       "vip": 0
+    },
+    "pages": {
+      "guest": 0,
+      "free": 1,
+      "pro": 1,
+      "vip": 1
     }
   },
   "plan_pages_url": "/static/plans_pages.json",

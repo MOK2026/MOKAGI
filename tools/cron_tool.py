@@ -155,22 +155,300 @@ def _write_crontab(lines: list) -> tuple:
         return False, str(e)
 
 def _parse_cron_lines(lines: list) -> list:
-    """解析 cron 行，回傳帶編號的任務清單（跳過註解）"""
+    """解析 cron 行，回傳帶編號的任務清單（跳過註解與環境變數行）
+
+    2026-10-19 修（agent mokagi說明）：
+      1) 支援 @reboot / @daily / @hourly 等特殊排程。舊版把整條指令都當成「排程欄位」，
+         結果指令只剩尾巴的 `2>&1`，完全看不懂（真實案例：第 11 條復活腳本）。
+      2) schedule 固定為「時間欄位」，command 固定為「要跑的指令」。
+      3) 編號 idx 仍然按 crontab 的行號計，這樣 /cron 的編號可以直接對應刪除操作。
+    """
     tasks = []
     for idx, line in enumerate(lines, 1):
         line_stripped = line.strip()
         if not line_stripped or line_stripped.startswith('#'):
             continue
-        # 簡單判斷：是否為有效的 cron 行（至少有 5 個時間欄位）
         parts = line_stripped.split()
+        # 環境變數行（例：SHELL=/bin/bash）不是任務
+        first = parts[0]
+        if "=" in first and not first.startswith("/") and first.split("=")[0].isupper():
+            continue
+        if first.startswith("@"):
+            command = " ".join(parts[1:])
+            if not command:
+                continue
+            tasks.append({
+                "number": idx,
+                "raw": line_stripped,
+                "schedule": first,
+                "command": command,
+                "special": True,
+            })
+            continue
         if len(parts) >= 6:  # 5個時間 + 至少1個指令
             tasks.append({
                 "number": idx,
                 "raw": line_stripped,
                 "schedule": " ".join(parts[:5]),
-                "command": " ".join(parts[5:])
+                "command": " ".join(parts[5:]),
+                "special": False,
             })
     return tasks
+
+
+# ------------------------------------------------------------------------------------ #
+# 🕐 時區顯示（2026-10-19 由 agent「mokagi說明」修）
+# 為什麼要改：本機系統時區是 Etc/UTC，cron 的 5 個時間欄位一律以「系統時區」解析，
+#   但主人與所有侍女都是用香港時間（HKT = UTC+8）思考。舊版 /cron list 只印原始欄位，
+#   於是 `0 4 * * *` 被讀成「凌晨四點」，實際上是香港中午 12:00 —— 這是會出事的誤讀。
+# 改法：純顯示層。清單開頭標明「系統時區」，每條任務多一行「HKT 換算 + 人類可讀」。
+#   不改任何排程、不改新增／確認流程、不改 crontab 內容。
+# 可用環境變數 MOK_CRON_DISPLAY_TZ 覆寫顯示用時區（預設 Asia/Hong_Kong）。
+# ------------------------------------------------------------------------------------ #
+CRON_DISPLAY_TZ = os.environ.get("MOK_CRON_DISPLAY_TZ", "Asia/Hong_Kong")
+_DOW_NAMES = ["日", "一", "二", "三", "四", "五", "六"]
+_CRON_SPECIAL = {
+    "@reboot": "開機時執行",
+    "@yearly": "每年一次",
+    "@annually": "每年一次",
+    "@monthly": "每月一次",
+    "@weekly": "每週一次",
+    "@daily": "每日一次",
+    "@midnight": "每日 00:00",
+    "@hourly": "每小時整點",
+}
+
+
+def _get_system_tz_name() -> str:
+    """取得系統時區名稱（＝ cron 解析排程所用的時區）"""
+    for path in ("/etc/timezone", "/var/db/zoneinfo"):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                name = f.read().strip()
+            if name:
+                return name
+        except Exception:
+            continue
+    try:
+        import datetime
+        name = datetime.datetime.now().astimezone().tzname()
+        if name:
+            return name
+    except Exception:
+        pass
+    return "UTC"
+
+
+def _tz_offset_hours(tz_name: str, ref_ts: float = None):
+    """回傳指定時區相對 UTC 的偏移小時數；無法解析回傳 None"""
+    if ref_ts is None:
+        ref_ts = time.time()
+    try:
+        from zoneinfo import ZoneInfo
+        import datetime
+        dt = datetime.datetime.fromtimestamp(ref_ts, tz=ZoneInfo(tz_name))
+        off = dt.utcoffset()
+        if off is None:
+            return None
+        return off.total_seconds() / 3600.0
+    except Exception:
+        return None
+
+
+def _tz_short_name(tz_name: str) -> str:
+    """Asia/Hong_Kong -> HKT（取不到就退回路徑末段）"""
+    try:
+        from zoneinfo import ZoneInfo
+        import datetime
+        ab = datetime.datetime.now(tz=ZoneInfo(tz_name)).tzname()
+        if ab:
+            return ab
+    except Exception:
+        pass
+    return str(tz_name).split("/")[-1].upper()[:5]
+
+
+def _fmt_offset(hours) -> str:
+    """+8 -> +08:00"""
+    if hours is None:
+        return "?"
+    sign = "+" if hours >= 0 else "-"
+    h = abs(hours)
+    hh = int(h)
+    mm = int(round((h - hh) * 60))
+    return "%s%02d:%02d" % (sign, hh, mm)
+
+
+def _expand_cron_field(field: str, lo: int, hi: int):
+    """把單一 cron 欄位展開成整數集合；無法解析回傳 None。支援 * , - /"""
+    vals = set()
+    field = str(field or "").strip()
+    if not field:
+        return None
+    for part in field.split(","):
+        part = part.strip()
+        if not part:
+            return None
+        step = 1
+        body = part
+        if "/" in part:
+            body, s = part.split("/", 1)
+            if not s.isdigit() or int(s) <= 0:
+                return None
+            step = int(s)
+        if body == "*":
+            start, end = lo, hi
+        elif "-" in body:
+            a, b = body.split("-", 1)
+            if not (a.strip().isdigit() and b.strip().isdigit()):
+                return None
+            start, end = int(a), int(b)
+        elif body.isdigit():
+            start = end = int(body)
+            if step > 1:
+                end = hi
+        else:
+            return None
+        if start < lo or end > hi or start > end:
+            return None
+        vals.update(range(start, end + 1, step))
+    return vals or None
+
+
+def _fmt_num_set(vals, max_list: int = 6) -> str:
+    """{2,3,4} -> '02–04'；{1,5} -> '01、05'"""
+    vals = sorted(vals)
+    if not vals:
+        return ""
+    if len(vals) == 1:
+        return "%02d" % vals[0]
+    if vals == list(range(vals[0], vals[-1] + 1)):
+        return "%02d–%02d" % (vals[0], vals[-1])
+    if len(vals) <= max_list:
+        return "、".join("%02d" % v for v in vals)
+    return "%02d、%02d…%02d" % (vals[0], vals[1], vals[-1])
+
+
+def _cron_dow_desc(field: str) -> str:
+    """星期欄位 -> 週一至週五 / 週日、週三 …"""
+    if not field or field == "*":
+        return ""
+    vals = _expand_cron_field(field.replace("7", "0"), 0, 6)
+    if not vals or len(vals) >= 7:
+        return ""
+    if vals == {1, 2, 3, 4, 5, 6}:
+        return "週一至週六"
+    if vals == {1, 2, 3, 4, 5}:
+        return "週一至週五"
+    return "、".join("週" + _DOW_NAMES[v] for v in sorted(vals))
+
+
+def _cron_time_hints(schedule: str, display_tz: str = None) -> dict:
+    """把 cron 排程換算成人類可讀時間（純字串，不動排程本身）。
+
+    回傳 {"utc": "UTC 每日 04:00", "local": "HKT 每日 12:00",
+          "label": "每日 04:00", "cross_day": bool, "ok": bool}
+    """
+    out = {"utc": "", "local": "", "label": "", "cross_day": False, "ok": False}
+    sched = (schedule or "").strip()
+    if not sched:
+        return out
+    target_tz = display_tz or CRON_DISPLAY_TZ
+
+    if sched.startswith("@"):
+        label = _CRON_SPECIAL.get(sched.lower(), sched)
+        out.update({
+            "label": label,
+            "utc": "UTC " + label,
+            "local": _tz_short_name(target_tz) + " " + label,
+            "ok": True,
+        })
+        return out
+
+    fields = sched.split()
+    if len(fields) != 5:
+        return out
+    minutes = _expand_cron_field(fields[0], 0, 59)
+    hours = _expand_cron_field(fields[1], 0, 23)
+    if not minutes or not hours:
+        return out
+
+    # ---- 日期／星期描述 ----
+    date_parts = []
+    if fields[3] != "*":
+        date_parts.append(fields[3] + " 月")
+    if fields[2] != "*":
+        date_parts.append(fields[2] + " 日")
+    dow_desc = _cron_dow_desc(fields[4])
+    if dow_desc:
+        date_parts.append(dow_desc)
+    date_prefix = (" ".join(date_parts) + " ") if date_parts else ""
+    all_day = len(hours) == 24
+
+    def _time_str(h_set, m_set, marks=None) -> str:
+        """marks: {hour: 0/1/-1}，>0 表示翌日、<0 表示前一日"""
+        if len(h_set) == 24 and len(m_set) == 60:
+            return "每分鐘"
+        if len(h_set) == 24:
+            return "每小時 %s 分" % _fmt_num_set(m_set)
+        hs = sorted(h_set)
+        mdesc = _fmt_num_set(m_set)
+        if len(hs) == 1 and len(m_set) == 1:
+            tag = ""
+            if marks:
+                d = marks.get(hs[0], 0)
+                tag = "(翌日)" if d > 0 else ("(前一日)" if d < 0 else "")
+            return "%02d:%02d%s" % (hs[0], list(m_set)[0], tag)
+        if marks and len(hs) <= 6:
+            hs_txt = "、".join(
+                "%02d%s" % (h, "" if marks.get(h, 0) == 0
+                            else ("(翌日)" if marks.get(h, 0) > 0 else "(前一日)"))
+                for h in hs)
+        else:
+            hs_txt = _fmt_num_set(hs)
+        return "%s 時 %s 分" % (hs_txt, mdesc)
+
+    label = date_prefix + _time_str(hours, minutes)
+    out.update({"label": label, "utc": "UTC " + label, "ok": True})
+
+    # ---- 換算到顯示時區 ----
+    off_sys = _tz_offset_hours(_get_system_tz_name())
+    off_tgt = _tz_offset_hours(target_tz)
+    if off_sys is None or off_tgt is None:
+        return out
+    delta = off_tgt - off_sys
+    shift = int(round(delta))
+    if abs(delta - shift) > 0.01:
+        # 非整點時差（例 +05:30）不強行換算，避免誤導
+        return out
+    short = _tz_short_name(target_tz)
+    if shift == 0 or all_day:
+        out["local"] = short + " " + date_prefix + _time_str(hours, minutes)
+        return out
+
+    local_marks = {}
+    cross = False
+    for h in sorted(hours):
+        t = h + shift
+        d = 0
+        while t >= 24:
+            t -= 24
+            d += 1
+        while t < 0:
+            t += 24
+            d -= 1
+        if d:
+            cross = True
+        if t in local_marks:
+            local_marks[t] = max(local_marks[t], d, key=abs)
+        else:
+            local_marks[t] = d
+
+    shifted = set(local_marks.keys())
+    out["local"] = short + " " + date_prefix + _time_str(shifted, minutes, local_marks)
+    # 只有「收斂成範圍顯示、看不出個別跨日」時才需要提醒
+    out["cross_day"] = cross and len(shifted) > 6
+    return out
 
 
 # ------------------------------------------------------------------------------------ #
@@ -348,9 +626,21 @@ async def handle_cron(args, chat_id: str = None, agent_config: dict = None):
         tasks = _parse_cron_lines(lines)
         if not tasks:
             return "📭 目前沒有任何有效的 cron 任務（僅有註解）。"
-        result = "📋 **目前的 Cron 任務**\n\n"
+
+        # 🕐 2026-10-19：明示系統時區，並逐條換算顯示時區（純顯示，不改排程）
+        sys_tz = _get_system_tz_name()
+        sys_off = _fmt_offset(_tz_offset_hours(sys_tz))
+        tgt_off = _fmt_offset(_tz_offset_hours(CRON_DISPLAY_TZ))
+        result = "📋 **目前的 Cron 任務**（共 %d 條）\n\n" % len(tasks)
+        result += "🌐 系統時區：`%s`（UTC%s）— 排程 5 個時間欄位一律以此解析\n" % (sys_tz, sys_off)
+        result += "🕐 每條另附 `%s`（UTC%s）換算。**寫排程時要寫系統時區，不是香港時間**：\n" % (CRON_DISPLAY_TZ, tgt_off)
+        result += "  例：想要 HKT 每天 04:00，要寫 `0 20 * * *`（前一日 20:00 UTC）。\n\n"
         for t in tasks:
-            result += f"`{t['number']}`. `{t['schedule']}` → `{t['command']}`\n"
+            result += "`%s`. `%s` → `%s`\n" % (t['number'], t['schedule'], t['command'])
+            hint = _cron_time_hints(t["schedule"])
+            if hint.get("ok") and hint.get("local"):
+                flag = "（換算後跨日，星期／日期需一併調整）" if hint.get("cross_day") else ""
+                result += "    🕐 %s ｜ %s%s\n" % (hint["local"], hint["utc"], flag)
             # 附上人類可讀說明（若該指令命中 CRON_TASK_DESCRIPTIONS）
             desc = _get_cron_description(t["command"])
             if desc:

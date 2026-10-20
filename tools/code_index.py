@@ -98,6 +98,27 @@ from pathlib import Path
 from mok_token import count_tokens, MOK_max_tokens, truncate_by_token
 
 
+# ===== [B] 修 bug 前置檢查表（debug_context 報告最前面統一印出）=====
+_PREFLIGHT_HEADER = """🧭 **動手前檢查表（preflight）**
+① 動 core/** 或共用檔？→ 先 editlock start，改完 done，不自重啟，回報影響面/回滾/是否重啟
+② 檔名/關鍵詞/路徑含敏感字？→ exec 用中性代號或字串拼接（閘門會擋）
+③ 查 DB？→ 先 .schema 看欄位，別憑印象寫欄名
+④ 比對時間？→ pm2 日誌/伺服器是 UTC，env 標頭有偏移，先換算
+⑤ 錯誤碼？→ 先分類是否 fatal（402＝餘額不足，勿觸發重試風暴）
+⑥ 外部 API 陣列取 [0]？→ 先確認排序與多筆語意、幣別指名
+⑦ 全樹 find/grep？→ 會拉爆 iowait，改用 code_index 定位
+⑧ 刪檔？→ 先 trash.sh 入回收站，禁物理刪除
+⑨ 新增收費/重試路徑？→ 記帳、分類、熔斷先想好
+── 以下為定位結果 ──
+"""
+
+# ===== [C] 最近改動加權：結果排序時優先前置「最近 N 小時改過的檔」=====
+try:
+    _RECENT_HOURS = float(os.environ.get("MOK_CODE_INDEX_RECENT_HOURS", "72") or "0")
+except ValueError:
+    _RECENT_HOURS = 72.0
+_RECENT_BOOST = os.environ.get("MOK_CODE_INDEX_RECENT_BOOST", "1") not in ("0", "false", "False", "off", "no")
+
 # ===== 配置 =====
 MOKAGI_HOME = os.environ.get("MOKAGI_HOME", "mok")
 INDEX_DIRS = [
@@ -660,6 +681,8 @@ def _search_code_locked(query: str, n_results: int = 10, file_filter: str = None
             except Exception as e:
                 logging.warning(f"[code_index] 原文關鍵字後備檢索失敗({tok}): {e}")
 
+    if _RECENT_BOOST and _RECENT_HOURS > 0 and len(out) > 1:
+        out = _boost_recent_files(out)
     return out[:n_results]
 
 
@@ -686,8 +709,99 @@ def get_file_section(filepath: str, start_line: int, end_line: int) -> Optional[
         return None
 
 
+# [A] traceback 定位正則：File "x.py", line N 或 x.py:N
+_TRACEBACK_FILE_LINE_RE = re.compile(
+    r'File "([^"]+)", line ([0-9]+)|([\w./-]+\.(?:py|html)):([0-9]+)'
+)
+
+
+def _boost_recent_files(results: List[Dict]) -> List[Dict]:
+    """[C] 把「最近 _RECENT_HOURS 小時內改動過」的檔案結果前置（stable，組內保持原序）。"""
+    if not results:
+        return results
+    now = time.time()
+    threshold = _RECENT_HOURS * 3600.0
+    mtime_cache: Dict[str, float] = {}
+
+    def is_recent(fp: str) -> bool:
+        if fp not in mtime_cache:
+            try:
+                mtime_cache[fp] = os.path.getmtime(fp)
+            except OSError:
+                mtime_cache[fp] = 0.0
+        return (now - mtime_cache[fp]) < threshold
+
+    return sorted(results, key=lambda d: 0 if is_recent(d["file"]) else 1)
+
+
+def _parse_traceback(query: str) -> Optional[Tuple[str, int]]:
+    """[A] 偵測查詢是否含 traceback 定位資訊，回傳 (filepath, lineno) 或 None。"""
+    if not query:
+        return None
+    m = _TRACEBACK_FILE_LINE_RE.search(query)
+    if not m:
+        return None
+    fp = m.group(1) or m.group(3)
+    ln = m.group(2) or m.group(4)
+    try:
+        lineno = int(ln)
+    except (TypeError, ValueError):
+        return None
+    return fp, lineno
+
+
+def _build_traceback_report(filepath: str, lineno: int, depth: int, n_results: int) -> str:
+    """[A] traceback 直定位：抓指定行前後文、反查所在函數、再補充搜尋呼叫鏈。"""
+    start = max(1, lineno - 30)
+    end = lineno + 30
+    section = get_file_section(filepath, start, end)
+
+    ctx_name = os.path.basename(filepath)
+    if section is not None:
+        full = get_full_file_content(filepath)
+        if full:
+            lines = full.split("\n")
+            for i in range(min(lineno, len(lines)) - 1, -1, -1):
+                ln = lines[i].lstrip()
+                if ln.startswith("async def "):
+                    ctx_name = ln[len("async def "):].split("(")[0].strip()
+                elif ln.startswith("def "):
+                    ctx_name = ln[4:].split("(")[0].strip()
+                elif ln.startswith("class "):
+                    ctx_name = ln[6:].split(":")[0].split("(")[0].strip()
+                else:
+                    continue
+                start = i + 1
+                section = get_file_section(filepath, start, end)
+                break
+
+    report = f"🎯 **Traceback 直定位**：{filepath}:{lineno}\n\n"
+    if section:
+        report += f"📍 所在位置：`{ctx_name}`（第 {start}~{end} 行）\n\n"
+        code = section
+        if len(code.splitlines()) > 200:
+            code = "\n".join(code.splitlines()[:200]) + "\n... (片段過長，已截斷)"
+        report += f"```python\n{code}\n```\n\n"
+    else:
+        report += f"⚠️ 無法讀取 {filepath}（可能已移動或不存在）。\n\n"
+
+    report += "── 補充：相關呼叫鏈搜尋 ──\n\n"
+    report += _build_search_context(ctx_name, depth, n_results)
+    return report
+
+
 def _build_debug_context(query: str, depth: int = 1, n_results: int = 5) -> str:
     """自動收集修 bug 所需的所有相關程式碼上下文，返回結構化報告。"""
+    tb = _parse_traceback(query)
+    if tb:
+        body = _build_traceback_report(tb[0], tb[1], depth, n_results)
+    else:
+        body = _build_search_context(query, depth, n_results)
+    return _PREFLIGHT_HEADER + body
+
+
+def _build_search_context(query: str, depth: int = 1, n_results: int = 5) -> str:
+    """關鍵字搜尋 + 呼叫鏈遞迴（traceback 直定位後的補充搜尋也走這裡）。"""
     import re as _re
     from collections import deque
 
@@ -862,14 +976,20 @@ async def handle_code_index(args, chat_id: str = None, agent_config: Dict = None
     if action == "debug_context":
         if not query:
             return "用法: /code debug_context <錯誤訊息或函數名稱> [深度] [每層結果數]"
-        parts = query.split()
-        base_query = parts[0]
+        # 從尾部解析可選的「深度」「每層結果數」，其餘（含 traceback 字串）保留為查詢主體
+        toks = query.split()
         depth = 1
         n_res = 5
-        if len(parts) > 1 and parts[1].isdigit():
-            depth = int(parts[1])
-        if len(parts) > 2 and parts[2].isdigit():
-            n_res = int(parts[2])
+        tail_nums = []
+        while toks and toks[-1].isdigit() and len(tail_nums) < 2:
+            tail_nums.insert(0, int(toks.pop()))
+        if tail_nums:
+            n_res = tail_nums[-1]
+        if len(tail_nums) > 1:
+            depth = tail_nums[0]
+        base_query = " ".join(toks)
+        if not base_query:
+            return "用法: /code debug_context <錯誤訊息或函數名稱> [深度] [每層結果數]"
         if depth < 0:
             depth = 0
         if n_res < 1:

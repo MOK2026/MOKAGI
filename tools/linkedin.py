@@ -39,6 +39,19 @@ def _agent_profile_dir(agent_config, explicit=None):
     return mok_profile.resolve_profile_dir(explicit=explicit, agent_config=agent_config)
 
 
+def _home_playwright_proxy():
+    """LinkedIn 預設走家機出口；家機不可用回 None（fallback 主機直連）。
+    Playwright 只吃 socks5://（不吃 socks5h），故用 home_proxy(playwright=True)。"""
+    try:
+        sys.path.insert(0, os.path.join(MOK, "tools"))
+        import home_proxy
+        if home_proxy.is_home_ip():
+            return home_proxy.home_proxy(playwright=True)
+    except Exception:
+        pass
+    return None
+
+
 def _call(action, arg="", publish=False, video="", profile_dir=None):
     result = {}
 
@@ -50,7 +63,13 @@ def _call(action, arg="", publish=False, video="", profile_dir=None):
             _spec.loader.exec_module(li_web)
             from playwright.sync_api import sync_playwright
             with sync_playwright() as p:
-                ctx = li_web._ctx(p, profile_dir)
+                os.environ.setdefault("DISPLAY", ":1")
+                ctx = p.chromium.launch_persistent_context(
+                    li_web.profile_dir(profile_dir), headless=False,
+                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                    viewport={"width": 1440, "height": 900},
+                    proxy=_home_playwright_proxy(),
+                )
                 page = ctx.new_page()
                 try:
                     if action == "status":

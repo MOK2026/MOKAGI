@@ -64,6 +64,13 @@ ADMIN_ONLY = (
     '/api/delete_file', '/api/mkdir', '/api/upload', '/api/backup', '/api/eml',
 )
 
+# 2026-10-19 15:46（香港）｜idx｜公開暫存上傳端點：讓未登入訪客與會員都能使用
+#   「講你需要」語音客服與公開首頁貼圖／錄音；這些端點只寫入 _tmp/ 暫存區
+#   （1 小時自動清理，mok_web.py 內另有單檔大小上限），不讀取任何機密資源。
+#   費用仍由既有機制結算：訪客 → guest_usage 額度；會員 → 統一結算扣 balance_tokens。
+#   ⚠ 必須精確匹配：不能沿用 ADMIN_ONLY 的前綴規則，否則 /api/upload 會誤攔 /api/upload_audio。
+PUBLIC_UPLOAD = ('/api/upload_audio', '/api/upload_image', '/api/upload_text')
+
 # 會員可寫（僅限自己房間 .mok/user/<自己帳號>/）的端點；其餘寫入端點仍限 admin
 MEMBER_WRITE = ('/api/create_file', '/api/save_file')
 
@@ -220,6 +227,9 @@ def _guard():
             return _deny('僅能修改自己房間的文件')
         if _excluded(_room_rel(_wp)):
             return _deny('此路徑已永久排除')
+        return None
+    # 2026-10-19 15:46（香港）｜idx｜暫存上傳端點精確放行（不影響其他 admin-only 路徑）
+    if p in PUBLIC_UPLOAD:
         return None
     for a in ADMIN_ONLY:
         if p == a or p.startswith(a + '/') or p.startswith(a + '_'):

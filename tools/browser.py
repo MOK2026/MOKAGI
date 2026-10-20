@@ -1036,6 +1036,18 @@ def _reap_profile_stragglers(profile_dir: str) -> dict:
     return {"success": True, "reaped": len(details), "killed": killed, "details": details}
 
 
+def _home_playwright_proxy():
+    """browser launch 走家機出口（home_ip 旗標）；家機不可用回 None（fallback 主機直連）。
+    Playwright 只吃 socks5://（不吃 socks5h）。"""
+    try:
+        import home_proxy
+        if home_proxy.is_home_ip():
+            return home_proxy.home_proxy(playwright=True)
+    except Exception:
+        pass
+    return None
+
+
 async def _handle_launch(args: str) -> str:
     """啟動 Chromium 瀏覽器（支援 profile=xxx 指定獨立設定檔；多 profile 可並行共存，互不關閉）"""
     # --- 解析 profile 參數：/browser launch profile=wa ---
@@ -1048,8 +1060,14 @@ async def _handle_launch(args: str) -> str:
                 profile_name = token.split("=", 1)[1].strip() or _default_profile
         # 從參數中移除 profile=xxx，避免影響 use_persistent 判斷
         clean_args = " ".join(t for t in clean_args.split() if not t.startswith("profile="))
+    # --- 解析 home_ip 旗標：/browser launch home_ip → 走家機出口（預設關閉，向後相容）---
+    use_home_ip = "home_ip" in clean_args.split()
+    if use_home_ip:
+        clean_args = " ".join(t for t in clean_args.split() if t != "home_ip")
+
     # 統一推導：交由 mok_profile 模組（單一真相來源）；種子複製由下方 _seed_profile_if_needed 處理
     profile_dir = mok_profile.resolve_profile_dir(explicit=profile_name, seed=False)
+    proxy = _home_playwright_proxy() if use_home_ip else None
 
     # 目標 profile 已存在且頁面活著 → 直接切換為活躍實例；絕不關閉其他 profile
     inst = _instances.get(profile_name)
@@ -1118,6 +1136,7 @@ async def _handle_launch(args: str) -> str:
                     profile_dir,
                     headless=False,
                     viewport={"width": 1280, "height": 800},
+                    proxy=proxy,
                     user_agent=(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -1145,6 +1164,7 @@ async def _handle_launch(args: str) -> str:
             launch_opts = {
                 "headless": False,
                 "env": _browser_env(display),
+                "proxy": proxy,
                 "args": [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",

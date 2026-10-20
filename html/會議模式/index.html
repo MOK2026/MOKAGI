@@ -1,1179 +1,743 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>會議模式 — mokagi</title>
-    <script src="/static/vendor/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
-    <script src="/static/vendor/marked.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
-    <script src="/static/vendor/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="/static/vendor/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous">
-    <script src="/static/vendor/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="/static/p0_meeting.css">
-    <style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>會議模式 — mokagi</title>
+<script src="/static/vendor/socket.io.min.js"></script>
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
+<link rel="stylesheet" href="/static/vendor/github-dark.min.css">
+<script src="/static/vendor/highlight.min.js"></script>
+<script src="/static/header_member.js" defer></script>
+<style>
 :root {
-    --bg: #0d1117; --panel: #161b22; --border: #30363d;
-    --accent: #58a6ff; --accent2: #3fb950; --text: #e6edf3;
-    --dim: #8b949e; --danger: #f85149; --warn: #d2991d;
-    --card-spring: #ffb7c5; --card-yue: #b7e4ff; --card-default: #d2a8ff;
+  --bg: #0d1117; --panel: #161b22; --panel2: #1c2128; --border: #30363d;
+  --accent: #58a6ff; --accent2: #3fb950; --accent3: #d2991d; --danger: #f85149;
+  --text: #e6edf3; --dim: #8b949e; --pink: #ff7b9c; --violet: #d2a8ff;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html { height: 100%; }
+html, body { height: 100%; }
 body {
-    background: var(--bg); color: var(--text);
-    font-family: 'Cascadia Code', 'Segoe UI', 'Helvetica Neue', sans-serif;
-    height: 100vh; height: 100dvh; overflow: hidden;
-    display: flex; flex-direction: column;
+  background: var(--bg); color: var(--text); overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  display: flex; flex-direction: column; height: 100vh; height: 100dvh;
 }
-::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
 
-/* ===== 頂部導航列（分頁） ===== */
-.top-nav {
-    flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
-    padding: 6px 10px; background: #161b22; border-bottom: 1px solid var(--border);
-    position: relative; z-index: 100;
+/* ============ 頂欄 ============ */
+.topbar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+  z-index: 50;
 }
-.nav-title { font-size: 13px; font-weight: 700; color: var(--accent); white-space: nowrap; }
-.nav-tabs { display: flex; gap: 5px; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; }
-.nav-tabs::-webkit-scrollbar { display: none; }
-.nav-tab {
-    border: 1px solid var(--border); background: #1c2128; color: var(--dim);
-    padding: 6px 13px; border-radius: 999px; font-size: 13px; cursor: pointer;
-    white-space: nowrap; transition: all .18s; font-family: inherit;
+.topbar .logo { font-size: 15px; font-weight: 800; color: var(--accent); white-space: nowrap; }
+.topbar .member { font-size: 12px; color: var(--dim); }
+.topbar .spacer { flex: 1; }
+.topbar .stat {
+  font-size: 12px; color: var(--dim); background: #0d1117; border: 1px solid var(--border);
+  padding: 4px 11px; border-radius: 999px; white-space: nowrap;
 }
-.nav-tab:hover { background: #21262d; color: var(--text); }
-.nav-tab.active { background: var(--accent); border-color: var(--accent); color: #08121f; font-weight: 700; }
-.nav-right { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.topbar .stat b { color: var(--text); }
+.topbar .icon-btn {
+  background: var(--border); border: none; color: var(--text); padding: 6px 12px;
+  border-radius: 8px; cursor: pointer; font-size: 13px; transition: all .18s; font-family: inherit;
+}
+.topbar .icon-btn:hover { background: var(--accent); color: #08121f; }
 
-/* ===== 頻道下拉（移植自 index.html 的 channelBtn） ===== */
-.chan-group { position: relative; display: inline-flex; align-items: center; }
-.chan-pill {
-    appearance: none; border: 1px solid var(--tone, var(--border));
-    background: rgba(255,255,255,.04); color: var(--text);
-    padding: 6px 13px; border-radius: 999px; font-size: 13px; cursor: pointer;
-    white-space: nowrap; font-family: inherit; transition: all .18s;
-}
-.chan-pill:hover { border-color: var(--tone, var(--accent)); box-shadow: 0 0 0 3px rgba(88,166,255,.12); }
-.header-btns-dropdown {
-    position: absolute; top: calc(100% + 8px); right: 0; min-width: 215px;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    padding: 6px; box-shadow: 0 14px 40px rgba(0,0,0,.6);
-    display: none; flex-direction: column; gap: 3px; z-index: 300;
-}
-.header-btns-dropdown.show { display: flex; }
-.header-dropdown-item {
-    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
-    padding: 9px 12px; border-radius: 8px; border: none; background: transparent;
-    color: var(--text); font-size: 13px; cursor: pointer; font-family: inherit; transition: all .15s;
-}
-.header-dropdown-item:hover { background: #21262d; color: var(--tone, var(--accent)); }
-.header-dropdown-gap { height: 1px; background: var(--border); margin: 4px 6px; }
-
-/* ===== 主容器 ===== */
-.meeting-container { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
-.splitter { flex: 0 0 5px; cursor: col-resize; position: relative; background: transparent; }
+/* ============ 三欄佈局 ============ */
+.layout { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
+.panel { display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+.panel-left { flex: 0 0 var(--w-left, 322px); border-right: 1px solid var(--border); }
+.panel-center { flex: 1 1 auto; background: var(--bg); min-width: 0; }
+.panel-right { flex: 0 0 var(--w-right, 340px); border-left: 1px solid var(--border); }
+.splitter { flex: 0 0 5px; cursor: col-resize; background: transparent; position: relative; }
 .splitter::after {
-    content: ''; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px;
-    background: var(--border); transition: background .2s;
+  content: ''; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px; background: var(--border);
 }
-.splitter:hover::after { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.splitter:hover::after, .splitter.active::after { background: var(--accent); width: 2px; }
 
-/* ===== 左側任務面板 ===== */
-.task-panel {
-    flex: 0 0 var(--pnl-w, 340px); min-width: 0; background: var(--panel);
-    border-right: 1px solid var(--border); display: flex; flex-direction: column;
-    overflow: hidden; min-height: 0; z-index: 10;
+.panel-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--panel2);
 }
-.task-panel-header {
-    flex: 0 0 auto; padding: 9px 12px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between; background: #1c2128;
-}
-.task-panel-header h2 { font-size: 14px; color: var(--accent); display: flex; align-items: center; gap: 6px; }
-.task-panel-header .btn-group { display: flex; gap: 6px; }
-.task-panel-header button, .collapse-btn {
-    background: var(--border); border: none; color: var(--text); padding: 5px 9px;
-    border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .2s; font-family: inherit;
-}
-.task-panel-header button:hover { background: var(--accent); color: #000; }
-.collapse-btn { background: transparent; font-size: 15px; padding: 3px 6px; }
-.collapse-btn:hover { background: var(--border); color: var(--text); }
-.task-panel.collapsed .task-input-area,
-.task-panel.collapsed .task-list,
-.task-panel.collapsed .agent-select-area { display: none; }
-.task-panel.collapsed { flex: 0 0 46px; min-width: 46px; }
-.task-panel.collapsed .task-panel-header { padding: 10px 8px; flex-direction: column; gap: 6px; }
-.task-panel.collapsed .task-panel-header h2 { font-size: 18px; }
-.task-panel.collapsed .task-panel-header h2 span { display: none; }
-.task-panel.collapsed .task-panel-header .btn-group { display: none; }
+.panel-head h2 { font-size: 13.5px; font-weight: 700; color: var(--accent); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.panel-head .hint { font-size: 11px; color: var(--dim); margin-left: auto; }
 
-/* ===== Agent 選擇區 ===== */
-.agent-select-area { flex: 0 0 auto; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-.agent-select-area > label {
-    font-size: 12px; color: var(--dim); cursor: pointer;
-    display: flex; align-items: center; gap: 6px; user-select: none;
+/* ============ 左欄：agent 名片 ============ */
+.agent-search { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.agent-search input {
+  width: 100%; background: #0d1117; border: 1px solid var(--border); color: var(--text);
+  padding: 8px 12px; border-radius: 8px; font-size: 13px; outline: none; font-family: inherit;
 }
-.agent-select-area.collapsed { padding-bottom: 6px; }
-.agent-select-area.collapsed label .collapse-arrow { transform: rotate(-90deg); }
-.collapse-arrow { font-size: 10px; transition: transform .25s; }
-.agent-select-content {
-    display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
-    overflow: hidden auto; transition: max-height .35s ease, opacity .3s;
-    max-height: 30vh; opacity: 1;
-}
-.agent-select-area.collapsed .agent-select-content { max-height: 0; opacity: 0; margin-bottom: 0; }
-.agent-checkboxes { display: flex; flex-wrap: wrap; gap: 6px; }
-.agent-chip {
-    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
-    border: 1px solid var(--border); border-radius: 999px; font-size: 12px;
-    cursor: pointer; background: #0d1117; color: var(--dim); transition: all .18s; user-select: none;
-}
-.agent-chip:hover { border-color: var(--accent); }
-.agent-chip.checked { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
-.agent-chip .agent-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--card-default); flex: 0 0 auto; }
-.agent-chip.spring .agent-dot { background: var(--card-spring); }
-.agent-chip.yue .agent-dot { background: var(--card-yue); }
-.agent-chip.spring.checked { background: #e8537a; border-color: #e8537a; color: #fff; }
-.agent-chip.yue.checked { background: #4a9fd8; border-color: #4a9fd8; color: #fff; }
-.analyzer-select { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
-.analyzer-select select {
-    flex: 1 1 auto; background: #0d1117; color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 5px 8px; font-size: 12px; font-family: inherit;
-}
+.agent-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(88,166,255,.12); }
 
-/* ===== 任務輸入 ===== */
-.task-input-area { flex: 0 0 auto; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-.task-input-area textarea {
-    width: 100%; height: 66px; resize: vertical; background: #0d1117; color: var(--text);
-    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
-    font-size: 12px; font-family: inherit; line-height: 1.5; outline: none;
-}
-.task-input-area textarea:focus { border-color: var(--accent); }
-.btn-row { display: flex; gap: 6px; margin-top: 6px; }
-.btn-primary, .btn-secondary, .btn-run-all {
-    flex: 1 1 0; border: none; border-radius: 8px; padding: 8px 10px;
-    font-size: 13px; font-weight: 700; cursor: pointer; transition: all .18s; font-family: inherit;
-}
-.btn-primary { background: var(--accent); color: #08121f; }
-.btn-secondary { background: var(--border); color: var(--text); }
-.btn-run-all { background: var(--accent2); color: #08121f; width: 100%; margin-top: 6px; }
-.btn-primary:hover, .btn-secondary:hover, .btn-run-all:hover { filter: brightness(1.15); }
-.btn-run-all:disabled { opacity: .5; cursor: not-allowed; }
-.action-hints {
-    margin-top: 6px; padding: 7px 9px; background: #1a1f27; border: 1px solid var(--border);
-    border-radius: 8px; font-size: 11px; color: var(--dim); line-height: 1.6;
-}
-.action-hints div { display: flex; align-items: flex-start; gap: 4px; }
-.action-hints b { color: var(--text); }
-
-/* ===== 任務列表 ===== */
-.task-list {
-    flex: 1 1 auto; overflow-y: auto; padding: 10px;
-    display: flex; flex-direction: column; gap: 8px; min-height: 0;
-}
-.task-item {
-    padding: 10px 12px; background: var(--bg); border-radius: 8px;
-    border: 1px solid var(--border); font-size: 12px; transition: all .3s;
-}
-.task-item.running { border-color: var(--warn); animation: pulse 1.5s infinite; }
-.task-item.done { border-color: var(--accent2); opacity: .85; }
-.task-item-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
-.task-agent-tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #30363d; color: var(--text); }
-.task-agent-tag.spring { background: #e8537a33; color: var(--card-spring); }
-.task-agent-tag.yue { background: #4a9fd833; color: var(--card-yue); }
-.task-agent-tag.default { background: #d2a8ff33; color: var(--card-default); }
-.task-desc { color: var(--dim); line-height: 1.5; margin-bottom: 6px; }
-.task-status { font-size: 11px; color: var(--dim); margin-left: auto; }
-
-/* ===== 中央會議室 ===== */
-.meeting-room {
-    flex: 1 1 auto; display: flex; flex-direction: column;
-    min-width: 0; min-height: 0; overflow: hidden;
-}
-.meeting-header {
-    flex: 0 0 auto; padding: 9px 12px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 8px; background: #1c2128;
-}
-.meeting-header .title { font-size: 14px; font-weight: 700; color: var(--accent); }
-.meeting-header .collapse-btn {
-    background: transparent; border: none; color: var(--dim); font-size: 15px;
-    padding: 3px 8px; cursor: pointer; transition: all .2s;
-}
-.meeting-header .collapse-btn:hover { color: var(--text); background: var(--border); }
-.meeting-status {
-    margin-left: auto; font-size: 11px; color: var(--dim); background: #0d1117;
-    border: 1px solid var(--border); padding: 3px 9px; border-radius: 999px;
-}
-.meeting-room.collapsed { flex: 0 0 auto; }
-.meeting-room.collapsed .agent-cards-grid { display: none; }
-.meeting-room.collapsed .meeting-header { border-bottom: none; }
-.agent-cards-grid {
-    flex: 1 1 auto; overflow-y: auto; padding: 12px; display: grid; gap: 12px;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-content: start;
-}
+.agent-list { flex: 1 1 auto; overflow-y: auto; padding: 10px; }
 .agent-card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    display: flex; flex-direction: column; overflow: hidden; min-height: 120px;
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px; margin-bottom: 7px;
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 10px;
+  cursor: pointer; transition: all .15s; position: relative;
 }
-.agent-card.running { border-color: var(--warn); }
-.agent-card.done { border-color: var(--accent2); }
-.agent-card-header {
-    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-    background: #1c2128; border-bottom: 1px solid var(--border);
+.agent-card:hover { border-color: #484f58; background: #21262d; }
+.agent-card.selected { border-color: var(--accent); background: rgba(88,166,255,.08); box-shadow: 0 0 0 2px rgba(88,166,255,.15); }
+.agent-avatar {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: 20px; background: var(--avatar-bg, #30363d);
+  border: 1px solid var(--border);
 }
-.agent-card-header .agent-name { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; }
-.agent-card-header .agent-dot-card { width: 10px; height: 10px; border-radius: 50%; background: var(--card-default); }
-.agent-card.spring .agent-dot-card { background: var(--card-spring); }
-.agent-card.yue .agent-dot-card { background: var(--card-yue); }
-.agent-card .agent-status { font-size: 10px; padding: 2px 8px; border-radius: 999px; margin-left: auto; }
-.agent-card .agent-status.idle { background: #30363d; color: var(--dim); }
-.agent-card .agent-status.running { background: #d2991d33; color: var(--warn); }
-.agent-card .agent-status.done { background: #3fb95033; color: var(--accent2); }
-.card-collapse-btn { cursor: pointer; font-size: 12px; margin-left: 6px; user-select: none; transition: transform .3s; }
-.agent-card-output {
-    flex: 1 1 auto; padding: 10px 12px; font-size: 12px; line-height: 1.6;
-    overflow-y: auto; max-height: 46vh; word-break: break-word;
+.agent-info { flex: 1 1 auto; min-width: 0; }
+.agent-info .name { font-size: 13.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.agent-info .name .name-text { overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+.agent-info .name .post { flex: 0 0 auto; }
+.agent-info .name .post {
+  font-size: 10.5px; font-weight: 500; color: var(--accent2); background: rgba(63,185,80,.12);
+  padding: 1px 7px; border-radius: 999px; white-space: nowrap;
 }
-.agent-card-output pre {
-    background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px; overflow-x: auto; font-size: 11px;
+.agent-info .desc { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.agent-status-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #484f58; margin-right: 2px; }
+.agent-status-dot.running { background: var(--accent3); box-shadow: 0 0 6px var(--accent3); animation: pulse 1.2s infinite; }
+.agent-status-dot.idle { background: #484f58; }
+.agent-card .check {
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--border);
+  display: flex; align-items: center; justify-content: center; font-size: 12px; color: transparent; transition: all .15s;
 }
-.streaming-cursor {
-    display: inline-block; width: 7px; height: 13px; background: var(--accent);
-    animation: blink .8s infinite; vertical-align: text-bottom;
-}
-.placeholder-text {
-    text-align: center; color: var(--dim); font-size: 13px; line-height: 1.9;
-    padding: 32px 16px; grid-column: 1 / -1;
-}
-.placeholder-text .icon { font-size: 44px; display: block; margin-bottom: 10px; opacity: .7; }
+.agent-card.selected .check { background: var(--accent); border-color: var(--accent); color: #08121f; }
 
-/* ===== 分頁切換 ===== */
-body[data-page="tasks"] #meetingRoom { display: none; }
-body[data-page="tasks"] .splitter { display: none; }
-body[data-page="room"] #taskPanel { display: none; }
-body[data-page="room"] .splitter { display: none; }
+.agent-footer { flex: 0 0 auto; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--panel2); }
+.agent-footer .sel-count { font-size: 12px; color: var(--dim); margin-bottom: 8px; }
+.agent-footer .sel-count b { color: var(--accent); }
+.agent-footer label { font-size: 12px; color: var(--dim); display: block; margin-bottom: 4px; }
+.agent-footer select {
+  width: 100%; background: #0d1117; border: 1px solid var(--border); color: var(--text);
+  padding: 8px 10px; border-radius: 8px; font-size: 13px; outline: none; font-family: inherit;
+}
+.agent-footer select:focus { border-color: var(--accent); }
 
-/* ===== 舊模式選單：保留 DOM 供原 JS 使用，但不顯示 ===== */
-.mode-selector-btn, .mode-panel { display: none !important; }
+/* ============ 中欄：對話框 ============ */
+.chat-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel);
+}
+.chat-head .title { font-size: 14px; font-weight: 700; }
+.chat-head .status { font-size: 12px; color: var(--dim); background: #0d1117; border: 1px solid var(--border); padding: 3px 10px; border-radius: 999px; }
+.chat-head .participants { display: flex; gap: -6px; margin-left: auto; align-items: center; }
+.chat-head .participants .p-avatar {
+  width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; font-size: 13px; border: 2px solid var(--panel); margin-left: -7px;
+  background: var(--avatar-bg, #30363d);
+}
+.chat-head .participants .p-avatar:first-child { margin-left: 0; }
 
-/* ===== Toast ===== */
+.chat-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.chat-empty {
+  margin: auto; text-align: center; color: var(--dim); font-size: 14px; line-height: 2.2; max-width: 460px;
+}
+.chat-empty .icon { font-size: 52px; display: block; margin-bottom: 12px; opacity: .8; }
+
+.msg { display: flex; flex-direction: column; max-width: 78%; animation: fadeUp .25s ease; }
+.msg.sys { align-self: center; max-width: 90%; text-align: center; }
+.msg.sys .sys-pill {
+  display: inline-block; background: var(--panel); border: 1px solid var(--border); color: var(--dim);
+  padding: 4px 14px; border-radius: 999px; font-size: 11.5px; margin: 0 auto;
+}
+.msg .msg-head { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+.msg .msg-head .who { font-size: 12px; font-weight: 700; }
+.msg .msg-head .when { font-size: 10.5px; color: var(--dim); }
+.msg .bubble {
+  padding: 10px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.65;
+  word-break: break-word; white-space: pre-wrap;
+}
+.msg.agent { align-self: flex-start; }
+.msg.agent .bubble { background: var(--panel2); border: 1px solid var(--border); border-top-left-radius: 4px; }
+.msg.agent .msg-head { flex-direction: row; }
+.msg.user { align-self: flex-end; }
+.msg.user .msg-head { flex-direction: row-reverse; }
+.msg.user .bubble { background: var(--accent); color: #08121f; border-top-right-radius: 4px; }
+.msg .bubble.markdown { background: var(--panel2); border: 1px solid var(--border); }
+.msg .bubble.markdown pre { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow-x: auto; font-size: 11.5px; }
+.msg .bubble.markdown code { font-family: 'Cascadia Code', monospace; font-size: 12px; }
+.msg .bubble.markdown h1,.msg .bubble.markdown h2,.msg .bubble.markdown h3 { margin: 8px 0 4px; font-size: 14px; }
+.msg .bubble.markdown ul,.msg .bubble.markdown ol { padding-left: 20px; margin: 4px 0; }
+.msg .bubble.markdown p { margin: 4px 0; }
+.msg .bubble.markdown table { border-collapse: collapse; margin: 6px 0; }
+.msg .bubble.markdown th,.msg .bubble.markdown td { border: 1px solid var(--border); padding: 4px 8px; font-size: 12px; }
+.stream-cursor { display: inline-block; width: 7px; height: 14px; background: var(--accent); animation: blink .8s infinite; vertical-align: text-bottom; }
+
+/* ============ 輸入區 ============ */
+.chat-input { flex: 0 0 auto; padding: 10px 14px 14px; background: var(--panel); border-top: 1px solid var(--border); }
+.action-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.action-btn {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); cursor: pointer;
+  font-size: 13.5px; font-weight: 700; font-family: inherit; transition: all .18s; color: var(--text); background: var(--panel2);
+}
+.action-btn:hover { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(88,166,255,.1); }
+.action-btn.primary { background: var(--accent); border-color: var(--accent); color: #08121f; }
+.action-btn.primary:hover { filter: brightness(1.08); }
+.action-btn.secondary { background: rgba(210,168,255,.1); border-color: var(--violet); color: var(--violet); }
+.action-btn.secondary:hover { background: rgba(210,168,255,.2); }
+.action-btn:disabled { opacity: .45; cursor: not-allowed; }
+.action-btn .sub { font-size: 10px; font-weight: 400; opacity: .75; display: block; }
+.input-row { display: flex; gap: 8px; align-items: flex-end; }
+.input-row textarea {
+  flex: 1; background: #0d1117; border: 1px solid var(--border); color: var(--text);
+  padding: 11px 13px; border-radius: 12px; font-size: 13.5px; resize: none; min-height: 46px;
+  max-height: 140px; outline: none; font-family: inherit; line-height: 1.5;
+}
+.input-row textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(88,166,255,.12); }
+.input-row .send-btn {
+  flex: 0 0 auto; background: var(--accent); border: none; color: #08121f; font-size: 18px;
+  width: 46px; height: 46px; border-radius: 12px; cursor: pointer; transition: all .18s;
+}
+.input-row .send-btn:hover { filter: brightness(1.1); }
+.input-row .send-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ============ 右欄：報告 ============ */
+.report-list { flex: 1 1 auto; overflow-y: auto; padding: 10px; }
+.report-empty { margin: auto; text-align: center; color: var(--dim); font-size: 13px; line-height: 2; padding: 30px 16px; }
+.report-empty .icon { font-size: 44px; display: block; margin-bottom: 10px; opacity: .7; }
+.report-card { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: var(--panel2); overflow: hidden; }
+.report-card .rc-head {
+  display: flex; align-items: center; gap: 9px; padding: 9px 11px; cursor: pointer; transition: background .15s;
+}
+.report-card .rc-head:hover { background: #21262d; }
+.report-card .rc-head .avatar { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; background: var(--avatar-bg, #30363d); }
+.report-card .rc-head .meta { flex: 1; min-width: 0; }
+.report-card .rc-head .meta .name { font-size: 12.5px; font-weight: 700; }
+.report-card .rc-head .meta .when { font-size: 10.5px; color: var(--dim); }
+.report-card .rc-head .arrow { color: var(--dim); font-size: 11px; transition: transform .2s; }
+.report-card.open .rc-head .arrow { transform: rotate(90deg); }
+.report-card .rc-body { display: none; padding: 10px 12px; border-top: 1px solid var(--border); max-height: 52vh; overflow-y: auto; font-size: 12.5px; line-height: 1.6; }
+.report-card.open .rc-body { display: block; }
+.report-card .rc-body pre { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 9px; overflow-x: auto; font-size: 11px; }
+.report-card .rc-body code { font-family: 'Cascadia Code', monospace; font-size: 11.5px; }
+.report-card .rc-body h1,.report-card .rc-body h2,.report-card .rc-body h3 { margin: 8px 0 4px; font-size: 13px; }
+.report-card .rc-body ul,.report-card .rc-body ol { padding-left: 18px; margin: 4px 0; }
+.report-card .rc-body p { margin: 4px 0; }
+
+/* ============ Toast ============ */
 .toast {
-    position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
-    background: var(--accent); color: #08121f; padding: 10px 24px; border-radius: 999px;
-    font-size: 14px; font-weight: 700; z-index: 2000; opacity: 0;
-    transition: opacity .3s; pointer-events: none; max-width: 86vw;
+  position: fixed; bottom: 34px; left: 50%; transform: translateX(-50%);
+  background: var(--accent); color: #08121f; padding: 11px 26px; border-radius: 999px;
+  font-size: 14px; font-weight: 700; z-index: 999; opacity: 0; transition: opacity .3s;
+  pointer-events: none; max-width: 86vw; box-shadow: 0 8px 30px rgba(0,0,0,.5);
 }
 .toast.show { opacity: 1; }
 
-@keyframes pulse { 0% { opacity: 1; } 50% { opacity: .6; } 100% { opacity: 1; } }
-@keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
-/* ===== 響應式 ===== */
+/* ============ 響應式 ============ */
 @media (max-width: 900px) {
-    .agent-cards-grid { grid-template-columns: 1fr; padding: 8px; gap: 8px; }
+  .layout { flex-direction: column; }
+  .panel-left { flex: 0 0 34vh; border-right: none; border-bottom: 1px solid var(--border); }
+  .panel-right { flex: 0 0 32vh; border-left: none; border-top: 1px solid var(--border); }
+  .splitter { display: none; }
+  .msg { max-width: 92%; }
 }
-@media (max-width: 768px) {
-    .top-nav { padding: 5px 8px; gap: 6px; }
-    .nav-title { display: none; }
-    .nav-tab { padding: 5px 10px; font-size: 12px; }
-    .meeting-container { flex-direction: column; }
-    .splitter { display: none !important; }
-    .task-panel { flex: 1 1 auto; width: 100%; border-right: none; min-height: 0; }
-    .task-panel.collapsed { flex: 0 0 auto; }
-    .meeting-room { flex: 1 1 auto; min-height: 0; }
-    .agent-card-output { max-height: none; }
-    .agent-select-content { max-height: 22vh; }
-    .task-input-area textarea { height: 58px; }
-}
-
-
-/* ===== 分頁：單欄時置中加寬，充分利用寬螢幕 ===== */
-body[data-page="tasks"] .meeting-container { justify-content: center; }
-body[data-page="tasks"] .task-panel { flex: 1 1 auto; max-width: 1040px; border-right: none; }
-body[data-page="room"] .meeting-room { flex: 1 1 auto; }
-.agent-select-content { max-height: 24vh; }
-
-/* ===== 空狀態垂直居中，避免大片空洞 ===== */
-.task-list .placeholder-text, .agent-cards-grid .placeholder-text { margin: auto 0; }
-.task-panel-header h2 span, .meeting-header .title { white-space: nowrap; }
 </style>
-    <script src="/static/header_member.js" defer></script>
 </head>
-<body data-page="both">
-<!-- ===== 頂部導航列（分頁 + 頻道） ===== -->
-<nav class="top-nav">
-    <span class="nav-title">🏛️ 會議模式</span>
-    <span id="headerMemberName" class="nav-title" style="margin-left:10px;">載入中…</span>
-    <div class="nav-tabs" id="navTabs">
-        <button class="nav-tab" data-page="tasks">📋 任務分派</button>
-        <button class="nav-tab" data-page="room">📊 會議室</button>
-        <button class="nav-tab" data-page="both">🖥️ 雙欄並排</button>
+<body>
+<!-- ===== 頂欄 ===== -->
+<header class="topbar">
+  <span class="logo">🏛️ 會議模式</span>
+  <span class="member" id="headerMemberName">載入中…</span>
+  <span class="spacer"></span>
+  <span class="stat">👥 已選 <b id="statSel">0</b> 位</span>
+  <span class="stat" id="statStatus">🟢 待命</span>
+  <button class="icon-btn" onclick="location.href='/'" title="回主控台">🏠 主控台</button>
+  <button class="icon-btn" onclick="clearAll()" title="清空會議">🗑 清空</button>
+</header>
+
+<!-- ===== 三欄佈局 ===== -->
+<main class="layout">
+
+  <!-- 左欄：Agent 名片 -->
+  <aside class="panel panel-left" id="panelLeft">
+    <div class="panel-head"><h2>👥 參與會議的 Agent</h2><span class="hint" id="agentCount"></span></div>
+    <div class="agent-search"><input id="agentSearch" type="text" placeholder="🔍 搜尋 Agent（名稱／職位／描述）…"></div>
+    <div class="agent-list" id="agentList"></div>
+    <div class="agent-footer">
+      <div class="sel-count">已勾選 <b id="selCount">0</b> 位參與者</div>
+      <label>🧠 總指揮（分析並指派）</label>
+      <select id="commanderSelect"><option value="">-- 選擇總指揮 --</option></select>
     </div>
-    <div class="nav-right">
-        <span class="chan-group" id="channelGroup"><button id="channelBtn" class="chan-pill" style="--tone:#4ec9b0;" title="頻道" aria-haspopup="true" aria-expanded="false">📡 頻道 ▾</button><div class="header-btns-dropdown" id="channelDropdown"><button id="roomBtn" class="header-dropdown-item" style="--tone:#4ec9b0;" onclick="location.href='/index.html'">🏠 房間</button><button id="meetingBtn" class="header-dropdown-item" style="--tone:#4ec9b0;" onclick="location.href='/會議模式'">📋 會議</button><button id="gameBtn" class="header-dropdown-item" style="--tone:#ffb84d;" onclick="location.href='game'">🎮 game</button><button id="live3Btn" class="header-dropdown-item" style="--tone:#e06c9f;" onclick="location.href='/report/病毒引擎/直播房3/index.html'">🎬 直播房3</button><button id="social2Btn" class="header-dropdown-item" style="--tone:#4ea3ff;" onclick="location.href='/report/春/mokagi社交平台2/index.html'">🌐 mokagi社交平台2</button></div></span>
+  </aside>
+
+  <div class="splitter" id="splitL"></div>
+
+  <!-- 中欄：對話框 -->
+  <section class="panel panel-center" id="panelCenter">
+    <div class="chat-head">
+      <span class="title">📋 會議進行中</span>
+      <span class="status" id="chatStatus">🟢 待命</span>
+      <div class="participants" id="participants"></div>
     </div>
-</nav>
-
-<div class="meeting-container">
-    <!-- ===== 左側任務面板 ===== -->
-    <div class="task-panel" id="taskPanel">
-        <div class="task-panel-header">
-            <h2><button class="collapse-btn" onclick="toggleTaskPanel()" title="摺疊/展開">◀</button> <span>🏛️ 會議控制台</span></h2>
-            <div class="btn-group">
-                <button onclick="location.href='/'" title="回主控台">🏠</button>
-                <button id="btnClearTasks" title="清除全部">🗑</button>
-            </div>
-        </div>
-
-        <!-- Agent 選擇區 -->
-        <div class="agent-select-area" id="agentSelectArea">
-            <label onclick="toggleAgentSelect()">📋 參與會議的 Agent <span class="collapse-arrow">▼</span></label>
-            <div class="agent-select-content">
-                <div class="agent-checkboxes" id="agentCheckboxes">
-                    <!-- 動態生成 -->
-                </div>
-                <div class="analyzer-select">
-                    <label>🧠 總指揮：</label>
-                    <select id="analyzerSelect">
-                        <!-- 動態生成 -->
-                    </select>
-                </div>
-            </div>
-        </div>
-
-        <!-- 任務輸入 -->
-        <div class="task-input-area">
-            <textarea id="meetingInput" placeholder="輸入會議總任務…
-例如：建立一個電商網站，包含首頁、商品頁、購物車、結帳流程"></textarea>
-            <div class="btn-row">
-                <button class="btn-primary" id="btnAnalyze" title="由總AI分析任務，自動拆解並分派給各Agent">🧠 分析分工</button>
-                <button class="btn-secondary" id="btnQuickDraft" title="不經分析，直接將任務派發給已選Agent">⚡ 快速啟動</button>
-            </div>
-            <button class="btn-run-all" id="btnRunAll" disabled title="所有已選Agent同時並行處理任務">🚀 全部並行執行</button>
-            <div class="action-hints">
-                <div>🧠 <b>分析分工</b>：總AI分析任務，自動拆解分派給各 Agent</div>
-                <div>⚡ <b>快速啟動</b>：不經分析，直接派發給已選 Agent</div>
-                <div>🚀 <b>全部並行執行</b>：所有已選 Agent 同時並行處理</div>
-            </div>
-        </div>
-
-        <!-- 分工任務列表 -->
-        <div class="task-list" id="taskList">
-            <div class="placeholder-text">
-                <span class="icon">🏛️</span>
-                選擇 Agent → 輸入總體任務<br>讓總 AI 分析並分工<br>各 Agent 並行處理 ✨
-            </div>
-        </div>
+    <div class="chat-body" id="chatBody">
+      <div class="chat-empty" id="chatEmpty">
+        <span class="icon">🏛️</span>
+        <b>開始一場多 Agent 會議</b><br>
+        ① 在左側勾選參與的 Agent（可搜尋）<br>
+        ② 選擇「總指揮」或直接並行<br>
+        ③ 在下方輸入總任務，點擊派發
+      </div>
     </div>
-
-    <div class="splitter" id="splitter" title="拖曳調整寬度"></div>
-
-    <!-- ===== 中央會議室 ===== -->
-    <div class="meeting-room" id="meetingRoom">
-        <div class="meeting-header">
-            <span class="title">📊 會議室 — 即時輸出</span>
-            <button class="collapse-btn" onclick="toggleMeetingRoom()" title="摺疊/展開">▼</button>
-            <span class="meeting-status" id="meetingStatus">🟢 待命中</span>
-        </div>
-        <div class="agent-cards-grid" id="agentCardsGrid">
-            <div class="placeholder-text" id="roomPlaceholder">
-                <span class="icon">🏢</span>
-                選擇左側 Agent 並分析分工<br>各 Agent 的輸出將在此即時顯示
-            </div>
-        </div>
+    <div class="chat-input">
+      <div class="action-row">
+        <button class="action-btn secondary" id="btnParallel" title="所有已選 Agent 直接做同一件事，同時並行">
+          ⚡ 並行同一工作 <span class="sub">全部 Agent 一起做</span>
+        </button>
+        <button class="action-btn primary" id="btnCommander" title="由總指揮分析任務，自動拆解並指派給各 Agent">
+          🧠 總指揮分析並指派 <span class="sub">先分析、再分工</span>
+        </button>
+      </div>
+      <div class="input-row">
+        <textarea id="taskInput" rows="1" placeholder="輸入會議總任務…&#10;例：建立一個電商網站，包含首頁、商品頁、購物車、結帳流程"></textarea>
+        <button class="send-btn" id="btnSend" title="送出（Shift+Enter）">➤</button>
+      </div>
     </div>
-</div>
+  </section>
 
-<!-- ===== 右下角模式選擇器 ===== -->
-<button class="mode-selector-btn" id="modeBtn" title="切換模式">⚙</button>
-<div class="mode-panel" id="modePanel">
-    <button class="mode-item" data-mode="stretch">
-        <span class="mode-icon">🧘</span> 伸展思考
-        <span class="mode-badge">未上市</span>
-    </button>
-    <button class="mode-item" data-mode="fast">
-        <span class="mode-icon">⚡</span> 快速模式
-        <span class="mode-badge">未上市</span>
-    </button>
-    <button class="mode-item" data-mode="document">
-        <span class="mode-icon">📄</span> 文件模式
-        <span class="mode-badge">未上市</span>
-    </button>
-    <button class="mode-item active" data-mode="meeting">
-        <span class="mode-icon">🏛️</span> 會議模式
-        <span class="mode-badge">當前</span>
-    </button>
-    <button class="mode-item" data-mode="custom">
-        <span class="mode-icon">🔮</span> ...模式
-        <span class="mode-badge">敬請期待</span>
-    </button>
-</div>
+  <div class="splitter" id="splitR"></div>
 
-<!-- Toast -->
+  <!-- 右欄：報告 -->
+  <aside class="panel panel-right" id="panelRight">
+    <div class="panel-head">
+      <h2>📑 各 Agent 報告</h2>
+      <span class="hint" id="reportHint"></span>
+      <button class="icon-btn" onclick="exportReports()" title="匯出全部報告為 Markdown" style="margin-left:auto;">⬇ 匯出</button>
+    </div>
+    <div class="report-list" id="reportList">
+      <div class="report-empty"><span class="icon">📄</span>暫無報告<br>執行會議後，各 Agent 產出將歸檔於此</div>
+    </div>
+  </aside>
+
+</main>
+
 <div class="toast" id="toast"></div>
 
 <script>
+'use strict';
 // ==================== 全域狀態 ====================
-const socket = io({ transports: ['polling'] });  // [P1-9 2026-10-04 稚] 只走 polling
-let agentList = [];
-let agentMeta = {};
+const socket = io({ transports: ['polling'] });
+let agentList = [];            // [{name, icon, post, desc, tags, is_running}]
 let selectedAgents = new Set();
-let tasks = [];
+let tasks = [];                // [{id, agent, task, status}]
+let reports = {};              // agent -> {output, ts}
+let activeStreams = {};        // agent -> {bubble, acc}
 let taskIdCounter = 0;
-let agentCardMap = {};  // agentName → cardId
-let agentOutputs = {};  // cardId → accumulated text
-let currentMode = 'meeting';
+let isBusy = false;
 
 // ==================== DOM ====================
-const $agentCheckboxes = document.getElementById('agentCheckboxes');
-const $analyzerSelect = document.getElementById('analyzerSelect');
-const $meetingInput = document.getElementById('meetingInput');
-const $btnAnalyze = document.getElementById('btnAnalyze');
-const $btnQuickDraft = document.getElementById('btnQuickDraft');
-const $btnRunAll = document.getElementById('btnRunAll');
-const $btnClearTasks = document.getElementById('btnClearTasks');
-const $taskList = document.getElementById('taskList');
-const $agentCardsGrid = document.getElementById('agentCardsGrid');
-const $roomPlaceholder = document.getElementById('roomPlaceholder');
-const $meetingStatus = document.getElementById('meetingStatus');
-const $modeBtn = document.getElementById('modeBtn');
-const $modePanel = document.getElementById('modePanel');
-const $toast = document.getElementById('toast');
-const $agentSelectArea = document.getElementById('agentSelectArea');
+const $ = id => document.getElementById(id);
+const $agentList = $('agentList'), $agentSearch = $('agentSearch'),
+      $commander = $('commanderSelect'), $chatBody = $('chatBody'),
+      $taskInput = $('taskInput'), $reportList = $('reportList'),
+      $participants = $('participants'), $chatStatus = $('chatStatus'),
+      $statStatus = $('statStatus'), $toast = $('toast');
 
-// ==================== Agent 選擇區摺疊 ====================
-function toggleAgentSelect() {
-    $agentSelectArea.classList.toggle('collapsed');
-}
-// 手機版預設摺疊 Agent 選擇區（節省空間，避免擠壓任務列表）
-if (window.innerWidth <= 768) $agentSelectArea.classList.add('collapsed');
+// ==================== 工具 ====================
+function esc(t) { const d = document.createElement('div'); d.textContent = (t == null ? '' : String(t)); return d.innerHTML; }
+function hashHue(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0; return h % 360; }
+function avatarBg(name) { return `hsl(${hashHue(name)}, 62%, 42%)`; }
+function nowTime() { const d = new Date(); return d.toTimeString().slice(0,5); }
+function showToast(msg) { $toast.textContent = msg; $toast.classList.add('show'); setTimeout(() => $toast.classList.remove('show'), 2600); }
 
-// ==================== 面板摺疊 ====================
-function toggleTaskPanel() {
-    const panel = document.getElementById("taskPanel");
-    const room = document.getElementById("meetingRoom");
-    const btn = panel.querySelector(".task-panel-header .collapse-btn");
-    panel.classList.toggle("collapsed");
-    if (panel.classList.contains("collapsed")) {
-        btn.textContent = "▶";
-        // 收合左側 → 中央會議室填滿
-        room.style.flex = "1 1 0%";
-    } else {
-        btn.textContent = "◀";
-        room.style.flex = "";
-        // 若會議室已收合 → 左側面板填滿
-        if (room.classList.contains("collapsed")) {
-            panel.style.flex = "1 1 0%";
-        }
-    }
+function mdRender(text) {
+  if (window.marked && window.DOMPurify) {
+    try { return window.DOMPurify.sanitize(window.marked.parse(String(text||''), {gfm:true, breaks:true}), {USE_PROFILES:{html:true}}); }
+    catch(e) { /* fallthrough */ }
+  }
+  return esc(text).replace(/\n/g, '<br>');
 }
 
-function toggleMeetingRoom() {
-    const room = document.getElementById("meetingRoom");
-    const panel = document.getElementById("taskPanel");
-    const btn = room.querySelector(".meeting-header .collapse-btn");
-    room.classList.toggle("collapsed");
-    if (room.classList.contains("collapsed")) {
-        btn.textContent = "▲";
-        // 收合中央 → 左側面板填滿
-        panel.style.flex = "1 1 0%";
-    } else {
-        btn.textContent = "▼";
-        panel.style.flex = "";
-        // 若左側面板已收合 → 中央會議室填滿
-        if (panel.classList.contains("collapsed")) {
-            room.style.flex = "1 1 0%";
-        }
-    }
-}
-
-// ==================== 卡片輸出摺疊 ====================
-function toggleCardOutput(cardId) {
-    const card = document.getElementById(cardId);
-    if (card) card.classList.toggle('collapsed');
-}
-// ==================== Toast ====================
-let toastTimer;
-function showToast(msg, duration = 2000) {
-    clearTimeout(toastTimer);
-    $toast.textContent = msg;
-    $toast.classList.add('show');
-    toastTimer = setTimeout(() => $toast.classList.remove('show'), duration);
-}
-
-// ==================== 模式選擇器 ====================
-$modeBtn.addEventListener('click', () => {
-    $modePanel.classList.toggle('show');
-    $modeBtn.classList.toggle('active');
-});
-
-document.querySelectorAll('.mode-item').forEach(item => {
-    item.addEventListener('click', function() {
-        const mode = this.dataset.mode;
-        document.querySelectorAll('.mode-item').forEach(i => i.classList.remove('active'));
-        this.classList.add('active');
-        currentMode = mode;
-
-        // 更新按鈕圖標
-        const icons = { stretch: '🧘', fast: '⚡', document: '📄', meeting: '🏛️', custom: '🔮' };
-        $modeBtn.textContent = icons[mode] || '⚙';
-
-        if (mode === 'meeting') {
-            showToast('🏛️ 已切換到會議模式');
-        } else {
-            showToast(`🔒 「${this.querySelector('.mode-icon').textContent} ${this.textContent.trim().split('\\n')[0]}」尚未開放`);
-            // 恢復會議模式
-            setTimeout(() => {
-                document.querySelectorAll('.mode-item').forEach(i => i.classList.remove('active'));
-                document.querySelector('.mode-item[data-mode="meeting"]').classList.add('active');
-                $modeBtn.textContent = '🏛️';
-                currentMode = 'meeting';
-            }, 1500);
-        }
-
-        $modePanel.classList.remove('show');
-        $modeBtn.classList.remove('active');
-    });
-});
-
-// 點其他處關閉模式面板
-document.addEventListener('click', (e) => {
-    if (!$modePanel.contains(e.target) && e.target !== $modeBtn) {
-        $modePanel.classList.remove('show');
-        $modeBtn.classList.remove('active');
-    }
-});
-
-// ==================== Socket 事件 ====================
-socket.on('connect', () => {
-    console.log('🔌 已連接');
-    loadAgentList();
-});
-
-async function loadAgentList() {
-    try {
-        const res = await fetch('/api/env_files', { credentials: 'same-origin' });
-        const data = await res.json();
-        agentList = (data.agents || []).map(a => a.name || a);
-        agentMeta = {};
-        (data.agents || []).forEach(a => { agentMeta[a.name || a] = a; });
-        renderAgentSelection();
-    } catch(e) {
-        console.error('載入 Agent 列表失敗', e);
-        showToast('❌ 無法載入 Agent 列表');
-    }
-}
-
-// 監聽心跳/狀態更新
+// ==================== Socket ====================
+socket.on('connect', () => { loadAgents(); });
 socket.on('agent_state', (data) => {
-    // data: { agent: '汐', state: 'idle'|'running'|... }
-    if (data && data.agent && agentCardMap[data.agent]) {
-        const cardId = agentCardMap[data.agent];
-        const card = document.getElementById(cardId);
-        if (card) {
-            const statusEl = card.querySelector('.agent-status');
-            if (statusEl) {
-                if (data.state === 'running') statusEl.textContent = '🟡 運轉中';
-                else if (data.state === 'idle') statusEl.textContent = '🟢 待命';
-            }
-        }
+  if (data && data.agent) {
+    const card = document.querySelector(`.agent-card[data-agent="${CSS.escape(data.agent)}"]`);
+    if (card) {
+      const dot = card.querySelector('.agent-status-dot');
+      if (dot) dot.className = 'agent-status-dot ' + (data.state === 'running' ? 'running' : 'idle');
     }
+  }
 });
 
-// ==================== Agent 選擇 ====================
-function renderAgentSelection() {
-    // Agent 複選框
-    $agentCheckboxes.innerHTML = agentList.map(a => {
-        const cls = getAgentColorClass(a);
-        const meta = agentMeta[a] || {};
-        const postSuffix = meta.post ? ` <span style="font-size:10px;color:var(--dim)">${meta.post}</span>` : '';
-        return `<label class="agent-chip ${cls}" data-agent="${a}">
-            <span class="agent-dot"></span> ${a}${postSuffix}
-        </label>`;
-    }).join('');
-
-    // 點擊切換
-    $agentCheckboxes.querySelectorAll('.agent-chip').forEach(chip => {
-        chip.addEventListener('click', () => {
-            const agent = chip.dataset.agent;
-            if (selectedAgents.has(agent)) {
-                selectedAgents.delete(agent);
-                chip.classList.remove('checked');
-            } else {
-                selectedAgents.add(agent);
-                chip.classList.add('checked');
-            }
-            updateAnalyzerSelect();
-            updateAgentCards();
-        });
-    });
-
-    // 總指揮下拉
-    updateAnalyzerSelect();
+// ==================== 載入 Agent ====================
+async function loadAgents() {
+  try {
+    const res = await fetch('/api/env_files', { credentials: 'same-origin' });
+    const data = await res.json();
+    agentList = (data.agents || []).map(a => ({ name: a.name, icon: a.icon || '🌸', post: a.post || '', desc: a.desc || '', tags: a.tags || '', is_running: a.is_running || false }));
+    renderAgentList();
+  } catch(e) {
+    console.error('載入 Agent 失敗', e);
+    showToast('❌ 無法載入 Agent 列表');
+  }
 }
 
-function getAgentColorClass(agent) {
-    const lower = agent.toLowerCase();
-    if (lower.includes('汐') || lower.includes('xi')) return 'spring';
-    if (lower.includes('玥') || lower.includes('yue')) return 'yue';
-    return '';
+// ==================== 渲染左欄名片 ====================
+function renderAgentList() {
+  const q = $agentSearch.value.trim().toLowerCase();
+  const filtered = agentList.filter(a => {
+    if (!q) return true;
+    return (a.name + ' ' + a.post + ' ' + a.desc + ' ' + a.tags).toLowerCase().includes(q);
+  });
+  $('agentCount').textContent = `${filtered.length}/${agentList.length}`;
+
+  $agentList.innerHTML = filtered.map(a => {
+    const sel = selectedAgents.has(a.name) ? 'selected' : '';
+    const dot = a.is_running ? 'running' : 'idle';
+    return `<div class="agent-card ${sel}" data-agent="${esc(a.name)}">
+      <div class="agent-avatar" style="--avatar-bg:${avatarBg(a.name)}">${esc(a.icon)}</div>
+      <div class="agent-info">
+        <div class="name"><span class="name-text">${esc(a.name)}</span>${a.post ? `<span class="post">${esc(a.post)}</span>` : ''}</div>
+        <div class="desc">${esc(a.desc)}</div>
+      </div>
+      <span class="agent-status-dot ${dot}" title="${a.is_running ? '執行中' : '待命'}"></span>
+      <span class="check">✓</span>
+    </div>`;
+  }).join('') || '<div class="report-empty">沒有符合條件的 Agent</div>';
+
+  $agentList.querySelectorAll('.agent-card').forEach(card => {
+    card.addEventListener('click', () => toggleAgent(card.dataset.agent));
+  });
 }
 
-function updateAnalyzerSelect() {
-    const agents = Array.from(selectedAgents);
-    $analyzerSelect.innerHTML = agents.map(a => `<option value="${a}">${a}</option>`).join('');
-    if (agents.length === 0) {
-        $analyzerSelect.innerHTML = '<option value="">-- 請先選擇 Agent --</option>';
-    }
+function toggleAgent(name) {
+  if (selectedAgents.has(name)) selectedAgents.delete(name);
+  else selectedAgents.add(name);
+  renderAgentList();
+  updateParticipants();
+  updateCommander();
+  updateStats();
 }
 
-function updateAgentCards() {
-    const agents = Array.from(selectedAgents);
-
-    if (agents.length === 0) {
-        $agentCardsGrid.innerHTML = `
-            <div class="placeholder-text" id="roomPlaceholder">
-                <span class="icon">🏢</span>
-                選擇左側 Agent 並分析分工<br>各 Agent 的輸出將在此即時顯示
-            </div>`;
-        return;
-    }
-
-    // 保留現有卡片（不重建，避免丟失輸出內容）
-    const existingCards = {};
-    $agentCardsGrid.querySelectorAll('.agent-card').forEach(card => {
-        existingCards[card.dataset.agent] = card;
-    });
-
-    $agentCardsGrid.innerHTML = '';
-    agents.forEach(agent => {
-        const cardId = 'card-' + agent.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_');
-        agentCardMap[agent] = cardId;
-
-        if (existingCards[agent]) {
-            $agentCardsGrid.appendChild(existingCards[agent]);
-        } else {
-            const cls = getAgentColorClass(agent);
-            const card = document.createElement('div');
-            card.className = `agent-card ${cls}`;
-            card.id = cardId;
-            card.dataset.agent = agent;
-            card.innerHTML = `
-                <div class="agent-card-header">
-                    <span class="agent-name">
-                        <span class="agent-dot-card"></span> ${agent}
-                    </span>
-                    <span style="display:flex;align-items:center;gap:4px;">
-                        <span class="agent-status idle">🟢 待命</span>
-                        <span class="card-collapse-btn" onclick="event.stopPropagation();toggleCardOutput('${cardId}')" title="摺疊/展開">▼</span>
-                    </span>
-                </div>
-                <div class="agent-card-output" id="${cardId}-output"></div>
-            `;
-            $agentCardsGrid.appendChild(card);
-            agentOutputs[cardId] = '';
-        }
-    });
-
-    if (agents.length > 0) {
-        $meetingStatus.textContent = `🟢 ${agents.length} 位 Agent 待命中`;
-    }
+function updateParticipants() {
+  const arr = Array.from(selectedAgents);
+  $participants.innerHTML = arr.slice(0, 12).map(n => {
+    const a = agentList.find(x => x.name === n);
+    return `<span class="p-avatar" style="--avatar-bg:${avatarBg(n)}" title="${esc(n)}">${esc(a ? a.icon : '🌸')}</span>`;
+  }).join('') + (arr.length > 12 ? `<span class="p-avatar" style="background:var(--panel2)">+${arr.length-12}</span>` : '');
 }
 
-// ==================== 分析分工 ====================
-$btnAnalyze.addEventListener('click', analyzeAndDispatch);
-$btnQuickDraft.addEventListener('click', quickDispatch);
-
-async function analyzeAndDispatch() {
-    const input = $meetingInput.value.trim();
-    if (!input) { showToast('⚠️ 請輸入會議總任務'); return; }
-    if (selectedAgents.size === 0) { showToast('⚠️ 請至少選擇一位 Agent'); return; }
-
-    const analyzer = $analyzerSelect.value;
-    if (!analyzer) { showToast('⚠️ 請選擇總指揮 Agent'); return; }
-
-    $btnAnalyze.disabled = true;
-    $btnAnalyze.textContent = '⏳ 分析中…';
-    $meetingStatus.textContent = '🧠 總 AI 分析分工中…';
-
-    const agents = Array.from(selectedAgents);
-    const agentsInfo = agents.map(a => { const meta = agentMeta[a] || {}; let info = a; if (meta.post || meta.desc) { info += `（`; if (meta.post) info += meta.post; if (meta.post && meta.desc) info += ` / `; if (meta.desc) info += meta.desc; info += `）`; } return info; }).join(`、`);
-    const prompt = `【會議模式 - 總指揮分析分工】
-
-你現在是總指揮 AI，負責分析以下總體任務，並將工作分配給團隊成員。
-
-總體任務：
-${input}
-
-團隊成員（可分配）：${agentsInfo}
-
-請分析這個任務，並輸出 JSON 格式的分工列表：
-{
-    "tasks": [
-        {"agent": "${agents[0]}", "task": "具體任務描述", "priority": 1},
-        {"agent": "${agents[1] || agents[0]}", "task": "具體任務描述", "priority": 2}
-    ]
+function updateCommander() {
+  const arr = Array.from(selectedAgents);
+  const prev = $commander.value;
+  $commander.innerHTML = '<option value="">-- 選擇總指揮 --</option>' + arr.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  if (arr.includes(prev)) $commander.value = prev;
 }
 
-規則：
-1. 每個 agent 至少分配一個任務
-2. ⚠️ 嚴格根據每位成員的職能（括號內的職位描述）分配任務，任務必須與該成員的專業角色匹配
-3. 任務要具體、可執行
-4. priority 越小越優先
-5. 只輸出 JSON，不要其他文字
-
-請開始分析：`;
-
-    let accumulated = '';
-    let resolved = false;
-
-    const handler = (data) => {
-        if (resolved) return;
-        if (data.type === 'reply') {
-            accumulated += data.content;
-        } else if (data.type === 'done') {
-            resolved = true;
-            socket.off('chat_stream', handler);
-            parseAndCreateTasks(accumulated);
-            $btnAnalyze.disabled = false;
-            $btnAnalyze.textContent = '🧠 分析分工';
-        }
-    };
-    socket.on('chat_stream', handler);
-
-    socket.emit('chat_message', {
-        agent: analyzer,
-        message: prompt,
-        user_id: (window.mokIdentity && window.mokIdentity()) || 'web_meeting',
-        context_files: ['agent.md', 'user.md']  // 🔧 會議模式：agent.md + user.md（不含 soul.md）
-    });
-
-    setTimeout(() => {
-        if (!resolved) {
-            resolved = true;
-            socket.off('chat_stream', handler);
-            parseAndCreateTasks(accumulated);
-            $btnAnalyze.disabled = false;
-            $btnAnalyze.textContent = '🧠 分析分工';
-        }
-    }, 120000);
+function updateStats() {
+  $('statSel').textContent = selectedAgents.size;
+  $('selCount').textContent = selectedAgents.size;
 }
 
-function quickDispatch() {
-    const input = $meetingInput.value.trim();
-    if (!input) { showToast('⚠️ 請輸入會議總任務'); return; }
-    if (selectedAgents.size === 0) { showToast('⚠️ 請至少選擇一位 Agent'); return; }
+// ==================== 搜尋 ====================
+$agentSearch.addEventListener('input', renderAgentList);
 
-    const agents = Array.from(selectedAgents);
-    // 快速模式：直接分配，每人做同樣的任務
-    tasks = agents.map((agent, i) => ({
-        id: ++taskIdCounter,
-        agent: agent,
-        task: input,
-        priority: i + 1,
-        status: 'waiting',
-        cardId: agentCardMap[agent]
-    }));
+// ==================== 對話框訊息 ====================
+function addSysMsg(text) {
+  const el = document.createElement('div');
+  el.className = 'msg sys';
+  el.innerHTML = `<span class="sys-pill">${esc(text)}</span>`;
+  $chatBody.appendChild(el);
+  scrollChat();
+}
+function addUserMsg(text) {
+  const el = document.createElement('div');
+  el.className = 'msg user';
+  el.innerHTML = `<div class="msg-head"><span class="who">你</span><span class="when">${nowTime()}</span></div><div class="bubble">${esc(text)}</div>`;
+  $chatBody.appendChild(el);
+  scrollChat();
+}
+function addAgentMsg(agent, text, opts) {
+  opts = opts || {};
+  const a = agentList.find(x => x.name === agent);
+  const el = document.createElement('div');
+  el.className = 'msg agent';
+  el.dataset.agent = agent;
+  const renderText = opts.markdown ? mdRender(text) : esc(text);
+  el.innerHTML = `<div class="msg-head"><span class="who" style="color:${avatarBg(agent)}">${esc(a ? a.icon : '🌸')} ${esc(agent)}</span><span class="when">${nowTime()}</span></div><div class="bubble ${opts.markdown ? 'markdown' : ''}">${renderText}</div>`;
+  $chatBody.appendChild(el);
+  scrollChat();
+  return el.querySelector('.bubble');
+}
 
-    renderTaskList();
-    $meetingStatus.textContent = `⚡ 快速分工：${tasks.length} 個任務`;
-    $btnRunAll.disabled = false;
-    showToast(`⚡ 已將任務直接派發給 ${agents.length} 位 Agent（並行執行）`);
+function scrollChat() {
+  $chatBody.scrollTop = $chatBody.scrollHeight;
+}
 
-    // 🔧 快速啟動：不經分析，直接將 meetingInput 內容派發給已選 Agent 並立即並行執行
-    setTimeout(() => runAllTasks(), 100);
+// ==================== 派發：並行同一工作 ====================
+function parallelDispatch() {
+  const input = $taskInput.value.trim();
+  if (!input) { showToast('⚠️ 請輸入會議任務'); return; }
+  if (selectedAgents.size === 0) { showToast('⚠️ 請先在左側勾選 Agent'); return; }
+  if (isBusy) { showToast('⏳ 會議進行中，請稍候'); return; }
+
+  const agents = Array.from(selectedAgents);
+  tasks = agents.map((agent, i) => ({ id: ++taskIdCounter, agent, task: input, priority: i + 1, status: 'waiting' }));
+
+  hideEmpty();
+  addSysMsg(`⚡ 並行模式：將同一任務派發給 ${agents.length} 位 Agent 同時執行`);
+  addUserMsg(input);
+  setBusy(true, `🚀 ${agents.length} 位 Agent 並行執行中…`);
+  runAllTasks();
+}
+
+// ==================== 派發：總指揮分析並指派 ====================
+async function commanderDispatch() {
+  const input = $taskInput.value.trim();
+  if (!input) { showToast('⚠️ 請輸入會議任務'); return; }
+  if (selectedAgents.size === 0) { showToast('⚠️ 請先在左側勾選 Agent'); return; }
+  const commander = $commander.value;
+  if (!commander) { showToast('⚠️ 請選擇總指揮 Agent'); return; }
+  if (isBusy) { showToast('⏳ 會議進行中，請稍候'); return; }
+
+  const agents = Array.from(selectedAgents);
+  const agentsInfo = agents.map(a => {
+    const meta = agentList.find(x => x.name === a) || {};
+    let info = a;
+    if (meta.post || meta.desc) info += `（${[meta.post, meta.desc].filter(Boolean).join(' / ')}）`;
+    return info;
+  }).join('、');
+
+  const prompt = `【會議模式 - 總指揮分析分工】\n\n你現在是總指揮 AI，負責分析以下總體任務，並將工作分配給團隊成員。\n\n總體任務：\n${input}\n\n團隊成員（可分配）：${agentsInfo}\n\n請分析這個任務，並輸出 JSON 格式的分工列表：\n{\n    "tasks": [\n        {"agent": "${agents[0]}", "task": "具體任務描述", "priority": 1},\n        {"agent": "${agents[1] || agents[0]}", "task": "具體任務描述", "priority": 2}\n    ]\n}\n\n規則：\n1. 每個 agent 至少分配一個任務\n2. ⚠️ 嚴格根據每位成員的職能（括號內的職位描述）分配任務，任務必須與該成員的專業角色匹配\n3. 任務要具體、可執行\n4. priority 越小越優先\n5. 只輸出 JSON，不要其他文字\n\n請開始分析：`;
+
+  hideEmpty();
+  addSysMsg(`🧠 總指揮 ${commander} 分析分工中…`);
+  addUserMsg(input);
+  setBusy(true, '🧠 總指揮分析中…');
+
+  const acc = await requestAgent(commander, prompt, null, 120000);
+  parseAndCreateTasks(acc);
 }
 
 function parseAndCreateTasks(text) {
-    console.log('分析回應:', text.substring(0, 300));
+  let jsonStr = String(text || '');
+  jsonStr = jsonStr.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (parsed.tasks && Array.isArray(parsed.tasks)) {
+      tasks = parsed.tasks.map((t, i) => ({ id: ++taskIdCounter, agent: t.agent, task: t.task, priority: t.priority || i + 1, status: 'waiting' }));
+    } else throw new Error('no tasks');
+  } catch(e) {
+    console.warn('JSON 解析失敗，改用並行備援', e);
+    const agents = Array.from(selectedAgents);
+    tasks = agents.map((a, i) => ({ id: ++taskIdCounter, agent: a, task: $taskInput.value.trim(), priority: i + 1, status: 'waiting' }));
+    addSysMsg('⚠️ 分工解析失敗，改為全部並行同一任務');
+  }
+  // 過濾未選中/無效 agent
+  tasks = tasks.filter(t => selectedAgents.has(t.agent));
+  if (tasks.length === 0) { setBusy(false, '🟢 待命'); showToast('⚠️ 分工結果無有效 Agent'); return; }
 
-    // 嘗試提取 JSON
-    let jsonStr = text;
-    const jsonMatch = text.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
-    if (jsonMatch) jsonStr = jsonMatch[0];
+  addSysMsg(`📋 分析完成，共 ${tasks.length} 個分工任務：`);
+  tasks.forEach(t => addSysMsg(`　→ ${t.agent}：${t.task.slice(0, 50)}${t.task.length > 50 ? '…' : ''}`));
+  setBusy(true, `🚀 ${tasks.length} 個任務並行執行中…`);
+  runAllTasks();
+}
 
-    // 移除可能的 markdown 代碼塊
-    jsonStr = jsonStr.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-
-    try {
-        const parsed = JSON.parse(jsonStr);
-        if (parsed.tasks && Array.isArray(parsed.tasks)) {
-            tasks = parsed.tasks.map((t, i) => ({
-                id: ++taskIdCounter,
-                agent: t.agent,
-                task: t.task,
-                priority: t.priority || i + 1,
-                status: 'waiting',
-                cardId: agentCardMap[t.agent] || null
-            }));
-        } else {
-            throw new Error('無 tasks 陣列');
-        }
-    } catch (e) {
-        console.warn('JSON 解析失敗，使用備用方案', e);
-        // 備用：嘗試手動解析
-        const agents = Array.from(selectedAgents);
-        const agentTaskMap = {};
-        agents.forEach(a => { agentTaskMap[a] = []; });
-
-        // 嘗試按行解析
-        const lines = text.split('\n');
-        let currentAgent = null;
-        lines.forEach(line => {
-            const trimmed = line.trim();
-            if (!trimmed) return;
-            // 檢測 agent 名稱
-            for (const a of agents) {
-                if (trimmed.includes(a)) {
-                    currentAgent = a;
-                    const taskText = trimmed.replace(new RegExp(`.*?${a}[：:]*\\s*`), '').trim();
-                    if (taskText) agentTaskMap[a].push(taskText);
-                    break;
-                }
-            }
-        });
-
-        tasks = [];
-        agents.forEach(a => {
-            const agentTasks = agentTaskMap[a];
-            if (agentTasks.length > 0) {
-                agentTasks.forEach(t => {
-                    tasks.push({
-                        id: ++taskIdCounter,
-                        agent: a,
-                        task: t,
-                        priority: tasks.length + 1,
-                        status: 'waiting',
-                        cardId: agentCardMap[a] || null
-                    });
-                });
-            } else {
-                // 至少給一個預設任務
-                tasks.push({
-                    id: ++taskIdCounter,
-                    agent: a,
-                    task: `處理：${$meetingInput.value.trim().substring(0, 60)}...`,
-                    priority: tasks.length + 1,
-                    status: 'waiting',
-                    cardId: agentCardMap[a] || null
-                });
-            }
-        });
-    }
-
-    // 清理無效 cardId
-    tasks.forEach(t => {
-        if (!t.cardId) t.cardId = agentCardMap[t.agent];
+// ==================== 請求單個 Agent（Promise 化） ====================
+function requestAgent(agent, message, bubble, timeoutMs) {
+  return new Promise((resolve) => {
+    let acc = '';
+    let resolved = false;
+    const handler = (data) => {
+      if (resolved) return;
+      if (data.agent && data.agent !== agent) return;
+      if (data.type === 'reply') {
+        acc += data.content || '';
+        if (bubble) { bubble.innerHTML = mdRender(acc) + '<span class="stream-cursor"></span>'; scrollChat(); }
+      } else if (data.type === 'done') {
+        resolved = true; socket.off('chat_stream', handler);
+        if (bubble) { bubble.innerHTML = mdRender(acc); }
+        resolve(acc);
+      }
+    };
+    socket.on('chat_stream', handler);
+    socket.emit('chat_message', {
+      agent, message, user_id: (window.mokIdentity && window.mokIdentity()) || 'web_meeting',
+      context_files: ['agent.md', 'user.md']
     });
-
-    renderTaskList();
-    $meetingStatus.textContent = `📋 分析完成：${tasks.length} 個分工任務`;
-    $btnRunAll.disabled = tasks.length === 0;
-    $btnAnalyze.textContent = '🧠 分析分工';
-    showToast(`✅ 總 AI 分析完成，共 ${tasks.length} 個任務`);
+    setTimeout(() => { if (!resolved) { resolved = true; socket.off('chat_stream', handler); if (bubble) bubble.innerHTML = mdRender(acc) + ' <i style="color:var(--dim)">(逾時)</i>'; resolve(acc); } }, timeoutMs || 300000);
+  });
 }
 
-function renderTaskList() {
-    if (tasks.length === 0) {
-        $taskList.innerHTML = `
-            <div class="placeholder-text">
-                <span class="icon">🏛️</span>
-                輸入總體任務<br>讓總 AI 分析並分工
-            </div>`;
-        $btnRunAll.disabled = true;
-        return;
-    }
-
-    $taskList.innerHTML = tasks.map(t => {
-        const cls = getAgentColorClass(t.agent);
-        const statusText = t.status === 'running' ? '🟡 執行中' :
-                          t.status === 'done' ? '✅ 完成' : '⏳ 等待';
-        return `
-            <div class="task-item ${t.status}" id="task-${t.id}">
-                <div class="task-item-header">
-                    <span class="task-agent-tag ${cls}">${t.agent}</span>
-                    <span class="task-status">${statusText}</span>
-                </div>
-                <div class="task-desc">${escapeHtml(t.task)}</div>
-            </div>`;
-    }).join('');
-
-    $btnRunAll.disabled = false;
-}
-
-// ==================== 全部並行執行（真正多工） ====================
-$btnRunAll.addEventListener('click', runAllTasks);
-
-let isExecuting = false;
+// ==================== 並行執行全部任務 ====================
+// [2026-10-18 靜｜真並行修正] engineio 對「同一個 polling payload」有寫死的
+// max_decode_packets = 16（engineio/payload.py），超過就整批 raise
+// ValueError: Too many packets in payload → 19 位同時 emit 會被「全部丟棄」，
+// 症狀就是「只有第一個女有輸出、其他都在等閃爍游標」。
+// 解法：送出時分批（每批 6 個，間隔 120ms），讓每批落在不同的 polling POST，
+// 後端仍然是同時在跑（各 agent 各自 gate），只是不再撞 16 上限。
+const SEND_BATCH = 6;
+const SEND_GAP_MS = 120;
 
 function runAllTasks() {
-    if (tasks.length === 0) { showToast('⚠️ 無任務可執行'); return; }
-
-    // 清除舊輸出
-    Object.keys(agentOutputs).forEach(k => { agentOutputs[k] = ''; });
-    document.querySelectorAll('.agent-card-output').forEach(el => { el.textContent = ''; el.classList.remove('streaming-cursor'); });
-    document.querySelectorAll('.agent-card').forEach(c => {
-        c.classList.remove('running', 'done');
-        const statusEl = c.querySelector('.agent-status');
-        if (statusEl) { statusEl.textContent = '🟢 待命'; statusEl.className = 'agent-status idle'; }
-    });
-
-    // 收集所有待執行任務
-    const pendingTasks = tasks.filter(t => t.status === 'waiting' || t.status === 'done').map(t => ({...t}));
-    tasks.forEach(t => { if (t.status === 'done') t.status = 'waiting'; });
-    if (pendingTasks.length === 0) { showToast('⚠️ 無待執行任務'); return; }
-
-    isExecuting = true;
-    $btnRunAll.disabled = true;
-    $btnQuickDraft.disabled = true;
-    $btnAnalyze.disabled = true;
-    $meetingStatus.textContent = `🚀 ${pendingTasks.length} 個 Agent 同時並行執行中…`;
-    showToast(`🚀 ${pendingTasks.length} 個 Agent 已同時派發（真正並行）`);
-
-    // 🔧 真正並行：同時對所有任務 emit，各自完成即回調
-    let completed = 0;
-    pendingTasks.forEach(qt => {
-        const task = tasks.find(t => t.id === qt.id);
-        if (!task) { completed++; checkAllDone(); return; }
-        runSingleTask(task, () => {
-            completed++;
-            checkAllDone();
-        });
-    });
-
-    function checkAllDone() {
-        $meetingStatus.textContent = `🚀 並行執行中… 已完成 ${completed}/${pendingTasks.length}`;
-        if (completed >= pendingTasks.length) {
-            isExecuting = false;
-            $btnRunAll.disabled = false;
-            $btnQuickDraft.disabled = false;
-            $btnAnalyze.disabled = false;
-            $meetingStatus.textContent = `✅ 全部完成 (${tasks.length} 個任務)`;
-            showToast('🎉 所有 Agent 任務完成！');
+  if (tasks.length === 0) { showToast('⚠️ 無任務'); setBusy(false, '🟢 待命'); return; }
+  let completed = 0;
+  (async () => {
+    for (let i = 0; i < tasks.length; i++) {
+      runSingleTask(tasks[i], () => {
+        completed++;
+        $statStatus.textContent = `🚀 執行中 ${completed}/${tasks.length}`;
+        $chatStatus.textContent = `🚀 執行中 ${completed}/${tasks.length}`;
+        if (completed >= tasks.length) {
+          setBusy(false, '✅ 全部完成');
+          $statStatus.textContent = '✅ 全部完成';
+          addSysMsg('🎉 所有 Agent 任務完成，報告已歸檔至右側');
+          renderReports();
         }
+      });
+      if ((i + 1) % SEND_BATCH === 0 && i + 1 < tasks.length) {
+        await new Promise(r => setTimeout(r, SEND_GAP_MS));
+      }
     }
+  })();
 }
-
-// （已移除：原依序隊列執行，改為上方真正並行）
 
 function runSingleTask(task, onComplete) {
-    task.status = 'running';
-    updateTaskUI(task);
+  task.status = 'running';
+  const bubble = addAgentMsg(task.agent, '…');
+  activeStreams[task.agent] = { bubble, acc: '' };
 
-    const card = document.getElementById(task.cardId);
-    if (card) {
-        card.classList.add('running');
-        card.classList.remove('done');
-        const statusEl = card.querySelector('.agent-status');
-        if (statusEl) { statusEl.textContent = '🟡 執行中…'; statusEl.className = 'agent-status running'; }
-        const output = card.querySelector('.agent-card-output');
-        if (output) {
-            output.textContent = '';
-            output.classList.add('streaming-cursor');
-        }
-        // 滾動到該卡片
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-
-    let accumulated = '';
-    let resolved = false;
-
-    const handler = (data) => {
-        if (resolved) return;
-        // 🔧 並行模式：只接收自己 agent 的 stream 事件（後端事件帶 data.agent）
-        if (data.agent && data.agent !== task.agent) return;
-        if (data.type === 'reply') {
-            accumulated += data.content;
-            const out = document.getElementById(task.cardId + '-output');
-            if (out) {
-                out.textContent = accumulated;
-                out.classList.add('streaming-cursor');
-                out.scrollTop = out.scrollHeight;
-            }
-        } else if (data.type === 'done') {
-            resolved = true;
-            socket.off('chat_stream', handler);
-            task.status = 'done';
-            updateTaskUI(task);
-
-            const card2 = document.getElementById(task.cardId);
-            if (card2) {
-                card2.classList.remove('running');
-                card2.classList.add('done');
-                const statusEl2 = card2.querySelector('.agent-status');
-                if (statusEl2) { statusEl2.textContent = '✅ 完成'; statusEl2.className = 'agent-status done'; }
-                const out2 = document.getElementById(task.cardId + '-output');
-                if (out2) {
-                    out2.textContent = accumulated || '(無輸出)';
-                    out2.classList.remove('streaming-cursor');
-                }
-            }
-
-            if (onComplete) onComplete();
-        }
-    };
-
-    socket.on('chat_stream', handler);
-
-    socket.emit('chat_message', {
-        agent: task.agent,
-        message: task.task,
-        user_id: (window.mokIdentity && window.mokIdentity()) || 'web_meeting',
-        context_files: ['agent.md', 'user.md']  // 🔧 會議模式任務：agent.md + user.md
-    });
-
-    // 超時處理
-    setTimeout(() => {
-        if (!resolved) {
-            resolved = true;
-            socket.off('chat_stream', handler);
-            task.status = 'done';
-            updateTaskUI(task);
-            const card3 = document.getElementById(task.cardId);
-            if (card3) {
-                card3.classList.remove('running');
-                card3.classList.add('done');
-                const out3 = document.getElementById(task.cardId + '-output');
-                if (out3) {
-                    out3.textContent = accumulated || '(超時)';
-                    out3.classList.remove('streaming-cursor');
-                }
-            }
-            if (onComplete) onComplete();
-        }
-    }, 300000);
+  requestAgent(task.agent, task.task, bubble).then((acc) => {
+    task.status = 'done';
+    reports[task.agent] = { output: acc, ts: Date.now() };
+    if (onComplete) onComplete();
+  });
 }
 
-function updateTaskUI(task) {
-    const el = document.getElementById('task-' + task.id);
-    if (!el) return;
-    el.className = 'task-item ' + task.status;
-    const statusEl = el.querySelector('.task-status');
-    if (statusEl) {
-        statusEl.textContent = task.status === 'running' ? '🟡 執行中' :
-                               task.status === 'done' ? '✅ 完成' : '⏳ 等待';
-    }
+// ==================== 忙碌狀態 ====================
+function setBusy(busy, statusText) {
+  isBusy = busy;
+  $('btnParallel').disabled = busy;
+  $('btnCommander').disabled = busy;
+  $('btnSend').disabled = busy;
+  if (statusText) { $statStatus.textContent = statusText; $chatStatus.textContent = statusText; }
+}
+
+function hideEmpty() {
+  const e = $('chatEmpty');
+  if (e) e.remove();
+}
+
+// ==================== 報告 ====================
+function renderReports() {
+  const keys = Object.keys(reports);
+  $('reportHint').textContent = keys.length ? `${keys.length} 份` : '';
+  if (keys.length === 0) {
+    $reportList.innerHTML = '<div class="report-empty"><span class="icon">📄</span>暫無報告<br>執行會議後，各 Agent 產出將歸檔於此</div>';
+    return;
+  }
+  $reportList.innerHTML = keys.map(agent => {
+    const a = agentList.find(x => x.name === agent);
+    const r = reports[agent];
+    const when = new Date(r.ts).toTimeString().slice(0,5);
+    const preview = (r.output || '').replace(/[#*`>\-\[\]]/g, '').slice(0, 60);
+    return `<div class="report-card" data-agent="${esc(agent)}">
+      <div class="rc-head" onclick="this.parentNode.classList.toggle('open')">
+        <span class="avatar" style="--avatar-bg:${avatarBg(agent)}">${esc(a ? a.icon : '🌸')}</span>
+        <div class="meta"><div class="name">${esc(agent)}</div><div class="when">${when} · ${(r.output || '').length} 字</div></div>
+        <span class="arrow">▶</span>
+      </div>
+      <div class="rc-body">${mdRender(r.output || '(無輸出)')}</div>
+    </div>`;
+  }).join('');
+}
+
+function exportReports() {
+  const keys = Object.keys(reports);
+  if (keys.length === 0) { showToast('⚠️ 暫無報告可匯出'); return; }
+  let md = '# 會議報告\n\n生成時間：' + new Date().toLocaleString() + '\n\n';
+  keys.forEach(agent => {
+    md += `\n---\n\n## ${agent}\n\n${reports[agent].output || '(無輸出)'}\n`;
+  });
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '會議報告_' + new Date().toISOString().slice(0,10) + '.md';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('⬇ 報告已匯出');
 }
 
 // ==================== 清除 ====================
-$btnClearTasks.addEventListener('click', () => {
-    tasks = [];
-    renderTaskList();
-    $meetingInput.value = '';
-    Object.keys(agentOutputs).forEach(k => { agentOutputs[k] = ''; });
-    document.querySelectorAll('.agent-card-output').forEach(el => { el.textContent = ''; el.classList.remove('streaming-cursor'); });
-    document.querySelectorAll('.agent-card').forEach(c => {
-        c.classList.remove('running', 'done');
-        const s = c.querySelector('.agent-status');
-        if (s) { s.textContent = '🟢 待命'; s.className = 'agent-status idle'; }
-    });
-    $meetingStatus.textContent = '🟢 待命中';
-    $btnRunAll.disabled = true;
-    showToast('🗑 已清除全部任務');
-});
-
-// ==================== 工具 ====================
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+function clearAll() {
+  tasks = [];
+  reports = {};
+  activeStreams = {};
+  $chatBody.innerHTML = '';
+  const empty = document.createElement('div');
+  empty.className = 'chat-empty';
+  empty.id = 'chatEmpty';
+  empty.innerHTML = '<span class="icon">🏛️</span><b>開始一場多 Agent 會議</b><br>① 在左側勾選參與的 Agent（可搜尋）<br>② 選擇「總指揮」或直接並行<br>③ 在下方輸入總任務，點擊派發';
+  $chatBody.appendChild(empty);
+  $taskInput.value = '';
+  renderReports();
+  setBusy(false, '🟢 待命');
+  $statStatus.textContent = '🟢 待命';
+  showToast('🗑 已清空會議');
 }
 
-// ==================== 鍵盤快捷鍵 ====================
-document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.key === 'Enter') {
-        e.preventDefault();
-        analyzeAndDispatch();
-    }
-    if (e.ctrlKey && e.key === 'r') {
-        e.preventDefault();
-        runAllTasks();
-    }
+// ==================== 事件綁定 ====================
+$('btnParallel').addEventListener('click', parallelDispatch);
+$('btnCommander').addEventListener('click', commanderDispatch);
+$('btnSend').addEventListener('click', () => {
+  if (selectedAgents.size === 0) { showToast('⚠️ 請先勾選 Agent'); return; }
+  if ($commander.value) commanderDispatch(); else parallelDispatch();
+});
+$taskInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('btnSend').click(); }
+  else if (e.key === 'Enter' && e.shiftKey) { /* newline */ }
+});
+$taskInput.addEventListener('input', () => {
+  $taskInput.style.height = 'auto';
+  $taskInput.style.height = Math.min($taskInput.scrollHeight, 140) + 'px';
 });
 
-// ==================== 初始化 ====================
-console.log('🏛️ 會議模式已就緒');
-console.log('  Ctrl+Enter → 分析分工');
-console.log('  Ctrl+R → 全部執行');
-console.log('  右下角 ⚙ → 切換模式');
+// ==================== 分隔條拖曳 ====================
+function initSplitter(el, panel, side) {
+  let startX = 0, startW = 0;
+  el.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    startX = e.clientX;
+    startW = panel.getBoundingClientRect().width;
+    el.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const move = (ev) => {
+      const dx = ev.clientX - startX;
+      let w = side === 'left' ? startW + dx : startW - dx;
+      w = Math.max(200, Math.min(560, w));
+      panel.style.flexBasis = w + 'px';
+    };
+    const up = () => {
+      el.classList.remove('active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
+}
+initSplitter($('splitL'), $('panelLeft'), 'left');
+initSplitter($('splitR'), $('panelRight'), 'right');
+
+// ==================== 儲存/載入會議狀態 ====================
+async function saveState() {
+  try {
+    await fetch('/api/meeting/save', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ v:1, ts: Date.now(), input: $taskInput.value, selected: Array.from(selectedAgents), tasks, reports }) });
+  } catch(e) {}
+}
+window.addEventListener('beforeunload', saveState);
 </script>
-
-<script>
-/* ===== 會議模式：分頁導航 + 頻道下拉 + 可拖曳分隔線 ===== */
-(function () {
-    var body = document.body;
-    var tabs = Array.prototype.slice.call(document.querySelectorAll('.nav-tab'));
-    var isMobile = function () { return window.matchMedia('(max-width: 768px)').matches; };
-
-    function apply(page) {
-        if (!page) { page = isMobile() ? 'tasks' : 'both'; }
-        if (page === 'both' && isMobile()) { page = 'tasks'; }
-        body.setAttribute('data-page', page);
-        tabs.forEach(function (t) {
-            t.classList.toggle('active', t.getAttribute('data-page') === page);
-        });
-        try { localStorage.setItem('meeting_page', page); } catch (e) {}
-    }
-    window.meetingSetPage = apply;
-    tabs.forEach(function (t) {
-        t.addEventListener('click', function () { apply(t.getAttribute('data-page')); });
-    });
-    var init = null;
-    try { init = localStorage.getItem('meeting_page'); } catch (e) {}
-    apply(init);
-    window.addEventListener('resize', function () { apply(body.getAttribute('data-page')); });
-
-    /* ---- 頻道下拉 ---- */
-    var cBtn = document.getElementById('channelBtn');
-    var cDd = document.getElementById('channelDropdown');
-    if (cBtn && cDd) {
-        cBtn.addEventListener('click', function (e) {
-            e.stopPropagation();
-            var open = cDd.classList.toggle('show');
-            cBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-        });
-        document.addEventListener('click', function (e) {
-            if (!cDd.classList.contains('show')) { return; }
-            if (cDd.contains(e.target) || cBtn.contains(e.target)) { return; }
-            cDd.classList.remove('show');
-            cBtn.setAttribute('aria-expanded', 'false');
-        });
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') {
-                cDd.classList.remove('show');
-                cBtn.setAttribute('aria-expanded', 'false');
-            }
-        });
-    }
-
-    /* ---- 分隔線拖曳調整寬度 ---- */
-    var sp = document.getElementById('splitter');
-    var wrap = document.querySelector('.meeting-container');
-    if (sp && wrap) {
-        var dragging = false;
-        function resize(clientX) {
-            var r = wrap.getBoundingClientRect();
-            var w = clientX - r.left;
-            w = Math.max(220, Math.min(w, r.width * 0.75));
-            wrap.style.setProperty('--pnl-w', w + 'px');
-        }
-        sp.addEventListener('mousedown', function (e) {
-            dragging = true; e.preventDefault(); document.body.style.cursor = 'col-resize';
-        });
-        window.addEventListener('mousemove', function (e) { if (dragging) { resize(e.clientX); } });
-        window.addEventListener('mouseup', function () { dragging = false; document.body.style.cursor = ''; });
-        sp.addEventListener('touchstart', function () { dragging = true; }, { passive: true });
-        window.addEventListener('touchmove', function (e) {
-            if (dragging && e.touches[0]) { resize(e.touches[0].clientX); }
-        }, { passive: true });
-        window.addEventListener('touchend', function () { dragging = false; });
-    }
-})();
-
-</script>
-<script src="/static/p0_meeting.js"></script>
 </body>
 </html>

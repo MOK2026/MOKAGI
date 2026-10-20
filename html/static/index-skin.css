@@ -463,7 +463,16 @@ button.mok-pill--danger{ background:rgba(224,85,97,.14) !important; }
 .tools-header-buttons{ flex-wrap:nowrap; }
 .tools-header-buttons button.tools-folded{ display:none !important; }
 .tools-header .tools-more-btn{ font-weight:700; letter-spacing:1px; }
-#toolsMoreDropdown{ top:calc(100% + 6px) !important; right:8px !important; left:auto !important; z-index:9999 !important; }
+/* ★ 2026-10-19 mokagi說明：⋯ 更多 下拉改為視窗級 fixed（座標由 main.js __mokPositionToolsMoreDD 計算），
+   並強制可滾動到底 + 顯示 sticky 標題；這樣任何被折疊的鍵都一定找得到，不再被面板裁切。 */
+#toolsMoreDropdown{ position:fixed !important; top:auto; right:8px; left:auto; bottom:auto; z-index:100000 !important; max-height:70vh; overflow-y:auto !important; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+#toolsMoreDropdown::-webkit-scrollbar{ width:10px; }
+#toolsMoreDropdown::-webkit-scrollbar-thumb{ background:rgba(78,201,176,.45); border-radius:8px; }
+#toolsMoreDropdown::-webkit-scrollbar-track{ background:transparent; }
+/* ★ 2026-10-19 mokagi說明：浮動面板2 沒有 ⋯ 鈕，若沿用 nowrap 會把尾端鍵橫向推出（滾動條被隱藏＝永遠看不到）。
+   改為換行排列，所有鍵一律看得到。 */
+.tools-header-float .tools-header-buttons{ flex-wrap:wrap !important; overflow-x:visible !important; overflow-y:visible !important; }
+#toolsMoreDropdown .tools-more-head{ position:sticky; top:-6px; margin:-6px -6px 4px; padding:8px 10px; background:rgba(26,26,32,.98); border-bottom:1px solid rgba(78,201,176,.28); color:#8fe6d6; font-size:11px; letter-spacing:1px; z-index:2; }
 
 @media (max-width:768px){
   .btnBox{ overflow:visible !important; z-index:60; }

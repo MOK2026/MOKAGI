@@ -1731,6 +1731,7 @@ if (headerDisplay) {
                 content: msg.content,
                 thinkContent: msg.thinkContent,
                 rounds: msg.rounds || null,
+                model: msg.model || null,
                 timestamp: msg.timestamp * 1000
             }));
         }
@@ -2066,6 +2067,7 @@ async function loadChatHistoryFromServer() {
             content: msg.content,
             thinkContent: msg.thinkContent,
             rounds: msg.rounds || null,
+            model: msg.model || null,
             timestamp: msg.timestamp * 1000
         }));
     } catch (err) {
@@ -2156,6 +2158,7 @@ async function loadMoreChatHistory() {
             content: msg.content,
             thinkContent: msg.thinkContent,
             rounds: msg.rounds || null,
+            model: msg.model || null,
             timestamp: msg.timestamp * 1000
         }));
         // 將更舊的消息插入到最前面
@@ -6781,20 +6784,23 @@ function loadAgentSoul(container, agentName) {
 }
 
 // 👁 工作報告預覽開關（由 Jobs 面板的報告按鈕呼叫）
+// indexPage|主人回報報告列表眼睛鍵按了無反應|原先靠 btn.parentElement.nextElementSibling 找預覽區；2026-10-19 加置頂時四鍵被包進 span.job-report-actions，兄弟節點變 null 直接 return。改由 closest('.job-report-item') 內找 .job-report-preview，不依賴按鈕在 DOM 的位置（置頂搬移節點後仍有效），並以 computed display 判斷開關|20261019-2309(香港)
 function toggleReportPreview(btn) {
-    const row = btn.parentElement;
-    const wrap = row ? row.nextElementSibling : null;
-    if (!wrap || !wrap.querySelector) return;
+    const item = btn.closest ? btn.closest('.job-report-item') : null;
+    const wrap = item ? item.querySelector('.job-report-preview') : null;
+    if (!wrap) return;
     const iframe = wrap.querySelector('iframe');
     if (wrap.style.display === 'none' || !wrap.style.display) {
         if (iframe && !iframe.getAttribute('src')) iframe.src = btn.dataset.src;
         // indexPage|主人反映報告預覽太短看不清|預覽 iframe 高度 420px→840px（放大一倍）|202610070019(香港)
         if (iframe) iframe.style.height = '840px';
         wrap.style.display = 'block';
-        btn.textContent = '✖ 關閉';
+        btn.textContent = '✖';
+        btn.title = '關閉預覽';
     } else {
         wrap.style.display = 'none';
-        btn.textContent = '👁 預覽';
+        btn.textContent = '👁';
+        btn.title = '預覽報告';
     }
 }
 
@@ -6804,7 +6810,7 @@ function copyReportPath(btn) {
     if (!p) return;
     const flash = () => {
         const old = btn.textContent;
-        btn.textContent = '✅ 已複製';
+        btn.textContent = '✅';
         setTimeout(() => { btn.textContent = old; }, 1200);
     };
     const fallback = () => {
@@ -6840,7 +6846,7 @@ function deleteReport(btn) {
     if (!confirm('確定把這份工作報告移入回收站？\n' + rel + '\n\n（30 天內可從 ~/.mok/trash 還原）')) return;
     const oldText = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '⏳ 刪除中';
+    btn.textContent = '⏳';
     const handler = (data) => {
         socket.off('agent_report_deleted', handler);
         if (data && data.error) {
@@ -6856,12 +6862,77 @@ function deleteReport(btn) {
     socket.emit('delete_agent_report', { agent: agent, path: rel });
 }
 
+// ⭐ 工作報告置頂（2026-10-19 by indexPage｜主人：預覽/複製路徑後加星號，按了置頂到上方摺疊區，20×20 圖示鍵）
+// 置頂屬「每位使用者 × 每個 agent」的介面偏好，存 localStorage（刷新／重啟仍保留）；不寫入 agent 房間，避免污染共用資料。
+const JOB_PIN_COLLAPSE_KEY = 'mok_job_pins_collapsed';
+function jobPinKey(agent) { return 'mok_job_pins:' + agent; }
+function getJobPins(agent) {
+    try { const a = JSON.parse(localStorage.getItem(jobPinKey(agent)) || '[]'); return Array.isArray(a) ? a : []; }
+    catch (e) { return []; }
+}
+function setJobPins(agent, list) {
+    localStorage.setItem(jobPinKey(agent), JSON.stringify(Array.from(new Set(list))));
+}
+function toggleReportPin(btn) {
+    const agent = btn.getAttribute('data-agent') || '';
+    const rel = btn.getAttribute('data-rel') || '';
+    const container = btn.closest('#agentTabContent') || document.getElementById('agentTabContent');
+    if (!agent || !rel || !container) return;
+    const pins = getJobPins(agent);
+    const i = pins.indexOf(rel);
+    if (i >= 0) pins.splice(i, 1); else pins.push(rel);   // 後加的排最上
+    setJobPins(agent, pins);
+    applyJobReportPins(container, agent);
+}
+// 依置頂清單重排：置頂項搬入 #jobPinnedArea（可摺疊），其餘照原日期序留在 #jobReportList
+function applyJobReportPins(container, agent) {
+    const section = container.querySelector('#jobReportSection');
+    if (!section) return;
+    const list = section.querySelector('#jobReportList');
+    const area = section.querySelector('#jobPinnedArea');
+    if (!list || !area) return;
+    if (!list.dataset.rawHtml) list.dataset.rawHtml = list.innerHTML;   // 保存原始順序，取消置頂時可還原
+    list.innerHTML = list.dataset.rawHtml;
+    area.innerHTML = '';
+    const pins = getJobPins(agent);
+    const items = Array.from(list.children).filter(el => el.classList.contains('job-report-item'));
+    const byRel = {};
+    items.forEach(el => {
+        const rel = el.getAttribute('data-report-rel') || '';
+        byRel[rel] = el;
+        const b = el.querySelector('.job-pin-btn');
+        const on = pins.includes(rel);
+        if (b) {
+            b.textContent = on ? '★' : '☆';
+            b.title = on ? '取消置頂' : '置頂到最上';
+            b.style.color = on ? '#ffd166' : '#9a9a9a';
+        }
+    });
+    const pinned = pins.slice().reverse().map(r => byRel[r]).filter(Boolean);
+    if (!pinned.length) return;
+    const collapsed = localStorage.getItem(JOB_PIN_COLLAPSE_KEY) === '1';
+    area.innerHTML = `<div class="job-pin-head" title="點擊展開／收起置頂報告"><span>📌 置頂 · ${pinned.length}</span><span class="job-pin-caret">${collapsed ? '▸' : '▾'}</span></div>`
+        + `<div class="job-pin-body" style="display:${collapsed ? 'none' : 'block'};"></div>`;
+    const body = area.querySelector('.job-pin-body');
+    pinned.forEach(el => { list.removeChild(el); body.appendChild(el); });
+    const head = area.querySelector('.job-pin-head');
+    head.addEventListener('click', () => {
+        const hidden = body.style.display === 'none';
+        body.style.display = hidden ? 'block' : 'none';
+        head.querySelector('.job-pin-caret').textContent = hidden ? '▾' : '▸';
+        localStorage.setItem(JOB_PIN_COLLAPSE_KEY, hidden ? '0' : '1');
+    });
+}
+
 function loadAgentJobs(container, agentName) {
     socket.emit("get_agent_jobs", { agent: agentName });
     const handler = (data) => {
         socket.off("agent_jobs_result", handler);
         if (data.error) container.innerHTML = `<div style="color:#ff6b6b;">❌ ${data.error}</div>`;
-        else container.innerHTML = data.content || "<div style=\"color:#888;\">(無工作)</div>";
+        else {
+            container.innerHTML = data.content || "<div style=\"color:#888;\">(無工作)</div>";
+            applyJobReportPins(container, agentName);
+        }
     };
     socket.on("agent_jobs_result", handler);
     setTimeout(() => { socket.off("agent_jobs_result", handler); if (container.innerHTML.includes("載入中")) container.innerHTML = "<div style=\"color:#e0a800;\">⚠️ 載入逾時</div>"; }, 8000);
@@ -8142,6 +8213,45 @@ function __mokScheduleToolsHeaderOverflow(delay){
     }, (typeof delay === "number") ? delay : 60);
 }
 
+/* ★ 2026-10-19 mokagi說明：把「⋯ 更多」下拉改成視窗級定位，解決「按鈕沒排在前邊就永遠看不到」。
+   原因：下拉原本 position:absolute 掛在 .tools-header 內，只要任何祖先容器
+   （#toolsPanel / .tools-panel-float / 手機版 transform 容器）有 overflow 或 transform，
+   下拉就會被裁切、只露一小截，裡面的折疊鍵再多也看不到。
+   做法：1) 開啟時把 #toolsMoreDropdown 掛到 body（portal），脫離所有祖先裁切；
+        2) fixed 定位貼著 ⋯ 鈕，下方空間不足自動往上翻；
+        3) 清單 max-height + overflow-y:auto，一定滾得到底；
+        4) 頂部 sticky 標題「更多工具（N）」，讓主人知道還有幾個。 */
+function __mokPositionToolsMoreDD(){
+    var moreBtn = document.getElementById("toolsMoreBtn");
+    var moreDD  = document.getElementById("toolsMoreDropdown");
+    if(!moreBtn || !moreDD) return;
+    if(moreDD.parentElement && moreDD.parentElement !== document.body){
+        try{ document.body.appendChild(moreDD); }catch(err){}
+    }
+    if(!moreDD.classList.contains("open")) return;
+    var br = moreBtn.getBoundingClientRect();
+    var vw = window.innerWidth || document.documentElement.clientWidth;
+    var vh = window.innerHeight || document.documentElement.clientHeight;
+    var GAP = 6, PAD = 8;
+    var maxH = Math.min(Math.round(vh * 0.7), vh - PAD * 2);
+    var width = Math.max(180, Math.min(moreDD.scrollWidth || 220, vw - PAD * 2));
+    moreDD.style.width = width + "px";
+    moreDD.style.maxHeight = maxH + "px";
+    var h = Math.min(moreDD.scrollHeight + 2, maxH);
+    var top = br.bottom + GAP;
+    if(top + h > vh - PAD){
+        var upTop = br.top - GAP - h;
+        top = (upTop >= PAD) ? upTop : Math.max(PAD, vh - PAD - h);
+    }
+    var right = Math.max(PAD, Math.min(vw - PAD - width, vw - br.right));
+    moreDD.style.position = "fixed";
+    moreDD.style.top = Math.round(top) + "px";
+    moreDD.style.right = Math.round(right) + "px";
+    moreDD.style.left = "auto";
+    moreDD.style.bottom = "auto";
+    moreDD.style.zIndex = "100000";
+}
+
 function updateToolsHeaderOverflow(){
     var wrap = document.querySelector('.tools-header .tools-header-buttons');
     var moreBtn = document.getElementById('toolsMoreBtn');
@@ -8175,9 +8285,15 @@ function updateToolsHeaderOverflow(){
         folded.unshift(btns[i]);
     }
     if(!folded.length){ moreBtn.style.display = 'none'; moreDD.classList.remove('open'); moreDD.innerHTML = ''; return; }
+    /* ★ 2026-10-19 mokagi說明：重建清單並加 sticky 標題，主人滾到中間也知漏了幾個鍵 */
     moreDD.innerHTML = '';
+    var __head = document.createElement('div');
+    __head.className = 'tools-more-head';
+    __head.textContent = '更多工具（' + folded.length + '）';
+    moreDD.appendChild(__head);
     folded.forEach(function(b){
         var item = document.createElement('button');
+        item.type = 'button';
         item.className = 'header-dropdown-item';
         item.innerHTML = b.innerHTML;
         item.title = b.title || b.textContent.trim();
@@ -8188,6 +8304,8 @@ function updateToolsHeaderOverflow(){
         });
         moreDD.appendChild(item);
     });
+    moreDD.style.width = '';
+    if(moreDD.classList.contains('open')){ try{ __mokPositionToolsMoreDD(); }catch(err){} }
 }
 
 document.addEventListener('DOMContentLoaded', function initToolsHeaderFold(){
@@ -8196,7 +8314,10 @@ document.addEventListener('DOMContentLoaded', function initToolsHeaderFold(){
     if(moreBtn && moreDD){
         moreBtn.addEventListener('click', function(e){
             e.stopPropagation();
+            var __wasOpen = moreDD.classList.contains('open');
             moreDD.classList.toggle('open');
+            /* ★ 2026-10-19 mokagi說明：開啟即時計算 fixed 座標（含上下翻轉） */
+            if(!__wasOpen){ try{ __mokPositionToolsMoreDD(); }catch(err){} }
         });
     }
     document.addEventListener('click', function(e){
@@ -8221,6 +8342,10 @@ document.addEventListener('DOMContentLoaded', function initToolsHeaderFold(){
     }
     var tt = null;
     window.addEventListener('resize', function(){ clearTimeout(tt); tt = setTimeout(updateToolsHeaderOverflow, 120); });
+    /* ★ 2026-10-19 mokagi說明：頁面／面板滾動時，展開中的下拉跟著 ⋯ 鈕走，不會飄出畫面 */
+    window.addEventListener('scroll', function(){
+        if(moreDD && moreDD.classList.contains('open')){ try{ __mokPositionToolsMoreDD(); }catch(err){} }
+    }, true);
     setTimeout(updateToolsHeaderOverflow, 400);
 });
 // 由於頁面加載時可能 init 已執行，但按鈕可能還未添加，所以使用 DOMContentLoaded 確保。
@@ -9074,7 +9199,7 @@ function addRoomNode(node, agent, parentUl, depth) {
       btn.innerHTML = (def.icon ? def.icon + ' ' : '') + (def.label || def.id);
       if (def.label) btn.title = def.label;
       applyAdmin(btn, def);
-      if (ref) container.insertBefore(btn, ref); else container.appendChild(btn);
+      /* indexPage 2026-10-20：錨點必須與按鈕同層，否則 insertBefore 會把鍵插到 tools-header（面板2 移除後再無同層錨點） */      if (ref && ref.parentNode === container) container.insertBefore(btn, ref); else container.appendChild(btn);
     });
   }
   function loadToolsJson() {
@@ -9565,8 +9690,32 @@ function addRoomNode(node, agent, parentUl, depth) {
   var USE_KEY = "mok_channel_use_v1";
   var MAX_PIN = 6;
   var _list = null, _q = "", _lastWrite = 0, _fetching = false, _waiters = [];
+  var _hidden = {};   // idx|2026-10-19 15:05(HK)：左頻道隱藏集（來源 /static/channel_visibility.json；主人在頻道清單逐頁按「隱藏」）
+  /* idx|2026-10-19 03:35(HK)：自動收錄僅在 channels.json 明示 autoInclude:true 才併入；
+     預設 false —— 主人指示：這些項目並非公開，絕不可出現在左頻道。 */
+  var _autoInclude = false;
 
   function keyOf(it){ return String((it && (it.id || it.label || it.href)) || ""); }
+  /* idx|2026-10-19 15:05(HK)：與 page_index.html vkey 同一口徑（去 domain/query/hash/index.html/尾斜線、補前導斜線、小寫）；兩邊改動須同步 */
+  function normPath(u){
+    var s = String(u == null ? "" : u).trim(), i, j, low;
+    if(!s) return "";
+    i = s.indexOf("://");
+    if(i >= 0){ j = s.indexOf("/", i + 3); s = (j >= 0) ? s.slice(j) : "/"; }
+    s = s.split("?")[0].split("#")[0];
+    low = s.toLowerCase();
+    if(low.slice(-11) === "/index.html") s = s.slice(0, s.length - 11) + "/";
+    else if(low.slice(-10) === "/index.htm") s = s.slice(0, s.length - 10) + "/";
+    while(s.length > 1 && s.charAt(s.length - 1) === "/") s = s.slice(0, -1);
+    if(s.charAt(0) !== "/") s = "/" + s;
+    return s.toLowerCase();
+  }
+  function isHiddenHref(u){ var k = normPath(u); return !!(k && _hidden[k]); }
+  function applyHidden(j){
+    var arr = (j && j.hidden) || [], i, k;
+    _hidden = {};
+    for(i = 0; i < arr.length; i++){ k = normPath(arr[i]); if(k) _hidden[k] = 1; }
+  }
   function readUse(){
     try { var j = JSON.parse(localStorage.getItem(USE_KEY) || "{}"); return (j && typeof j === "object") ? j : {}; }
     catch(e){ return {}; }
@@ -9600,6 +9749,7 @@ function addRoomNode(node, agent, parentUl, depth) {
     var q = _q.trim().toLowerCase(), used = [], fresh = [], i;
     for(i = 0; i < _list.length; i++){
       var it = _list[i]; if(!it || !it.href) continue;
+      if(isHiddenHref(it.href)) continue;   // idx|2026-10-19 15:05(HK)：主人在頻道清單按「隱藏」的頁面，左頻道不出現
       if(q && (String(it.label || "") + " " + String(it.id || "") + " " + String(it.href || "")).toLowerCase().indexOf(q) < 0) continue;
       var r = rankOf(keyOf(it));
       (r.n > 0 ? used : fresh).push({it: it, n: r.n, t: r.t, i: i});
@@ -9613,7 +9763,16 @@ function addRoomNode(node, agent, parentUl, depth) {
       for(i = 0; i < pin.length; i++) h += rowHtml(pin[i].it, true);
       if(rest.length) h += '<div class="ch-group-label">全部</div>';
     }
-    for(i = 0; i < rest.length; i++) h += rowHtml(rest[i].it, false);
+    var manual = [], autoItems = [];
+    for(i = 0; i < rest.length; i++) (rest[i].it.auto ? autoItems : manual).push(rest[i]);
+    for(i = 0; i < manual.length; i++) h += rowHtml(manual[i].it, false);
+    /* idx|2026-10-19 03:35(HK)：autoInclude=false → 自動收錄組整組不出現（含「全部頁面目錄」入口） */
+    var autoKeep = _autoInclude ? (q ? autoItems : autoItems.slice(0, 8)) : [];
+    if(autoKeep.length){
+      h += '<div class="ch-group-label">自動收錄 · 公開</div>';
+      for(i = 0; i < autoKeep.length; i++) h += rowHtml(autoKeep[i].it, false);
+    }
+    if(!q && _autoInclude) h += rowHtml({id:'__page_index__', label:'全部頁面目錄' + (autoItems.length > autoKeep.length ? '（+' + (autoItems.length - autoKeep.length) + '）' : ''), icon:'📚', tone:'#4ec9b0', href:'/static/page_index.html'}, false);
     if(!h) h = '<div class="ch-empty">🔍 沒有符合的頻道</div>';
     put(box, h);
   }
@@ -9680,8 +9839,38 @@ function addRoomNode(node, agent, parentUl, depth) {
     _fetching = true;
     fetch("/static/channels.json?t=" + Date.now(), {cache: "no-store"})
       .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(j){ if(j && j.channels) _list = j.channels; })
+      .then(function(j){
+        if(j && j.channels) _list = j.channels;
+        _autoInclude = !!(j && j.autoInclude === true);
+        return fetch("/static/channel_visibility.json?t=" + Date.now(), {cache: "no-store"})
+          .then(function(r){ return r.ok ? r.json() : null; })
+          .then(applyHidden)
+          .catch(function(){});
+      })
       .catch(function(){})
+      .then(function(){
+        /* 自動歸位：把 visibility=public 的頁面併入頻道盤（indexPage 2026-10-19）
+           資料源 /static/page_index_public.json；channels.json 只負責人手精選置頂。 */
+        if(!_autoInclude) return;   /* idx|2026-10-19 03:35(HK)：非公開項目不得進入左頻道 */
+        return fetch("/static/page_index_public.json?t=" + Date.now(), {cache: "no-store"})
+          .then(function(r){ return r.ok ? r.json() : null; })
+          .then(function(p){
+            var items = (p && p.items) || []; if(!items.length) return;
+            var seen = {}, base = _list || (_list = []), i2;
+            function norm(u){
+              return String(u || "").replace(/^https?:\/\/[^\/]+/, "").replace(/^\/+/, "").toLowerCase();
+            }
+            for(i2 = 0; i2 < base.length; i2++) seen[norm(base[i2] && base[i2].href)] = 1;
+            for(i2 = 0; i2 < items.length; i2++){
+              var it = items[i2] || {}, href = String(it.href || "");
+              if(!href || seen[norm(href)]) continue;
+              seen[norm(href)] = 1;
+              base.push({id: "auto:" + href, icon: it.icon || "📄", label: it.label || href,
+                         href: href, tone: "#4ea3ff", auto: true});
+            }
+          })
+          .catch(function(){});
+      })
       .then(function(){
         _fetching = false;
         var ws = _waiters; _waiters = [];
