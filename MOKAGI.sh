@@ -81,7 +81,7 @@ if [ ${#existing_agents[@]} -eq 0 ]; then
     agent_dir="${AGENT_ROOT}/${MOK_AGENT_NAME_INPUT}"
     mkdir -p "$agent_dir"
     cfg_file="${agent_dir}/.${MOK_AGENT_NAME_INPUT}"
-    curl -sL "${GITHUB_REPO_RAW}/env.env" -o "$cfg_file"
+    curl -sfL "${GITHUB_REPO_RAW}/env.env.example" -o "$cfg_file" || curl -sL "${GITHUB_REPO_RAW}/env.env" -o "$cfg_file"
     sed -i "s/__MOK_AGENT_NAME_PLACEHOLDER__/${MOK_AGENT_NAME_INPUT}/g" "$cfg_file"
     mkdir -p "${agent_dir}/soul"
     mkdir -p "${agent_dir}/logs"
